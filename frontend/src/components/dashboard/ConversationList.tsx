@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useMemo } from "react";
 import type { AcceptedConversationItem, PendingOutgoingRequest } from "../../types/conversations";
+import PresenceAvatar from "./PresenceAvatar";
 import ProfileAvatar from "./ProfileAvatar";
 import { getProfileDisplayName } from "./profileUtils";
 
@@ -11,6 +12,7 @@ type ConversationListProps = {
   selectedConversationId: string | null;
   isLoading: boolean;
   loadError: string;
+  onlineUserIds: ReadonlySet<string>;
   onRefresh: () => void;
   onStartConversation: () => void;
   onPendingRequestSelected: (request: PendingOutgoingRequest) => void;
@@ -32,7 +34,7 @@ function LoadingRows() {
   return <div role="status" aria-live="polite" aria-label="Loading messages" className="space-y-2 px-1">{[0, 1, 2, 3].map((item) => <div key={item} className="flex items-center gap-3 rounded-2xl p-3"><div className="h-12 w-12 shrink-0 animate-pulse rounded-full bg-accent" /><div className="min-w-0 flex-1 space-y-2"><div className="h-4 w-2/5 animate-pulse rounded-full bg-accent" /><div className="h-3 w-4/5 animate-pulse rounded-full bg-accent" /></div><div className="h-3 w-10 animate-pulse rounded-full bg-accent" /></div>)}</div>;
 }
 
-function ConversationList({ pendingRequests, conversations, searchQuery, selectedConversationId, isLoading, loadError, onRefresh, onStartConversation, onPendingRequestSelected, onConversationSelected }: ConversationListProps) {
+function ConversationList({ pendingRequests, conversations, searchQuery, selectedConversationId, isLoading, loadError, onlineUserIds, onRefresh, onStartConversation, onPendingRequestSelected, onConversationSelected }: ConversationListProps) {
   const shouldReduceMotion = useReducedMotion();
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
   const transition = shouldReduceMotion ? { duration: 0 } : { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const };
@@ -72,7 +74,7 @@ function ConversationList({ pendingRequests, conversations, searchQuery, selecte
             {filteredConversations.length > 0 && (
               <motion.section key="conversations" initial={{ opacity: 0, y: shouldReduceMotion ? 0 : 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: shouldReduceMotion ? 0 : -4 }} transition={transition} aria-labelledby="accepted-conversations-heading">
                 <h2 id="accepted-conversations-heading" className="px-2 pb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted">Conversations</h2>
-                <div className="space-y-1">{filteredConversations.map((conversation) => { const name = getProfileDisplayName(conversation.otherProfile); const isSelected = selectedConversationId === conversation.conversationId; const preview = conversation.latestMessage ? `${conversation.latestMessageSentByCurrentUser ? "You: " : ""}${conversation.latestMessage}` : "Conversation ready"; const timestamp = conversation.latestMessageAt ?? conversation.updatedAt; return <motion.button layout={!shouldReduceMotion} key={conversation.conversationId} type="button" onClick={() => onConversationSelected(conversation)} aria-current={isSelected ? "true" : undefined} aria-label={`Open conversation with ${name}`} className={`flex w-full min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isSelected ? "bg-accent shadow-soft" : "hover:bg-accent"}`}><ProfileAvatar profile={conversation.otherProfile} /><div className="min-w-0 flex-1"><p className="truncate font-semibold text-heading">{name}</p><p className="mt-1 truncate text-sm text-body">{preview}</p></div><time dateTime={timestamp} className="max-w-16 shrink-0 self-start pt-1 text-right text-xs leading-5 text-muted">{formatSidebarTime(timestamp)}</time></motion.button>; })}</div>
+                <div className="space-y-1">{filteredConversations.map((conversation) => { const name = getProfileDisplayName(conversation.otherProfile); const isSelected = selectedConversationId === conversation.conversationId; const isOnline = onlineUserIds.has(conversation.otherProfile.id); const preview = conversation.latestMessage ? `${conversation.latestMessageSentByCurrentUser ? "You: " : ""}${conversation.latestMessage}` : "Conversation ready"; const timestamp = conversation.latestMessageAt ?? conversation.updatedAt; const unreadDescription = conversation.unreadCount > 0 ? `, ${conversation.unreadCount} unread ${conversation.unreadCount === 1 ? "message" : "messages"}` : ""; const onlineDescription = isOnline ? ", online" : ""; return <motion.button layout={!shouldReduceMotion} key={conversation.conversationId} type="button" onClick={() => onConversationSelected(conversation)} aria-current={isSelected ? "true" : undefined} aria-label={`Open conversation with ${name}${onlineDescription}${unreadDescription}`} className={`flex w-full min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isSelected ? "bg-accent shadow-soft" : "hover:bg-accent"}`}><PresenceAvatar profile={conversation.otherProfile} isOnline={isOnline} /><div className="min-w-0 flex-1"><p className="truncate font-semibold text-heading">{name}</p><p className="mt-1 truncate text-sm text-body">{preview}</p></div><div className="flex max-w-16 shrink-0 flex-col items-end gap-2 self-start pt-1"><time dateTime={timestamp} className="truncate text-right text-xs leading-5 text-muted">{formatSidebarTime(timestamp)}</time>{conversation.unreadCount > 0 && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-white"><span aria-hidden="true">{conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}</span><span className="sr-only">{conversation.unreadCount} unread {conversation.unreadCount === 1 ? "message" : "messages"}</span></span>}</div></motion.button>; })}</div>
               </motion.section>
             )}
           </AnimatePresence>

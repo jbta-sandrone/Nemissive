@@ -3,6 +3,12 @@ export type ProfileSearchResult = {
   username: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  last_seen_at?: string | null;
+};
+
+export type RealtimeProfileLastSeenEvent = {
+  profileId: string;
+  lastSeenAt: string;
 };
 
 export type SelectedConversation = {
@@ -30,6 +36,9 @@ export type MessageSidebarItem =
       latestMessageAt: string | null;
       latestMessageSentByCurrentUser: boolean | null;
       updatedAt: string;
+      unreadCount: number;
+      currentUserLastReadAt: string | null;
+      latestUnreadMessageAt: string | null;
     };
 
 export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;
@@ -61,6 +70,20 @@ export type RealtimeChatMessageEvent = {
   sequence: number;
   message: ChatMessage;
 };
+
+export type ParticipantReceiptCursor = {
+  conversationId: string;
+  userId: string;
+  lastDeliveredAt: string | null;
+  lastReadAt: string | null;
+};
+
+export type RealtimeParticipantReceiptEvent = {
+  sequence: number;
+  receipt: ParticipantReceiptCursor;
+};
+
+export type ConfirmedMessageStatus = "sent" | "delivered" | "seen";
 
 export type ProfileRelationship =
   | { state: "none" }

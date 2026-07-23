@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import type { AcceptedConversationItem, PendingOutgoingRequest, ProfileSearchResult } from "../../types/conversations";
+import type { AcceptedConversationItem, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileSearchResult } from "../../types/conversations";
 
 type UseMessagesDataOptions = {
   currentUserId: string | null;
   isAccountResolved: boolean;
+  currentUserReceiptsByConversationId: ReadonlyMap<string, ParticipantReceiptCursor>;
+  onIncomingMessageSynchronized: (conversationId: string, messageCreatedAt: string) => void;
 };
 
 type PendingRequestRow = {
@@ -18,6 +20,7 @@ type PendingRequestRow = {
 
 type MembershipRow = {
   conversation_id: string;
+  last_read_at: string | null;
 };
 
 type DirectConversationRow = {
@@ -28,7 +31,7 @@ type DirectConversationRow = {
   messages: Array<{ body: string; created_at: string; sender_id: string }>;
 };
 
-function useMessagesData({ currentUserId, isAccountResolved }: UseMessagesDataOptions) {
+function useMessagesData({ currentUserId, isAccountResolved, currentUserReceiptsByConversationId, onIncomingMessageSynchronized }: UseMessagesDataOptions) {
   const latestLoadRef = useRef(0);
   const [pendingRequests, setPendingRequests] = useState<PendingOutgoingRequest[]>([]);
   const [conversations, setConversations] = useState<AcceptedConversationItem[]>([]);
@@ -48,7 +51,7 @@ function useMessagesData({ currentUserId, isAccountResolved }: UseMessagesDataOp
     async function loadMessagesData() {
       const [pendingResult, membershipResult] = await Promise.all([
         supabase.from("conversation_requests").select("id, recipient_id, introduction, created_at, status, conversation_id").eq("sender_id", userId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
-        supabase.from("conversation_participants").select("conversation_id").eq("user_id", userId).abortSignal(abortController.signal),
+        supabase.from("conversation_participants").select("conversation_id, last_read_at").eq("user_id", userId).abortSignal(abortController.signal),
       ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
@@ -62,7 +65,9 @@ function useMessagesData({ currentUserId, isAccountResolved }: UseMessagesDataOp
       }
 
       const pendingRows = (pendingResult.data ?? []) as PendingRequestRow[];
-      const conversationIds = [...new Set(((membershipResult.data ?? []) as MembershipRow[]).map((row) => row.conversation_id))];
+      const membershipRows = (membershipResult.data ?? []) as MembershipRow[];
+      const conversationIds = [...new Set(membershipRows.map((row) => row.conversation_id))];
+      const membershipByConversationId = new Map(membershipRows.map((row) => [row.conversation_id, row]));
       let directConversationRows: DirectConversationRow[] = [];
 
       if (conversationIds.length > 0) {
@@ -88,6 +93,26 @@ function useMessagesData({ currentUserId, isAccountResolved }: UseMessagesDataOp
         directConversationRows = (conversationData ?? []) as DirectConversationRow[];
       }
 
+      const unreadCountResults = await Promise.all(directConversationRows.map((conversation) => {
+        const lastReadAt = membershipByConversationId.get(conversation.id)?.last_read_at ?? null;
+        let unreadQuery = supabase.from("messages").select("created_at", { count: "exact" }).eq("conversation_id", conversation.id).neq("sender_id", userId).order("created_at", { ascending: false }).limit(1);
+        if (lastReadAt) unreadQuery = unreadQuery.gt("created_at", lastReadAt);
+        return unreadQuery.abortSignal(abortController.signal);
+      }));
+
+      if (isCancelled || loadId !== latestLoadRef.current) return;
+      const unreadCountError = unreadCountResults.find((result) => result.error)?.error;
+      if (unreadCountError) {
+        setIsLoading(false);
+        setHasLoaded(true);
+        setLoadError("We couldn’t load your unread messages. Please retry.");
+        if (import.meta.env.DEV) console.error("Loading unread conversation counts failed", unreadCountError);
+        return;
+      }
+
+      const unreadCountByConversationId = new Map(directConversationRows.map((conversation, index) => [conversation.id, unreadCountResults[index]?.count ?? 0]));
+      const latestUnreadMessageAtByConversationId = new Map(directConversationRows.map((conversation, index) => [conversation.id, unreadCountResults[index]?.data?.[0]?.created_at ?? null]));
+
       const otherUserIdByConversationId = new Map<string, string>();
       directConversationRows.forEach((conversation) => {
         const otherParticipant = conversation.conversation_participants.find((participant) => participant.user_id !== userId);
@@ -98,7 +123,7 @@ function useMessagesData({ currentUserId, isAccountResolved }: UseMessagesDataOp
       let profiles: ProfileSearchResult[] = [];
 
       if (profileIds.length > 0) {
-        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url").in("id", profileIds).abortSignal(abortController.signal);
+        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, last_seen_at").in("id", profileIds).abortSignal(abortController.signal);
 
         if (isCancelled || loadId !== latestLoadRef.current) return;
 
@@ -128,6 +153,7 @@ function useMessagesData({ currentUserId, isAccountResolved }: UseMessagesDataOp
         const otherUserId = otherUserIdByConversationId.get(conversation.id);
         if (!otherUserId) return [];
         const latestMessage = conversation.messages[0] ?? null;
+        if (latestMessage && latestMessage.sender_id !== userId) onIncomingMessageSynchronized(conversation.id, latestMessage.created_at);
         return [{
           kind: "conversation",
           conversationId: conversation.id,
@@ -136,6 +162,9 @@ function useMessagesData({ currentUserId, isAccountResolved }: UseMessagesDataOp
           latestMessageAt: latestMessage?.created_at ?? null,
           latestMessageSentByCurrentUser: latestMessage ? latestMessage.sender_id === userId : null,
           updatedAt: conversation.updated_at || conversation.created_at,
+          unreadCount: unreadCountByConversationId.get(conversation.id) ?? 0,
+          currentUserLastReadAt: membershipByConversationId.get(conversation.id)?.last_read_at ?? null,
+          latestUnreadMessageAt: latestUnreadMessageAtByConversationId.get(conversation.id) ?? null,
         }];
       }).sort((first, second) => {
         const firstTimestamp = Date.parse(first.latestMessageAt ?? first.updatedAt);
@@ -156,7 +185,7 @@ function useMessagesData({ currentUserId, isAccountResolved }: UseMessagesDataOp
       isCancelled = true;
       abortController.abort();
     };
-  }, [currentUserId, loadKey]);
+  }, [currentUserId, loadKey, onIncomingMessageSynchronized]);
 
   const refresh = useCallback(() => {
     latestLoadRef.current += 1;
@@ -170,14 +199,40 @@ function useMessagesData({ currentUserId, isAccountResolved }: UseMessagesDataOp
     setLoadKey((key) => key + 1);
   }, []);
 
+  const mergeProfileLastSeen = useCallback((profileId: string, lastSeenAt: string) => {
+    const incomingTime = Date.parse(lastSeenAt);
+    if (Number.isNaN(incomingTime)) return;
+
+    setConversations((currentConversations) => currentConversations.map((conversation) => {
+      if (conversation.otherProfile.id !== profileId) return conversation;
+      const currentTime = Date.parse(conversation.otherProfile.last_seen_at ?? "");
+      if (!Number.isNaN(currentTime) && currentTime >= incomingTime) return conversation;
+      return { ...conversation, otherProfile: { ...conversation.otherProfile, last_seen_at: lastSeenAt } };
+    }));
+  }, []);
+
+  const conversationsWithReceiptState = useMemo(() => conversations.map((conversation) => {
+    const receipt = currentUserReceiptsByConversationId.get(conversation.conversationId);
+    const nextReadAt = receipt?.lastReadAt ?? null;
+    if (!nextReadAt) return conversation;
+    const currentReadTime = Date.parse(conversation.currentUserLastReadAt ?? "");
+    const nextReadTime = Date.parse(nextReadAt);
+    if (Number.isNaN(nextReadTime) || (!Number.isNaN(currentReadTime) && nextReadTime <= currentReadTime)) return conversation;
+    const latestUnreadTime = Date.parse(conversation.latestUnreadMessageAt ?? "");
+    const clearsUnread = Number.isNaN(latestUnreadTime) || nextReadTime >= latestUnreadTime;
+    return { ...conversation, currentUserLastReadAt: nextReadAt, unreadCount: clearsUnread ? 0 : conversation.unreadCount, latestUnreadMessageAt: clearsUnread ? null : conversation.latestUnreadMessageAt };
+  }), [conversations, currentUserReceiptsByConversationId]);
+
   return {
     pendingRequests: currentUserId ? pendingRequests : [],
-    conversations: currentUserId ? conversations : [],
+    conversations: currentUserId ? conversationsWithReceiptState : [],
     isLoading: currentUserId ? isLoading : !isAccountResolved,
     hasLoaded: currentUserId ? hasLoaded : isAccountResolved,
     loadError: currentUserId ? loadError : isAccountResolved ? "Your session has expired. Please sign in again." : "",
+    aggregateUnreadCount: currentUserId ? conversationsWithReceiptState.reduce((total, conversation) => total + conversation.unreadCount, 0) : 0,
     refresh,
     refreshSilently,
+    mergeProfileLastSeen,
   };
 }
 

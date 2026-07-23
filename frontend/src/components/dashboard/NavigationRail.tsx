@@ -4,6 +4,7 @@ import type { DashboardSection } from "../../types/dashboard";
 type NavigationRailProps = {
   activeSection: DashboardSection;
   pendingRequestCount: number;
+  unreadMessageCount: number;
   isCompactChatVisible: boolean;
   onSectionChange: (section: DashboardSection) => void;
 };
@@ -21,39 +22,41 @@ function SectionIcon({ section }: { section: DashboardSection }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M9 4v6M8 14v6" strokeLinecap="round" /></svg>;
 }
 
-function PendingBadge({ count, compact = false }: { count: number; compact?: boolean }) {
+function CountBadge({ count, label, compact = false }: { count: number; label: string; compact?: boolean }) {
   if (count <= 0) return null;
 
-  return <span className={`${compact ? "-right-1 -top-1" : "-right-1.5 -top-1.5"} absolute z-20 inline-flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-surface bg-primary px-1 text-[10px] font-bold leading-none text-white shadow-soft`}><span aria-hidden="true">{count > 9 ? "9+" : count}</span><span className="sr-only">{count} pending message {count === 1 ? "request" : "requests"}</span></span>;
+  return <span className={`${compact ? "-right-1 -top-1" : "-right-1.5 -top-1.5"} absolute z-20 inline-flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-surface bg-primary px-1 text-[10px] font-bold leading-none text-white shadow-soft`}><span aria-hidden="true">{count > 9 ? "9+" : count}</span><span className="sr-only">{label}</span></span>;
 }
 
-function NavigationButton({ section, label, activeSection, pendingRequestCount, layoutId, showLabel, onSectionChange }: { section: DashboardSection; label: string; activeSection: DashboardSection; pendingRequestCount: number; layoutId: string; showLabel: boolean; onSectionChange: (section: DashboardSection) => void }) {
+function NavigationButton({ section, label, activeSection, pendingRequestCount, unreadMessageCount, layoutId, showLabel, onSectionChange }: { section: DashboardSection; label: string; activeSection: DashboardSection; pendingRequestCount: number; unreadMessageCount: number; layoutId: string; showLabel: boolean; onSectionChange: (section: DashboardSection) => void }) {
   const shouldReduceMotion = useReducedMotion();
   const isActive = activeSection === section;
-  const accessibleLabel = section === "requests" && pendingRequestCount > 0 ? `${label}, ${pendingRequestCount} pending message ${pendingRequestCount === 1 ? "request" : "requests"}` : label;
+  const badgeCount = section === "requests" ? pendingRequestCount : section === "messages" ? unreadMessageCount : 0;
+  const badgeDescription = section === "requests" ? `${badgeCount} pending message ${badgeCount === 1 ? "request" : "requests"}` : `${badgeCount} unread ${badgeCount === 1 ? "message" : "messages"}`;
+  const accessibleLabel = badgeCount > 0 ? `${label}, ${badgeDescription}` : label;
 
   return (
     <button type="button" aria-label={accessibleLabel} aria-current={isActive ? "page" : undefined} title={label} onClick={() => onSectionChange(section)} className={`${showLabel ? "min-w-0 flex-1 flex-col gap-1 py-2" : "h-12 w-12"} relative flex items-center justify-center rounded-2xl text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isActive ? "text-white" : "text-muted hover:bg-accent hover:text-heading"}`}>
       {isActive && <motion.span layoutId={layoutId} className="absolute inset-0 rounded-2xl bg-primary shadow-soft" transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }} />}
       <span className="relative z-10 flex items-center justify-center"><SectionIcon section={section} /></span>
       {showLabel && <span className="relative z-10 text-[11px] leading-none">{label}</span>}
-      {section === "requests" && <PendingBadge count={pendingRequestCount} compact={showLabel} />}
+      {(section === "requests" || section === "messages") && <CountBadge count={badgeCount} label={badgeDescription} compact={showLabel} />}
     </button>
   );
 }
 
-function NavigationRail({ activeSection, pendingRequestCount, isCompactChatVisible, onSectionChange }: NavigationRailProps) {
+function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount, isCompactChatVisible, onSectionChange }: NavigationRailProps) {
   return (
     <>
       <aside className="hidden h-full w-16 shrink-0 flex-col items-center border-r border-border bg-background py-4 md:flex lg:w-[72px]" aria-label="Dashboard navigation">
         <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-surface text-lg font-bold text-primary shadow-soft" aria-label="Nemissive">N</div>
         <nav className="mt-7 flex flex-col gap-2" aria-label="Dashboard sections">
-          {navigationItems.map((item) => <NavigationButton key={item.section} {...item} activeSection={activeSection} pendingRequestCount={pendingRequestCount} layoutId="desktop-dashboard-section" showLabel={false} onSectionChange={onSectionChange} />)}
+          {navigationItems.map((item) => <NavigationButton key={item.section} {...item} activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} layoutId="desktop-dashboard-section" showLabel={false} onSectionChange={onSectionChange} />)}
         </nav>
-        <div className="mt-auto"><NavigationButton section="menu" label="Menu" activeSection={activeSection} pendingRequestCount={pendingRequestCount} layoutId="desktop-dashboard-section" showLabel={false} onSectionChange={onSectionChange} /></div>
+        <div className="mt-auto"><NavigationButton section="menu" label="Menu" activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} layoutId="desktop-dashboard-section" showLabel={false} onSectionChange={onSectionChange} /></div>
       </aside>
 
-      {!isCompactChatVisible && <nav className="order-last flex shrink-0 items-center gap-1 border-t border-border bg-surface px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden" aria-label="Dashboard sections">{[...navigationItems, { section: "menu" as const, label: "Menu" }].map((item) => <NavigationButton key={item.section} {...item} activeSection={activeSection} pendingRequestCount={pendingRequestCount} layoutId="mobile-dashboard-section" showLabel onSectionChange={onSectionChange} />)}</nav>}
+      {!isCompactChatVisible && <nav className="order-last flex shrink-0 items-center gap-1 border-t border-border bg-surface px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden" aria-label="Dashboard sections">{[...navigationItems, { section: "menu" as const, label: "Menu" }].map((item) => <NavigationButton key={item.section} {...item} activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} layoutId="mobile-dashboard-section" showLabel onSectionChange={onSectionChange} />)}</nav>}
     </>
   );
 }

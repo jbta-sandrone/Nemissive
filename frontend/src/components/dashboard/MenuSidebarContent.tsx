@@ -9,6 +9,7 @@ type MenuSidebarContentProps = {
   profile: ProfileSearchResult | null;
   isAccountLoading: boolean;
   accountError: string;
+  onBeforeSignOut: () => void;
 };
 
 function MenuIcon({ kind }: { kind: "profile" | "settings" | "signout" }) {
@@ -21,7 +22,7 @@ function ComingSoonRow({ kind, label }: { kind: "profile" | "settings"; label: s
   return <div aria-disabled="true" className="flex min-h-14 w-full items-center gap-3 rounded-2xl border border-border bg-background px-4 py-3 opacity-70"><span className="text-muted"><MenuIcon kind={kind} /></span><span className="min-w-0 flex-1 font-semibold text-heading">{label}</span><span className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-primary">Coming soon</span></div>;
 }
 
-function MenuSidebarContent({ profile, isAccountLoading, accountError }: MenuSidebarContentProps) {
+function MenuSidebarContent({ profile, isAccountLoading, accountError, onBeforeSignOut }: MenuSidebarContentProps) {
   const navigate = useNavigate();
   const isSigningOutRef = useRef(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -33,6 +34,7 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError }: MenuSid
     isSigningOutRef.current = true;
     setIsSigningOut(true);
     setSignOutError("");
+    onBeforeSignOut();
 
     const { error } = await supabase.auth.signOut();
 

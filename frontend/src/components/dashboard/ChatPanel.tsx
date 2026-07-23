@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, DashboardChatState, DisplayChatMessage, OptimisticChatMessage, RealtimeChatMessageEvent, SelectedConversation } from "../../types/conversations";
+import type { ChatMessage, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, OptimisticChatMessage, ParticipantReceiptCursor, RealtimeChatMessageEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
+import PresenceAvatar from "./PresenceAvatar";
 import ProfileAvatar from "./ProfileAvatar";
+import { formatLastSeen } from "./presenceUtils";
 import { getProfileDisplayName } from "./profileUtils";
 import useConversationTyping from "./useConversationTyping";
 
@@ -15,12 +17,22 @@ type MessageRow = {
   source_request_id: string | null;
 };
 
+type ParticipantRow = {
+  user_id: string;
+  last_delivered_at: string | null;
+  last_read_at: string | null;
+};
+
 type ChatPanelProps = {
   chatState: DashboardChatState | null;
   currentUserId: string | null;
   isMobileVisible: boolean;
   realtimeRefreshKey: number;
   realtimeMessageEvents: RealtimeChatMessageEvent[];
+  realtimeReceiptEvents: RealtimeParticipantReceiptEvent[];
+  onlineUserIds: ReadonlySet<string>;
+  onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void;
+  onConversationRead: (conversationId: string, messageCreatedAt: string) => void;
   onMessageConfirmed: () => void;
   onStartConversation: () => void;
   onMobileBack: () => void;
@@ -31,6 +43,7 @@ const messageMaxLength = 2000;
 const characterCountThreshold = 200;
 const nearBottomThreshold = 140;
 const comingSoonMessageDurationMs = 3000;
+const readAcknowledgementDebounceMs = 280;
 
 function mapMessageRow(row: MessageRow): ChatMessage {
   return {
@@ -54,6 +67,34 @@ function sortMessages(messages: DisplayChatMessage[]) {
     if (timestampDifference !== 0) return timestampDifference;
     return getMessageKey(first).localeCompare(getMessageKey(second));
   });
+}
+
+function getNormalizedTimestamp(value: string | null) {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function getConfirmedMessageStatus(message: ChatMessage, otherReceipt: ParticipantReceiptCursor | null): ConfirmedMessageStatus {
+  const messageTimestamp = getNormalizedTimestamp(message.createdAt);
+  const readTimestamp = getNormalizedTimestamp(otherReceipt?.lastReadAt ?? null);
+  const deliveredTimestamp = getNormalizedTimestamp(otherReceipt?.lastDeliveredAt ?? null);
+  if (messageTimestamp !== null && readTimestamp !== null && messageTimestamp <= readTimestamp) return "seen";
+  if (messageTimestamp !== null && deliveredTimestamp !== null && messageTimestamp <= deliveredTimestamp) return "delivered";
+  return "sent";
+}
+
+function mergeReceiptCursor(current: ParticipantReceiptCursor | null, incoming: ParticipantReceiptCursor) {
+  if (!current) return incoming;
+  const currentDelivered = getNormalizedTimestamp(current.lastDeliveredAt);
+  const incomingDelivered = getNormalizedTimestamp(incoming.lastDeliveredAt);
+  const currentRead = getNormalizedTimestamp(current.lastReadAt);
+  const incomingRead = getNormalizedTimestamp(incoming.lastReadAt);
+  return {
+    ...incoming,
+    lastDeliveredAt: incomingDelivered !== null && (currentDelivered === null || incomingDelivered > currentDelivered) ? incoming.lastDeliveredAt : current.lastDeliveredAt,
+    lastReadAt: incomingRead !== null && (currentRead === null || incomingRead > currentRead) ? incoming.lastReadAt : current.lastReadAt,
+  };
 }
 
 function reconcileConfirmedMessage(messages: DisplayChatMessage[], confirmedMessage: ChatMessage, optimisticId?: string) {
@@ -113,17 +154,20 @@ function TypingIndicator({ isVisible, name, shouldReduceMotion }: { isVisible: b
   );
 }
 
-function AcceptedConversationPanel({ conversation, currentUserId, realtimeRefreshKey, realtimeMessageEvents, onMessageConfirmed, onMobileBack }: { conversation: SelectedConversation; currentUserId: string | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; onMessageConfirmed: () => void; onMobileBack: () => void }) {
+function AcceptedConversationPanel({ conversation, currentUserId, compactVisibilitySignal, realtimeRefreshKey, realtimeMessageEvents, realtimeReceiptEvents, isOtherUserOnline, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMobileBack }: { conversation: SelectedConversation; currentUserId: string | null; compactVisibilitySignal: boolean; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMobileBack: () => void }) {
   const shouldReduceMotion = useReducedMotion();
   const latestLoadRef = useRef(0);
+  const panelRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const comingSoonTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const readAcknowledgementTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const hasLoadedMessagesRef = useRef(false);
   const isMountedRef = useRef(true);
   const isSubmittingRef = useRef(false);
   const inFlightMessageRef = useRef<{ optimisticId: string; conversationId: string; body: string } | null>(null);
   const processedRealtimeSequenceRef = useRef(realtimeMessageEvents.at(-1)?.sequence ?? 0);
+  const processedReceiptSequenceRef = useRef(realtimeReceiptEvents.at(-1)?.sequence ?? 0);
   const realtimeSequenceByMessageIdRef = useRef(new Map<string, number>());
   const locallyConfirmedMessageIdsRef = useRef(new Set<string>());
   const [messages, setMessages] = useState<DisplayChatMessage[]>([]);
@@ -135,7 +179,10 @@ function AcceptedConversationPanel({ conversation, currentUserId, realtimeRefres
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [newMessageAnnouncement, setNewMessageAnnouncement] = useState("");
   const [comingSoonMessage, setComingSoonMessage] = useState("");
+  const [otherReceipt, setOtherReceipt] = useState<ParticipantReceiptCursor | null>(null);
+  const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
   const otherName = getProfileDisplayName(conversation.otherProfile);
+  const presenceText = isOtherUserOnline ? "Online" : formatLastSeen(conversation.otherProfile.last_seen_at, relativeTimeNow);
   const { isOtherUserTyping, notifyTyping, stopTyping } = useConversationTyping({ conversationId: conversation.id, currentUserId, otherUserId: conversation.otherProfile.id });
 
   useEffect(() => {
@@ -143,8 +190,15 @@ function AcceptedConversationPanel({ conversation, currentUserId, realtimeRefres
     return () => {
       isMountedRef.current = false;
       if (comingSoonTimerRef.current !== null) window.clearTimeout(comingSoonTimerRef.current);
+      if (readAcknowledgementTimerRef.current !== null) window.clearTimeout(readAcknowledgementTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (isOtherUserOnline) return;
+    const timer = window.setInterval(() => setRelativeTimeNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [conversation.otherProfile.last_seen_at, isOtherUserOnline]);
 
   const isNearBottom = useCallback(() => {
     const viewport = scrollViewportRef.current;
@@ -168,23 +222,31 @@ function AcceptedConversationPanel({ conversation, currentUserId, realtimeRefres
 
     async function loadMessages() {
       const shouldScrollAfterLoad = !hasLoadedMessagesRef.current || isNearBottom();
-      const [historyResult, introductionResult] = await Promise.all([
+      const [historyResult, introductionResult, participantResult] = await Promise.all([
         supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, source_request_id").eq("conversation_id", conversation.id).order("created_at", { ascending: false }).limit(initialMessageLimit).abortSignal(abortController.signal),
         supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, source_request_id").eq("conversation_id", conversation.id).not("source_request_id", "is", null).order("created_at", { ascending: true }).limit(1).abortSignal(abortController.signal),
+        supabase.from("conversation_participants").select("user_id, last_delivered_at, last_read_at").eq("conversation_id", conversation.id).abortSignal(abortController.signal),
       ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
 
       setIsLoading(false);
 
-      if (historyResult.error || introductionResult.error) {
+      if (historyResult.error || introductionResult.error || participantResult.error) {
         if (!hasLoadedMessagesRef.current) setHistoryError("We couldn’t load this conversation. Please try again.");
-        if (import.meta.env.DEV) console.error("Loading conversation messages failed", { conversationId: conversation.id, historyError: historyResult.error, introductionError: introductionResult.error });
+        if (import.meta.env.DEV) console.error("Loading conversation messages failed", { conversationId: conversation.id, historyError: historyResult.error, introductionError: introductionResult.error, participantError: participantResult.error });
         return;
       }
 
       const serverRowsById = new Map([...(historyResult.data ?? []), ...(introductionResult.data ?? [])].map((row) => [row.id, row as MessageRow]));
       const serverMessages = [...serverRowsById.values()].map(mapMessageRow).sort((first, second) => Date.parse(first.createdAt) - Date.parse(second.createdAt));
+      const otherParticipant = ((participantResult.data ?? []) as ParticipantRow[]).find((participant) => participant.user_id !== currentUserId);
+      if (otherParticipant) {
+        const loadedReceipt: ParticipantReceiptCursor = { conversationId: conversation.id, userId: otherParticipant.user_id, lastDeliveredAt: otherParticipant.last_delivered_at, lastReadAt: otherParticipant.last_read_at };
+        setOtherReceipt((currentReceipt) => mergeReceiptCursor(currentReceipt, loadedReceipt));
+      }
+      const newestIncomingMessage = [...serverMessages].reverse().find((message) => message.senderId !== currentUserId);
+      if (newestIncomingMessage) onIncomingMessagesSynchronized(conversation.id, newestIncomingMessage.createdAt);
       const serverMessageIds = new Set(serverMessages.map((message) => message.id));
       serverMessageIds.forEach((messageId) => locallyConfirmedMessageIdsRef.current.delete(messageId));
       setMessages((currentMessages) => {
@@ -208,7 +270,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, realtimeRefres
       isCancelled = true;
       abortController.abort();
     };
-  }, [conversation.id, isNearBottom, realtimeRefreshKey, retryKey, scrollToLatest]);
+  }, [conversation.id, currentUserId, isNearBottom, onIncomingMessagesSynchronized, realtimeRefreshKey, retryKey, scrollToLatest]);
 
   useEffect(() => {
     const newEvents = realtimeMessageEvents.filter((event) => event.sequence > processedRealtimeSequenceRef.current);
@@ -242,6 +304,69 @@ function AcceptedConversationPanel({ conversation, currentUserId, realtimeRefres
       else setShowJumpToLatest(true);
     }
   }, [conversation.id, currentUserId, isNearBottom, otherName, realtimeMessageEvents, scrollToLatest]);
+
+  useEffect(() => {
+    const newEvents = realtimeReceiptEvents.filter((event) => event.sequence > processedReceiptSequenceRef.current);
+    if (newEvents.length === 0) return;
+    processedReceiptSequenceRef.current = newEvents[newEvents.length - 1]?.sequence ?? processedReceiptSequenceRef.current;
+    const otherParticipantEvents = newEvents.filter((event) => event.receipt.conversationId === conversation.id && event.receipt.userId === conversation.otherProfile.id);
+    if (otherParticipantEvents.length === 0) return;
+    setOtherReceipt((currentReceipt) => otherParticipantEvents.reduce((receipt, event) => mergeReceiptCursor(receipt, event.receipt), currentReceipt));
+  }, [conversation.id, conversation.otherProfile.id, realtimeReceiptEvents]);
+
+  const newestIncomingMessage = [...messages].reverse().find((message): message is ChatMessage => message.kind === "confirmed" && message.senderId !== currentUserId);
+  const newestIncomingMessageCreatedAt = newestIncomingMessage?.createdAt ?? null;
+
+  useEffect(() => {
+    if (!newestIncomingMessageCreatedAt || !hasLoadedMessagesRef.current) return;
+    onIncomingMessagesSynchronized(conversation.id, newestIncomingMessageCreatedAt);
+  }, [conversation.id, newestIncomingMessageCreatedAt, onIncomingMessagesSynchronized]);
+
+  useEffect(() => {
+    if (!newestIncomingMessageCreatedAt || isLoading || !hasLoadedMessagesRef.current) return;
+    const messageCreatedAt = newestIncomingMessageCreatedAt;
+
+    function isConversationVisiblyActive() {
+      const panel = panelRef.current;
+      if (!panel || document.visibilityState !== "visible" || !document.hasFocus()) return false;
+      const bounds = panel.getBoundingClientRect();
+      return panel.getClientRects().length > 0 && bounds.width > 0 && bounds.height > 0;
+    }
+
+    function clearReadTimer() {
+      if (readAcknowledgementTimerRef.current === null) return;
+      window.clearTimeout(readAcknowledgementTimerRef.current);
+      readAcknowledgementTimerRef.current = null;
+    }
+
+    function scheduleReadAcknowledgement() {
+      clearReadTimer();
+      if (!isConversationVisiblyActive()) return;
+      readAcknowledgementTimerRef.current = window.setTimeout(() => {
+        readAcknowledgementTimerRef.current = null;
+        if (isConversationVisiblyActive()) onConversationRead(conversation.id, messageCreatedAt);
+      }, readAcknowledgementDebounceMs);
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") scheduleReadAcknowledgement();
+      else clearReadTimer();
+    }
+
+    scheduleReadAcknowledgement();
+    window.addEventListener("focus", scheduleReadAcknowledgement);
+    window.addEventListener("blur", clearReadTimer);
+    window.addEventListener("resize", scheduleReadAcknowledgement);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearReadTimer();
+      window.removeEventListener("focus", scheduleReadAcknowledgement);
+      window.removeEventListener("blur", clearReadTimer);
+      window.removeEventListener("resize", scheduleReadAcknowledgement);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [compactVisibilitySignal, conversation.id, isLoading, newestIncomingMessageCreatedAt, onConversationRead]);
 
   function handleHistoryRetry() {
     latestLoadRef.current += 1;
@@ -355,13 +480,15 @@ function AcceptedConversationPanel({ conversation, currentUserId, realtimeRefres
   const showCharacterCount = remainingCharacters <= characterCountThreshold;
   const isSendDisabled = !currentUserId || !draft.trim() || isSubmitting || draft.length > messageMaxLength;
   const shouldShowIntroductoryFallback = Boolean(conversation.introductoryMessage) && !messages.some((message) => message.kind === "confirmed" && message.isIntroduction);
+  const newestDisplayedMessage = messages.at(-1);
+  const statusMessageKey = newestDisplayedMessage?.senderId === currentUserId ? getMessageKey(newestDisplayedMessage) : null;
   const composerHelpId = `message-composer-help-${conversation.id}`;
   const characterCountId = `message-character-count-${conversation.id}`;
   const composerDescription = showCharacterCount ? `${composerHelpId} ${characterCountId}` : composerHelpId;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border bg-surface px-4 py-4 sm:px-6"><MobileBackButton onClick={onMobileBack} /><ProfileAvatar profile={conversation.otherProfile} size="sm" /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1>{conversation.otherProfile.username && <p className="truncate text-sm text-body">@{conversation.otherProfile.username}</p>}</div><span className="shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-semibold text-primary">Accepted</span></header>
+    <div ref={panelRef} className="flex min-h-0 flex-1 flex-col">
+      <header className="flex shrink-0 items-center gap-3 border-b border-border bg-surface px-4 py-4 sm:px-6"><MobileBackButton onClick={onMobileBack} /><PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={isOtherUserOnline} /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1><p className={`truncate text-xs font-medium ${isOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{conversation.otherProfile.username && <span className="font-normal text-body"> · @{conversation.otherProfile.username}</span>}</p></div><span className="hidden shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-semibold text-primary sm:inline-flex">Accepted</span></header>
 
       <p aria-live="polite" className="sr-only">{newMessageAnnouncement}</p>
       <div className="relative min-h-0 flex-1">
@@ -373,7 +500,31 @@ function AcceptedConversationPanel({ conversation, currentUserId, realtimeRefres
           ) : messages.length === 0 && !shouldShowIntroductoryFallback ? (
             <div className="mx-auto max-w-md py-12 text-center"><h2 className="font-semibold text-heading">No messages yet. Start the conversation.</h2></div>
           ) : (
-            <div className="mx-auto max-w-2xl space-y-4">{historyError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>Earlier messages couldn’t be refreshed.</p><button type="button" onClick={handleHistoryRetry} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry history</button></div>}{shouldShowIntroductoryFallback && <article className="flex justify-start"><div className="max-w-[85%] rounded-3xl rounded-bl-md border border-border bg-surface px-4 py-3 text-body shadow-soft sm:max-w-[75%]"><p className="whitespace-pre-wrap break-words text-sm leading-6">{conversation.introductoryMessage}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">{conversation.introductoryMessageCreatedAt && <time dateTime={conversation.introductoryMessageCreatedAt}>{formatMessageTimestamp(conversation.introductoryMessageCreatedAt)}</time>}<span>Introduction</span></div></div></article>}{messages.map((message) => { const isCurrentUser = message.senderId === currentUserId; const isFailed = message.kind === "optimistic" && message.deliveryState === "failed"; const isSending = message.kind === "optimistic" && message.deliveryState === "sending"; return <article key={getMessageKey(message)} className={`flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}><div className={`min-w-0 max-w-[85%] rounded-3xl px-4 py-3 shadow-soft sm:max-w-[75%] ${isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"}`}><p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p><div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}{isSending && <span role="status">Sending…</span>}{isFailed && <span role="alert" className="font-semibold text-primary">Couldn’t send</span>}</div>{isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}</div></article>; })}</div>
+            <div className="mx-auto max-w-2xl space-y-4">
+              {historyError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>Earlier messages couldn’t be refreshed.</p><button type="button" onClick={handleHistoryRetry} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry history</button></div>}
+              {shouldShowIntroductoryFallback && <article className="flex justify-start"><div className="max-w-[85%] rounded-3xl rounded-bl-md border border-border bg-surface px-4 py-3 text-body shadow-soft sm:max-w-[75%]"><p className="whitespace-pre-wrap break-words text-sm leading-6">{conversation.introductoryMessage}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">{conversation.introductoryMessageCreatedAt && <time dateTime={conversation.introductoryMessageCreatedAt}>{formatMessageTimestamp(conversation.introductoryMessageCreatedAt)}</time>}<span>Introduction</span></div></div></article>}
+              {messages.map((message) => {
+                const isCurrentUser = message.senderId === currentUserId;
+                const isFailed = message.kind === "optimistic" && message.deliveryState === "failed";
+                const isSending = message.kind === "optimistic" && message.deliveryState === "sending";
+                const shouldShowStatus = isCurrentUser && statusMessageKey === getMessageKey(message);
+                const confirmedStatus = message.kind === "confirmed" ? getConfirmedMessageStatus(message, otherReceipt) : null;
+                const statusLabel = isSending ? "Sending…" : isFailed ? "Failed" : confirmedStatus === "seen" ? "Seen" : confirmedStatus === "delivered" ? "Delivered" : "Sent";
+
+                return (
+                  <article key={getMessageKey(message)} className={`flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
+                    <div className={`flex min-w-0 max-w-[85%] flex-col sm:max-w-[75%] ${isCurrentUser ? "items-end" : "items-start"}`}>
+                      <div className={`min-w-0 rounded-3xl px-4 py-3 shadow-soft ${isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"}`}>
+                        <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p>
+                        <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}</div>
+                        {isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}
+                      </div>
+                      {shouldShowStatus && <p role={isFailed ? "alert" : isSending ? "status" : undefined} className={`mt-1.5 px-1 text-right text-xs font-medium ${isFailed ? "text-primary" : "text-muted"}`}>{statusLabel}</p>}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           )}
         </div>
 
@@ -398,7 +549,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, realtimeRefres
   );
 }
 
-function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshKey, realtimeMessageEvents, onMessageConfirmed, onStartConversation, onMobileBack }: ChatPanelProps) {
+function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshKey, realtimeMessageEvents, realtimeReceiptEvents, onlineUserIds, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onStartConversation, onMobileBack }: ChatPanelProps) {
   const visibilityClasses = isMobileVisible ? "flex" : "hidden lg:flex";
 
   if (chatState?.kind === "pending") {
@@ -413,7 +564,7 @@ function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshK
   }
 
   if (chatState?.kind === "accepted") {
-    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentUserId={currentUserId} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} onMessageConfirmed={onMessageConfirmed} onMobileBack={onMobileBack} /></main>;
+    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMobileBack={onMobileBack} /></main>;
   }
 
   return (

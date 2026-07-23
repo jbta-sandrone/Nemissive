@@ -1,12 +1,14 @@
 import { useEffect, useRef } from "react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage } from "../../types/conversations";
+import type { ChatMessage, ParticipantReceiptCursor, RealtimeProfileLastSeenEvent } from "../../types/conversations";
 
 type UseConversationRealtimeOptions = {
   currentUserId: string | null;
   onRequestsChanged: () => void;
   onConversationDataChanged: () => void;
   onMessageInserted: (message: ChatMessage) => void;
+  onParticipantReceiptUpdated: (receipt: ParticipantReceiptCursor) => void;
+  onProfileLastSeenUpdated: (profile: RealtimeProfileLastSeenEvent) => void;
   onOpenConversationMessagesChanged: () => void;
 };
 
@@ -34,12 +36,34 @@ function parseRealtimeMessage(value: unknown): ChatMessage | null {
   };
 }
 
-function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
-  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged });
+function parseParticipantReceipt(value: unknown): ParticipantReceiptCursor | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.conversation_id !== "string" || typeof row.user_id !== "string") return null;
+  if (row.last_delivered_at !== null && typeof row.last_delivered_at !== "string") return null;
+  if (row.last_read_at !== null && typeof row.last_read_at !== "string") return null;
+
+  return {
+    conversationId: row.conversation_id,
+    userId: row.user_id,
+    lastDeliveredAt: row.last_delivered_at,
+    lastReadAt: row.last_read_at,
+  };
+}
+
+function parseProfileLastSeen(value: unknown): RealtimeProfileLastSeenEvent | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || typeof row.last_seen_at !== "string" || Number.isNaN(Date.parse(row.last_seen_at))) return null;
+  return { profileId: row.id, lastSeenAt: row.last_seen_at };
+}
+
+function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
+  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged });
 
   useEffect(() => {
-    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged };
-  }, [onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged, onRequestsChanged]);
+    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged };
+  }, [onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onRequestsChanged]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -82,7 +106,14 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
       .on("postgres_changes", { event: "*", schema: "public", table: "conversation_requests" }, () => {
         scheduleInvalidation({ requests: true, conversationData: true });
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_participants" }, () => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "conversation_participants" }, () => {
+        scheduleInvalidation({ conversationData: true });
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "conversation_participants" }, (payload) => {
+        const receipt = parseParticipantReceipt(payload.new);
+        if (receipt) callbacksRef.current.onParticipantReceiptUpdated(receipt);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "conversation_participants" }, () => {
         scheduleInvalidation({ conversationData: true });
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
@@ -98,6 +129,10 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, () => {
         scheduleInvalidation({ conversationData: true, openConversationMessages: true });
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
+        const profile = parseProfileLastSeen(payload.new);
+        if (profile) callbacksRef.current.onProfileLastSeenUpdated(profile);
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
