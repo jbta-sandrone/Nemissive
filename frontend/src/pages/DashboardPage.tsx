@@ -1,18 +1,21 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ChatPanel from "../components/dashboard/ChatPanel";
 import NavigationRail from "../components/dashboard/NavigationRail";
 import NewConversationModal from "../components/dashboard/NewConversationModal";
 import Sidebar from "../components/dashboard/Sidebar";
+import useConversationRealtime from "../components/dashboard/useConversationRealtime";
 import useMessageRequests from "../components/dashboard/useMessageRequests";
+import useMessagesData from "../components/dashboard/useMessagesData";
 import { supabase } from "../lib/supabase";
 import type { DashboardSection } from "../types/dashboard";
-import type { DashboardChatState, PendingOutgoingRequest, ProfileSearchResult, SelectedConversation } from "../types/conversations";
+import type { DashboardChatState, PendingOutgoingRequest, ProfileRelationship, ProfileSearchResult, SelectedConversation } from "../types/conversations";
 
 function DashboardPage() {
   const [activeSection, setActiveSection] = useState<DashboardSection>("messages");
   const [isNewConversationOpen, setIsNewConversationOpen] = useState(false);
   const [chatState, setChatState] = useState<DashboardChatState | null>(null);
   const [isCompactChatVisible, setIsCompactChatVisible] = useState(false);
+  const [chatRealtimeRefreshKey, setChatRealtimeRefreshKey] = useState(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentProfile, setCurrentProfile] = useState<ProfileSearchResult | null>(null);
   const [isAccountResolved, setIsAccountResolved] = useState(false);
@@ -63,13 +66,66 @@ function DashboardPage() {
     setIsCompactChatVisible(true);
   }, []);
 
-  const requestsController = useMessageRequests({ currentUserId, isAccountResolved, onConversationReady: handleConversationReady });
+  const messagesController = useMessagesData({ currentUserId, isAccountResolved });
+  const refreshMessages = messagesController.refresh;
+  const refreshMessagesSilently = messagesController.refreshSilently;
+  const requestsController = useMessageRequests({ currentUserId, isAccountResolved, onConversationReady: handleConversationReady, onRequestsChanged: refreshMessages });
+  const refreshRequestsSilently = requestsController.refreshSilently;
+  const handleRealtimeRequestsChanged = useCallback(() => {
+    refreshRequestsSilently();
+  }, [refreshRequestsSilently]);
+  const handleRealtimeConversationDataChanged = useCallback(() => {
+    refreshMessagesSilently();
+  }, [refreshMessagesSilently]);
+  const handleRealtimeOpenConversationMessagesChanged = useCallback(() => {
+    setChatRealtimeRefreshKey((key) => key + 1);
+  }, []);
 
-  const handlePendingRequest = useCallback((request: PendingOutgoingRequest) => {
+  useConversationRealtime({
+    currentUserId,
+    onRequestsChanged: handleRealtimeRequestsChanged,
+    onConversationDataChanged: handleRealtimeConversationDataChanged,
+    onOpenConversationMessagesChanged: handleRealtimeOpenConversationMessagesChanged,
+  });
+
+  const handlePendingRequestSelected = useCallback((request: PendingOutgoingRequest) => {
     setChatState({ kind: "pending", request });
     setActiveSection("messages");
     setIsCompactChatVisible(true);
   }, []);
+
+  const handleRequestCreated = useCallback((request: PendingOutgoingRequest) => {
+    handlePendingRequestSelected(request);
+    refreshMessages();
+  }, [handlePendingRequestSelected, refreshMessages]);
+
+  const relationshipsByProfileId = useMemo(() => {
+    const relationships = new Map<string, ProfileRelationship>();
+
+    messagesController.pendingRequests.forEach((request) => {
+      relationships.set(request.otherProfile.id, { state: "outgoing_pending", request });
+    });
+
+    requestsController.requests.forEach((request) => {
+      if (!relationships.has(request.senderProfile.id)) relationships.set(request.senderProfile.id, { state: "incoming_pending", requestId: request.id });
+    });
+
+    messagesController.conversations.forEach((conversation) => {
+      relationships.set(conversation.otherProfile.id, { state: "accepted", conversation: { id: conversation.conversationId, otherProfile: conversation.otherProfile } });
+    });
+
+    return relationships;
+  }, [messagesController.conversations, messagesController.pendingRequests, requestsController.requests]);
+
+  const resolvedChatState = useMemo<DashboardChatState | null>(() => {
+    if (chatState?.kind !== "pending" || !messagesController.hasLoaded || messagesController.isLoading || messagesController.loadError) return chatState;
+    if (messagesController.pendingRequests.some((request) => request.requestId === chatState.request.requestId)) return chatState;
+
+    const acceptedConversation = messagesController.conversations.find((conversation) => conversation.otherProfile.id === chatState.request.otherProfile.id);
+    if (!acceptedConversation) return null;
+    return { kind: "accepted", conversation: { id: acceptedConversation.conversationId, otherProfile: acceptedConversation.otherProfile } };
+  }, [chatState, messagesController.conversations, messagesController.hasLoaded, messagesController.isLoading, messagesController.loadError, messagesController.pendingRequests]);
+  const effectiveCompactChatVisible = isCompactChatVisible && Boolean(resolvedChatState);
 
   function handleSectionChange(section: DashboardSection) {
     setActiveSection(section);
@@ -85,15 +141,20 @@ function DashboardPage() {
     handleSectionChange("requests");
   }
 
+  function refreshRelationships() {
+    refreshMessages();
+    requestsController.refresh();
+  }
+
   return (
     <>
       <div className="flex h-screen w-full min-w-0 flex-col overflow-hidden bg-background md:flex-row">
-        <NavigationRail activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} isCompactChatVisible={isCompactChatVisible} onSectionChange={handleSectionChange} />
-        <Sidebar activeSection={activeSection} currentUserId={currentUserId} currentProfile={currentProfile} isAccountResolved={isAccountResolved} accountError={accountError} isCompactChatVisible={isCompactChatVisible} requestsController={requestsController} onSectionChange={handleSectionChange} onNewConversation={openNewConversation} onConversationReady={handleConversationReady} />
-        <ChatPanel chatState={chatState} isMobileVisible={isCompactChatVisible} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
+        <NavigationRail activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} isCompactChatVisible={effectiveCompactChatVisible} onSectionChange={handleSectionChange} />
+        <Sidebar activeSection={activeSection} currentProfile={currentProfile} isAccountResolved={isAccountResolved} accountError={accountError} isCompactChatVisible={effectiveCompactChatVisible} requestsController={requestsController} messagesController={messagesController} chatState={resolvedChatState} onNewConversation={openNewConversation} onPendingRequestSelected={handlePendingRequestSelected} onConversationReady={handleConversationReady} />
+        <ChatPanel chatState={resolvedChatState} isMobileVisible={effectiveCompactChatVisible} realtimeRefreshKey={chatRealtimeRefreshKey} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
       </div>
 
-      <NewConversationModal isOpen={isNewConversationOpen} onClose={() => setIsNewConversationOpen(false)} onConversationReady={handleConversationReady} onPendingRequest={handlePendingRequest} onOpenRequests={openMessageRequestsSection} />
+      <NewConversationModal isOpen={isNewConversationOpen} currentUserId={currentUserId} isAccountResolved={isAccountResolved} accountError={accountError} relationshipsByProfileId={relationshipsByProfileId} isRelationshipsLoading={messagesController.isLoading || requestsController.isLoading} relationshipsError={messagesController.loadError || requestsController.loadError} onClose={() => setIsNewConversationOpen(false)} onConversationSelected={handleConversationReady} onPendingRequestSelected={handlePendingRequestSelected} onRequestCreated={handleRequestCreated} onOpenIncomingRequests={openMessageRequestsSection} onRefreshRelationships={refreshRelationships} />
     </>
   );
 }

@@ -10,22 +10,33 @@ export type ConversationRequestItem = {
   senderProfile: ProfileSearchResult;
 };
 
+export type RequestUpdateItem = {
+  id: string;
+  recipient_id: string;
+  status: "accepted" | "declined";
+  conversation_id: string | null;
+  created_at: string;
+  updated_at: string;
+  recipientProfile: ProfileSearchResult;
+};
+
 export type RequestAction = "accept" | "decline";
 
 type ConversationRequestRow = Omit<ConversationRequestItem, "senderProfile">;
+type RequestUpdateRow = Omit<RequestUpdateItem, "recipientProfile">;
 
 type UseMessageRequestsOptions = {
   currentUserId: string | null;
   isAccountResolved: boolean;
   onConversationReady: (conversation: SelectedConversation) => void;
+  onRequestsChanged: (action: RequestAction) => void;
 };
 
-const requestLimit = 50;
-
-function useMessageRequests({ currentUserId, isAccountResolved, onConversationReady }: UseMessageRequestsOptions) {
+function useMessageRequests({ currentUserId, isAccountResolved, onConversationReady, onRequestsChanged }: UseMessageRequestsOptions) {
   const latestLoadRef = useRef(0);
   const respondingRef = useRef<string | null>(null);
   const [requests, setRequests] = useState<ConversationRequestItem[]>([]);
+  const [updates, setUpdates] = useState<RequestUpdateItem[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -43,47 +54,54 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
     let isCancelled = false;
 
     async function loadRequests() {
-      setIsLoading(true);
-      setLoadError("");
-
-      const { data: requestData, error: requestError, count } = await supabase.from("conversation_requests").select("id, sender_id, introduction, created_at", { count: "exact" }).eq("recipient_id", currentUserId).eq("status", "pending").order("created_at", { ascending: false }).limit(requestLimit).abortSignal(abortController.signal);
+      const [incomingResult, updatesResult] = await Promise.all([
+        supabase.from("conversation_requests").select("id, sender_id, introduction, created_at", { count: "exact" }).eq("recipient_id", currentUserId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
+        supabase.from("conversation_requests").select("id, recipient_id, status, conversation_id, created_at, updated_at").eq("sender_id", currentUserId).in("status", ["accepted", "declined"]).order("updated_at", { ascending: false }).limit(50).abortSignal(abortController.signal),
+      ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
 
-      if (requestError) {
+      if (incomingResult.error || updatesResult.error) {
         setIsLoading(false);
-        setLoadError("We couldn’t load message requests. Please try again.");
-        if (import.meta.env.DEV) console.error("Loading conversation requests failed", requestError);
+        setLoadError("We couldn’t load conversation requests and updates. Please try again.");
+        if (import.meta.env.DEV) console.error("Loading conversation requests failed", { incomingError: incomingResult.error, updatesError: updatesResult.error });
         return;
       }
 
-      const requestRows = (requestData ?? []) as ConversationRequestRow[];
-      const senderIds = [...new Set(requestRows.map((request) => request.sender_id))];
-      let senderProfiles: ProfileSearchResult[] = [];
+      const requestRows = (incomingResult.data ?? []) as ConversationRequestRow[];
+      const updateRows = (updatesResult.data ?? []) as RequestUpdateRow[];
+      const profileIds = [...new Set([...requestRows.map((request) => request.sender_id), ...updateRows.map((update) => update.recipient_id)])];
+      let profiles: ProfileSearchResult[] = [];
 
-      if (senderIds.length > 0) {
-        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url").in("id", senderIds).abortSignal(abortController.signal);
+      if (profileIds.length > 0) {
+        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url").in("id", profileIds).abortSignal(abortController.signal);
 
         if (isCancelled || loadId !== latestLoadRef.current) return;
 
         if (profileError) {
           setIsLoading(false);
-          setLoadError("We couldn’t load the people attached to these requests. Please retry.");
-          if (import.meta.env.DEV) console.error("Loading request sender profiles failed", profileError);
+          setLoadError("We couldn’t load the people attached to these requests and updates. Please retry.");
+          if (import.meta.env.DEV) console.error("Loading request profiles failed", profileError);
           return;
         }
 
-        senderProfiles = (profileData ?? []) as ProfileSearchResult[];
+        profiles = (profileData ?? []) as ProfileSearchResult[];
       }
 
-      const profilesById = new Map(senderProfiles.map((profile) => [profile.id, profile]));
+      const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+      const fallbackProfile = (id: string): ProfileSearchResult => ({ id, username: null, display_name: null, avatar_url: null });
       const nextRequests = requestRows.map((request) => ({
         ...request,
-        senderProfile: profilesById.get(request.sender_id) ?? { id: request.sender_id, username: null, display_name: null, avatar_url: null },
+        senderProfile: profilesById.get(request.sender_id) ?? fallbackProfile(request.sender_id),
+      }));
+      const nextUpdates = updateRows.map((update): RequestUpdateItem => ({
+        ...update,
+        recipientProfile: profilesById.get(update.recipient_id) ?? fallbackProfile(update.recipient_id),
       }));
 
       setRequests(nextRequests);
-      setPendingCount(count ?? nextRequests.length);
+      setUpdates(nextUpdates);
+      setPendingCount(incomingResult.count ?? nextRequests.length);
       setIsLoading(false);
       setLoadError("");
     }
@@ -94,12 +112,18 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
       isCancelled = true;
       abortController.abort();
     };
-  }, [currentUserId, isAccountResolved, loadKey]);
+  }, [currentUserId, loadKey]);
 
   const refresh = useCallback(() => {
     latestLoadRef.current += 1;
+    setIsLoading(true);
     setResponseError("");
     setStatusMessage("");
+    setLoadKey((key) => key + 1);
+  }, []);
+
+  const refreshSilently = useCallback(() => {
+    latestLoadRef.current += 1;
     setLoadKey((key) => key + 1);
   }, []);
 
@@ -138,6 +162,7 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
 
     setRequests((currentRequests) => currentRequests.filter((item) => item.id !== request.id));
     setPendingCount((currentCount) => Math.max(0, currentCount - 1));
+    onRequestsChanged(action);
 
     if (action === "decline") {
       setStatusMessage("Request declined.");
@@ -145,10 +170,11 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
     }
 
     onConversationReady({ id: result.conversation_id as string, otherProfile: request.senderProfile, introductoryMessage: request.introduction, introductoryMessageCreatedAt: request.created_at });
-  }, [onConversationReady]);
+  }, [onConversationReady, onRequestsChanged]);
 
   return {
     requests: currentUserId ? requests : [],
+    updates: currentUserId ? updates : [],
     pendingCount: currentUserId ? pendingCount : 0,
     isLoading: currentUserId ? isLoading : !isAccountResolved,
     loadError: currentUserId ? loadError : isAccountResolved ? "Your session has expired. Please sign in again." : "",
@@ -157,6 +183,7 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
     respondingRequestId,
     respondingAction,
     refresh,
+    refreshSilently,
     respond,
   };
 }

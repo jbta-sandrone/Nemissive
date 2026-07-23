@@ -12,12 +12,34 @@ export type SelectedConversation = {
   introductoryMessageCreatedAt?: string;
 };
 
-export type PendingOutgoingRequest = {
-  requestId: string;
-  otherProfile: ProfileSearchResult;
-  introduction: string;
-  createdAt?: string;
-};
+export type MessageSidebarItem =
+  | {
+      kind: "pending";
+      requestId: string;
+      otherProfile: ProfileSearchResult;
+      introduction: string;
+      createdAt: string;
+      status: "pending";
+      conversationId: string | null;
+    }
+  | {
+      kind: "conversation";
+      conversationId: string;
+      otherProfile: ProfileSearchResult;
+      latestMessage: string | null;
+      latestMessageAt: string | null;
+      latestMessageSentByCurrentUser: boolean | null;
+      updatedAt: string;
+    };
+
+export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;
+export type AcceptedConversationItem = Extract<MessageSidebarItem, { kind: "conversation" }>;
+
+export type ProfileRelationship =
+  | { state: "none" }
+  | { state: "outgoing_pending"; request: PendingOutgoingRequest }
+  | { state: "incoming_pending"; requestId: string }
+  | { state: "accepted"; conversation: SelectedConversation };
 
 export type DashboardChatState =
   | { kind: "accepted"; conversation: SelectedConversation }
