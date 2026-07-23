@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ChatPanel from "../components/dashboard/ChatPanel";
 import NavigationRail from "../components/dashboard/NavigationRail";
 import NewConversationModal from "../components/dashboard/NewConversationModal";
@@ -8,7 +8,7 @@ import useMessageRequests from "../components/dashboard/useMessageRequests";
 import useMessagesData from "../components/dashboard/useMessagesData";
 import { supabase } from "../lib/supabase";
 import type { DashboardSection } from "../types/dashboard";
-import type { DashboardChatState, PendingOutgoingRequest, ProfileRelationship, ProfileSearchResult, SelectedConversation } from "../types/conversations";
+import type { ChatMessage, DashboardChatState, PendingOutgoingRequest, ProfileRelationship, ProfileSearchResult, RealtimeChatMessageEvent, SelectedConversation } from "../types/conversations";
 
 function DashboardPage() {
   const [activeSection, setActiveSection] = useState<DashboardSection>("messages");
@@ -16,6 +16,8 @@ function DashboardPage() {
   const [chatState, setChatState] = useState<DashboardChatState | null>(null);
   const [isCompactChatVisible, setIsCompactChatVisible] = useState(false);
   const [chatRealtimeRefreshKey, setChatRealtimeRefreshKey] = useState(0);
+  const [realtimeMessageEvents, setRealtimeMessageEvents] = useState<RealtimeChatMessageEvent[]>([]);
+  const realtimeMessageSequenceRef = useRef(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentProfile, setCurrentProfile] = useState<ProfileSearchResult | null>(null);
   const [isAccountResolved, setIsAccountResolved] = useState(false);
@@ -80,11 +82,16 @@ function DashboardPage() {
   const handleRealtimeOpenConversationMessagesChanged = useCallback(() => {
     setChatRealtimeRefreshKey((key) => key + 1);
   }, []);
+  const handleRealtimeMessageInserted = useCallback((message: ChatMessage) => {
+    const event = { sequence: ++realtimeMessageSequenceRef.current, message };
+    setRealtimeMessageEvents((currentEvents) => [...currentEvents.slice(-99), event]);
+  }, []);
 
   useConversationRealtime({
     currentUserId,
     onRequestsChanged: handleRealtimeRequestsChanged,
     onConversationDataChanged: handleRealtimeConversationDataChanged,
+    onMessageInserted: handleRealtimeMessageInserted,
     onOpenConversationMessagesChanged: handleRealtimeOpenConversationMessagesChanged,
   });
 
@@ -151,7 +158,7 @@ function DashboardPage() {
       <div className="flex h-screen w-full min-w-0 flex-col overflow-hidden bg-background md:flex-row">
         <NavigationRail activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} isCompactChatVisible={effectiveCompactChatVisible} onSectionChange={handleSectionChange} />
         <Sidebar activeSection={activeSection} currentProfile={currentProfile} isAccountResolved={isAccountResolved} accountError={accountError} isCompactChatVisible={effectiveCompactChatVisible} requestsController={requestsController} messagesController={messagesController} chatState={resolvedChatState} onNewConversation={openNewConversation} onPendingRequestSelected={handlePendingRequestSelected} onConversationReady={handleConversationReady} />
-        <ChatPanel chatState={resolvedChatState} isMobileVisible={effectiveCompactChatVisible} realtimeRefreshKey={chatRealtimeRefreshKey} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
+        <ChatPanel chatState={resolvedChatState} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} onMessageConfirmed={refreshMessagesSilently} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
       </div>
 
       <NewConversationModal isOpen={isNewConversationOpen} currentUserId={currentUserId} isAccountResolved={isAccountResolved} accountError={accountError} relationshipsByProfileId={relationshipsByProfileId} isRelationshipsLoading={messagesController.isLoading || requestsController.isLoading} relationshipsError={messagesController.loadError || requestsController.loadError} onClose={() => setIsNewConversationOpen(false)} onConversationSelected={handleConversationReady} onPendingRequestSelected={handlePendingRequestSelected} onRequestCreated={handleRequestCreated} onOpenIncomingRequests={openMessageRequestsSection} onRefreshRelationships={refreshRelationships} />

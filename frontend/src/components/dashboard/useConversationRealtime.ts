@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
 import { supabase } from "../../lib/supabase";
+import type { ChatMessage } from "../../types/conversations";
 
 type UseConversationRealtimeOptions = {
   currentUserId: string | null;
   onRequestsChanged: () => void;
   onConversationDataChanged: () => void;
+  onMessageInserted: (message: ChatMessage) => void;
   onOpenConversationMessagesChanged: () => void;
 };
 
@@ -16,12 +18,28 @@ type InvalidationState = {
 
 const realtimeDebounceMs = 180;
 
-function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
-  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onOpenConversationMessagesChanged });
+function parseRealtimeMessage(value: unknown): ChatMessage | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || typeof row.conversation_id !== "string" || typeof row.sender_id !== "string" || typeof row.body !== "string" || typeof row.created_at !== "string") return null;
+
+  return {
+    kind: "confirmed",
+    id: row.id,
+    conversationId: row.conversation_id,
+    senderId: row.sender_id,
+    body: row.body,
+    createdAt: row.created_at,
+    isIntroduction: typeof row.source_request_id === "string",
+  };
+}
+
+function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
+  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged });
 
   useEffect(() => {
-    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onOpenConversationMessagesChanged };
-  }, [onConversationDataChanged, onOpenConversationMessagesChanged, onRequestsChanged]);
+    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged };
+  }, [onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged, onRequestsChanged]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -70,7 +88,15 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
         scheduleInvalidation({ conversationData: true });
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
+        const message = parseRealtimeMessage(payload.new);
+        if (message) callbacksRef.current.onMessageInserted(message);
+        scheduleInvalidation({ conversationData: true, openConversationMessages: !message });
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages" }, () => {
+        scheduleInvalidation({ conversationData: true, openConversationMessages: true });
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, () => {
         scheduleInvalidation({ conversationData: true, openConversationMessages: true });
       })
       .subscribe((status) => {

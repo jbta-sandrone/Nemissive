@@ -35,6 +35,33 @@ export type MessageSidebarItem =
 export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;
 export type AcceptedConversationItem = Extract<MessageSidebarItem, { kind: "conversation" }>;
 
+export type ChatMessage = {
+  kind: "confirmed";
+  id: string;
+  conversationId: string;
+  senderId: string;
+  body: string;
+  createdAt: string;
+  isIntroduction: boolean;
+};
+
+export type OptimisticChatMessage = {
+  kind: "optimistic";
+  optimisticId: string;
+  conversationId: string;
+  senderId: string;
+  body: string;
+  createdAt: string;
+  deliveryState: "sending" | "failed";
+};
+
+export type DisplayChatMessage = ChatMessage | OptimisticChatMessage;
+
+export type RealtimeChatMessageEvent = {
+  sequence: number;
+  message: ChatMessage;
+};
+
 export type ProfileRelationship =
   | { state: "none" }
   | { state: "outgoing_pending"; request: PendingOutgoingRequest }
