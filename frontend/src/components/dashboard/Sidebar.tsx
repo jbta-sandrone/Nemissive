@@ -19,6 +19,8 @@ type SidebarProps = {
   messagesController: MessagesDataController;
   chatState: DashboardChatState | null;
   onlineUserIds: ReadonlySet<string>;
+  quickReactions: string[];
+  onSaveQuickReactions: (reactions: string[]) => Promise<boolean>;
   onBeforeSignOut: () => void;
   onNewConversation: () => void;
   onPendingRequestSelected: (request: PendingOutgoingRequest) => void;
@@ -40,7 +42,7 @@ function MessagesSidebarContent({ messagesController, chatState, onlineUserIds, 
   );
 }
 
-function Sidebar({ activeSection, currentProfile, isAccountResolved, accountError, isCompactChatVisible, requestsController, messagesController, chatState, onlineUserIds, onBeforeSignOut, onNewConversation, onPendingRequestSelected, onConversationReady }: SidebarProps) {
+function Sidebar({ activeSection, currentProfile, isAccountResolved, accountError, isCompactChatVisible, requestsController, messagesController, chatState, onlineUserIds, quickReactions, onSaveQuickReactions, onBeforeSignOut, onNewConversation, onPendingRequestSelected, onConversationReady }: SidebarProps) {
   const shouldReduceMotion = useReducedMotion();
   const visibilityClasses = isCompactChatVisible ? "hidden lg:flex" : "flex";
   const transition = shouldReduceMotion ? { duration: 0 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] as const };
@@ -52,7 +54,7 @@ function Sidebar({ activeSection, currentProfile, isAccountResolved, accountErro
           {activeSection === "messages" && <MessagesSidebarContent messagesController={messagesController} chatState={chatState} onlineUserIds={onlineUserIds} onNewConversation={onNewConversation} onPendingRequestSelected={onPendingRequestSelected} onConversationReady={onConversationReady} />}
           {activeSection === "people" && <PeopleSidebarContent conversations={messagesController.conversations} isLoading={messagesController.isLoading} errorMessage={messagesController.loadError} selectedConversationId={chatState?.kind === "accepted" ? chatState.conversation.id : null} onlineUserIds={onlineUserIds} onRefresh={messagesController.refresh} onConversationReady={onConversationReady} onStartConversation={onNewConversation} />}
           {activeSection === "requests" && <RequestsSidebarContent requests={requestsController.requests} updates={requestsController.updates} pendingCount={requestsController.pendingCount} isLoading={requestsController.isLoading} loadError={requestsController.loadError} responseError={requestsController.responseError} statusMessage={requestsController.statusMessage} respondingRequestId={requestsController.respondingRequestId} respondingAction={requestsController.respondingAction} onRefresh={requestsController.refresh} onRespond={(request, action) => void requestsController.respond(request, action)} onConversationReady={onConversationReady} />}
-          {activeSection === "menu" && <MenuSidebarContent profile={currentProfile} isAccountLoading={!isAccountResolved} accountError={accountError} onBeforeSignOut={onBeforeSignOut} />}
+          {activeSection === "menu" && <MenuSidebarContent profile={currentProfile} isAccountLoading={!isAccountResolved} accountError={accountError} quickReactions={quickReactions} onSaveQuickReactions={onSaveQuickReactions} onBeforeSignOut={onBeforeSignOut} />}
         </motion.div>
       </AnimatePresence>
     </aside>

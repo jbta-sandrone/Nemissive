@@ -4,6 +4,7 @@ export type ProfileSearchResult = {
   display_name: string | null;
   avatar_url: string | null;
   last_seen_at?: string | null;
+  quick_reactions?: string[] | null;
 };
 
 export type RealtimeProfileLastSeenEvent = {
@@ -69,6 +70,29 @@ export type DisplayChatMessage = ChatMessage | OptimisticChatMessage;
 export type RealtimeChatMessageEvent = {
   sequence: number;
   message: ChatMessage;
+};
+
+export type MessageReaction = {
+  id: string;
+  messageId: string;
+  userId: string;
+  emoji: string;
+  createdAt: string;
+};
+
+export type MessageReactionDeleteIdentity = {
+  id: string | null;
+  messageId: string | null;
+  userId: string | null;
+  emoji: string | null;
+};
+
+export type MessageReactionRealtimeChange =
+  | { action: "insert"; reaction: MessageReaction }
+  | { action: "delete"; reaction: MessageReactionDeleteIdentity };
+
+export type RealtimeMessageReactionEvent = MessageReactionRealtimeChange & {
+  sequence: number;
 };
 
 export type ParticipantReceiptCursor = {

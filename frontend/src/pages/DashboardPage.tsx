@@ -8,9 +8,10 @@ import useConversationRealtime from "../components/dashboard/useConversationReal
 import useMessageRequests from "../components/dashboard/useMessageRequests";
 import useMessagesData from "../components/dashboard/useMessagesData";
 import useUserPresence from "../components/dashboard/useUserPresence";
+import { normalizeQuickReactions } from "../components/dashboard/emojiData";
 import { supabase } from "../lib/supabase";
 import type { DashboardSection } from "../types/dashboard";
-import type { ChatMessage, DashboardChatState, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileRelationship, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeProfileLastSeenEvent, SelectedConversation } from "../types/conversations";
+import type { ChatMessage, DashboardChatState, MessageReactionRealtimeChange, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileRelationship, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeMessageReactionEvent, RealtimeProfileLastSeenEvent, SelectedConversation } from "../types/conversations";
 
 function DashboardPage() {
   const [activeSection, setActiveSection] = useState<DashboardSection>("messages");
@@ -19,7 +20,9 @@ function DashboardPage() {
   const [isCompactChatVisible, setIsCompactChatVisible] = useState(false);
   const [chatRealtimeRefreshKey, setChatRealtimeRefreshKey] = useState(0);
   const [realtimeMessageEvents, setRealtimeMessageEvents] = useState<RealtimeChatMessageEvent[]>([]);
+  const [realtimeReactionEvents, setRealtimeReactionEvents] = useState<RealtimeMessageReactionEvent[]>([]);
   const realtimeMessageSequenceRef = useRef(0);
+  const realtimeReactionSequenceRef = useRef(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentProfile, setCurrentProfile] = useState<ProfileSearchResult | null>(null);
   const [isAccountResolved, setIsAccountResolved] = useState(false);
@@ -41,7 +44,7 @@ function DashboardPage() {
 
       setCurrentUserId(userData.user.id);
 
-      const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url").eq("id", userData.user.id).abortSignal(abortController.signal).maybeSingle();
+      const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, quick_reactions").eq("id", userData.user.id).abortSignal(abortController.signal).maybeSingle();
 
       if (isCancelled) return;
       if (profileError || !profileData) {
@@ -93,6 +96,10 @@ function DashboardPage() {
     setRealtimeMessageEvents((currentEvents) => [...currentEvents.slice(-99), event]);
     if (currentUserId && message.senderId !== currentUserId) advanceDelivered(message.conversationId, message.createdAt);
   }, [advanceDelivered, currentUserId]);
+  const handleRealtimeMessageReactionChanged = useCallback((change: MessageReactionRealtimeChange) => {
+    const event = { sequence: ++realtimeReactionSequenceRef.current, ...change };
+    setRealtimeReactionEvents((currentEvents) => [...currentEvents.slice(-199), event]);
+  }, []);
   const handleRealtimeParticipantReceiptUpdated = useCallback((receipt: ParticipantReceiptCursor) => {
     handleRealtimeReceipt(receipt);
   }, [handleRealtimeReceipt]);
@@ -105,6 +112,7 @@ function DashboardPage() {
     onRequestsChanged: handleRealtimeRequestsChanged,
     onConversationDataChanged: handleRealtimeConversationDataChanged,
     onMessageInserted: handleRealtimeMessageInserted,
+    onMessageReactionChanged: handleRealtimeMessageReactionChanged,
     onParticipantReceiptUpdated: handleRealtimeParticipantReceiptUpdated,
     onProfileLastSeenUpdated: handleRealtimeProfileLastSeenUpdated,
     onOpenConversationMessagesChanged: handleRealtimeOpenConversationMessagesChanged,
@@ -174,12 +182,26 @@ function DashboardPage() {
     requestsController.refresh();
   }
 
+  const quickReactions = normalizeQuickReactions(currentProfile?.quick_reactions);
+
+  async function saveQuickReactions(reactions: string[]) {
+    const { data, error } = await supabase.rpc("set_quick_reactions", { candidate_reactions: reactions });
+    if (error) {
+      if (import.meta.env.DEV) console.error("Saving quick reactions failed", { code: error.code });
+      return false;
+    }
+
+    const savedReactions = Array.isArray(data) && data.every((item) => typeof item === "string") ? data : reactions;
+    setCurrentProfile((profile) => profile ? { ...profile, quick_reactions: savedReactions } : profile);
+    return true;
+  }
+
   return (
     <>
       <div className="flex h-screen w-full min-w-0 flex-col overflow-hidden bg-background md:flex-row">
         <NavigationRail activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} unreadMessageCount={messagesController.aggregateUnreadCount} isCompactChatVisible={effectiveCompactChatVisible} onSectionChange={handleSectionChange} />
-        <Sidebar activeSection={activeSection} currentProfile={currentProfile} isAccountResolved={isAccountResolved} accountError={accountError} isCompactChatVisible={effectiveCompactChatVisible} requestsController={requestsController} messagesController={messagesController} chatState={resolvedChatState} onlineUserIds={presenceController.onlineUserIds} onBeforeSignOut={() => void presenceController.markLastSeenNow()} onNewConversation={openNewConversation} onPendingRequestSelected={handlePendingRequestSelected} onConversationReady={handleConversationReady} />
-        <ChatPanel chatState={resolvedChatState} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeReceiptEvents={receiptEvents} onlineUserIds={presenceController.onlineUserIds} onIncomingMessagesSynchronized={advanceDelivered} onConversationRead={advanceRead} onMessageConfirmed={refreshMessagesSilently} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
+        <Sidebar activeSection={activeSection} currentProfile={currentProfile} isAccountResolved={isAccountResolved} accountError={accountError} isCompactChatVisible={effectiveCompactChatVisible} requestsController={requestsController} messagesController={messagesController} chatState={resolvedChatState} onlineUserIds={presenceController.onlineUserIds} quickReactions={quickReactions} onSaveQuickReactions={saveQuickReactions} onBeforeSignOut={() => void presenceController.markLastSeenNow()} onNewConversation={openNewConversation} onPendingRequestSelected={handlePendingRequestSelected} onConversationReady={handleConversationReady} />
+        <ChatPanel chatState={resolvedChatState} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={receiptEvents} onlineUserIds={presenceController.onlineUserIds} quickReactions={quickReactions} onIncomingMessagesSynchronized={advanceDelivered} onConversationRead={advanceRead} onMessageConfirmed={refreshMessagesSilently} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
       </div>
 
       <NewConversationModal isOpen={isNewConversationOpen} currentUserId={currentUserId} isAccountResolved={isAccountResolved} accountError={accountError} relationshipsByProfileId={relationshipsByProfileId} isRelationshipsLoading={messagesController.isLoading || requestsController.isLoading} relationshipsError={messagesController.loadError || requestsController.loadError} onClose={() => setIsNewConversationOpen(false)} onConversationSelected={handleConversationReady} onPendingRequestSelected={handlePendingRequestSelected} onRequestCreated={handleRequestCreated} onOpenIncomingRequests={openMessageRequestsSection} onRefreshRelationships={refreshRelationships} />

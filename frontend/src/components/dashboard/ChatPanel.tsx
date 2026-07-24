@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, OptimisticChatMessage, ParticipantReceiptCursor, RealtimeChatMessageEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
+import type { ChatMessage, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageReaction, MessageReactionDeleteIdentity, OptimisticChatMessage, ParticipantReceiptCursor, RealtimeChatMessageEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
+import AnchoredPopover from "./AnchoredPopover";
+import EmojiPicker from "./EmojiPicker";
 import PresenceAvatar from "./PresenceAvatar";
 import ProfileAvatar from "./ProfileAvatar";
+import { getEmojiLabel } from "./emojiData";
 import { formatLastSeen } from "./presenceUtils";
 import { getProfileDisplayName } from "./profileUtils";
 import useConversationTyping from "./useConversationTyping";
@@ -23,14 +26,24 @@ type ParticipantRow = {
   last_read_at: string | null;
 };
 
+type ReactionRow = {
+  id: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at: string;
+};
+
 type ChatPanelProps = {
   chatState: DashboardChatState | null;
   currentUserId: string | null;
   isMobileVisible: boolean;
   realtimeRefreshKey: number;
   realtimeMessageEvents: RealtimeChatMessageEvent[];
+  realtimeReactionEvents: RealtimeMessageReactionEvent[];
   realtimeReceiptEvents: RealtimeParticipantReceiptEvent[];
   onlineUserIds: ReadonlySet<string>;
+  quickReactions: string[];
   onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void;
   onConversationRead: (conversationId: string, messageCreatedAt: string) => void;
   onMessageConfirmed: () => void;
@@ -67,6 +80,37 @@ function sortMessages(messages: DisplayChatMessage[]) {
     if (timestampDifference !== 0) return timestampDifference;
     return getMessageKey(first).localeCompare(getMessageKey(second));
   });
+}
+
+function mapReactionRow(row: ReactionRow): MessageReaction {
+  return { id: row.id, messageId: row.message_id, userId: row.user_id, emoji: row.emoji, createdAt: row.created_at };
+}
+
+function getReactionTupleKey(reaction: Pick<MessageReaction, "messageId" | "userId" | "emoji">) {
+  return `${reaction.messageId}\u0000${reaction.userId}\u0000${reaction.emoji}`;
+}
+
+function getDeletedReactionTupleKey(reaction: MessageReactionDeleteIdentity) {
+  return reaction.messageId && reaction.userId && reaction.emoji ? getReactionTupleKey({ messageId: reaction.messageId, userId: reaction.userId, emoji: reaction.emoji }) : null;
+}
+
+function matchesDeletedReaction(reaction: MessageReaction, deletedReaction: MessageReactionDeleteIdentity) {
+  const matchesId = Boolean(deletedReaction.id && reaction.id === deletedReaction.id);
+  const deletedTupleKey = getDeletedReactionTupleKey(deletedReaction);
+  return matchesId || Boolean(deletedTupleKey && getReactionTupleKey(reaction) === deletedTupleKey);
+}
+
+function mergeReaction(reactions: MessageReaction[], incoming: MessageReaction) {
+  return [...reactions.filter((reaction) => reaction.id !== incoming.id && getReactionTupleKey(reaction) !== getReactionTupleKey(incoming)), incoming];
+}
+
+function groupMessageReactions(reactions: MessageReaction[], messageId: string, currentUserId: string | null) {
+  const groups = new Map<string, { emoji: string; count: number; reactedByCurrentUser: boolean }>();
+  reactions.filter((reaction) => reaction.messageId === messageId).forEach((reaction) => {
+    const currentGroup = groups.get(reaction.emoji);
+    groups.set(reaction.emoji, { emoji: reaction.emoji, count: (currentGroup?.count ?? 0) + 1, reactedByCurrentUser: Boolean(currentGroup?.reactedByCurrentUser || reaction.userId === currentUserId) });
+  });
+  return [...groups.values()];
 }
 
 function getNormalizedTimestamp(value: string | null) {
@@ -139,6 +183,18 @@ function SendIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-5 w-5" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" strokeLinejoin="round" /><path d="M7 12h13" strokeLinecap="round" /></svg>;
 }
 
+function ReactionIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M9 10h.01M15 10h.01M8.5 14.5c1 1.2 2.1 1.8 3.5 1.8s2.5-.6 3.5-1.8M18.5 4.5v4M16.5 6.5h4" strokeLinecap="round" /></svg>;
+}
+
+function QuickReactionMenu({ anchorRef, quickReactions, messageLabel, onClose, onOpenPicker, onSelect }: { anchorRef: RefObject<HTMLElement | null>; quickReactions: string[]; messageLabel: string; onClose: () => void; onOpenPicker: () => void; onSelect: (emoji: string) => void }) {
+  return (
+    <AnchoredPopover anchorRef={anchorRef} ariaLabel={`Quick reactions for ${messageLabel}`} onClose={onClose} placement="top" panelClassName="max-w-[calc(100vw-1rem)] rounded-2xl border border-border bg-surface p-1.5 shadow-soft">
+      <div className="flex max-w-full items-center gap-0.5 overflow-x-auto">{quickReactions.map((emoji) => <button key={emoji} type="button" onClick={() => { onSelect(emoji); onClose(); }} aria-label={`React with ${getEmojiLabel(emoji)}`} title={getEmojiLabel(emoji)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">{emoji}</button>)}<button type="button" onClick={() => { onClose(); onOpenPicker(); }} aria-label="Open full emoji picker" title="More reactions" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg font-semibold text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">+</button></div>
+    </AnchoredPopover>
+  );
+}
+
 function TypingIndicator({ isVisible, name, shouldReduceMotion }: { isVisible: boolean; name: string; shouldReduceMotion: boolean | null }) {
   return (
     <div className="mb-1 flex min-h-7 items-center px-2 sm:mb-1.5">
@@ -154,7 +210,7 @@ function TypingIndicator({ isVisible, name, shouldReduceMotion }: { isVisible: b
   );
 }
 
-function AcceptedConversationPanel({ conversation, currentUserId, compactVisibilitySignal, realtimeRefreshKey, realtimeMessageEvents, realtimeReceiptEvents, isOtherUserOnline, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMobileBack }: { conversation: SelectedConversation; currentUserId: string | null; compactVisibilitySignal: boolean; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMobileBack: () => void }) {
+function AcceptedConversationPanel({ conversation, currentUserId, compactVisibilitySignal, realtimeRefreshKey, realtimeMessageEvents, realtimeReactionEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMobileBack }: { conversation: SelectedConversation; currentUserId: string | null; compactVisibilitySignal: boolean; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMobileBack: () => void }) {
   const shouldReduceMotion = useReducedMotion();
   const latestLoadRef = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -162,15 +218,25 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const comingSoonTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const readAcknowledgementTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const reactionErrorTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const hasLoadedMessagesRef = useRef(false);
   const isMountedRef = useRef(true);
   const isSubmittingRef = useRef(false);
   const inFlightMessageRef = useRef<{ optimisticId: string; conversationId: string; body: string } | null>(null);
   const processedRealtimeSequenceRef = useRef(realtimeMessageEvents.at(-1)?.sequence ?? 0);
+  const processedReactionSequenceRef = useRef(realtimeReactionEvents.at(-1)?.sequence ?? 0);
   const processedReceiptSequenceRef = useRef(realtimeReceiptEvents.at(-1)?.sequence ?? 0);
   const realtimeSequenceByMessageIdRef = useRef(new Map<string, number>());
+  const reactionInsertSequenceByIdRef = useRef(new Map<string, number>());
+  const reactionDeleteSequenceByIdRef = useRef(new Map<string, number>());
+  const reactionDeleteSequenceByTupleRef = useRef(new Map<string, number>());
   const locallyConfirmedMessageIdsRef = useRef(new Set<string>());
+  const pendingReactionKeysRef = useRef(new Set<string>());
+  const reactionAnchorRef = useRef<HTMLElement | null>(null);
+  const composerEmojiButtonRef = useRef<HTMLButtonElement | null>(null);
+  const composerSelectionRef = useRef({ start: 0, end: 0 });
   const [messages, setMessages] = useState<DisplayChatMessage[]>([]);
+  const [reactions, setReactions] = useState<MessageReaction[]>([]);
   const [draft, setDraft] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -179,6 +245,11 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [newMessageAnnouncement, setNewMessageAnnouncement] = useState("");
   const [comingSoonMessage, setComingSoonMessage] = useState("");
+  const [reactionError, setReactionError] = useState("");
+  const [pendingReactionKeys, setPendingReactionKeys] = useState<Set<string>>(() => new Set());
+  const [quickReactionMessageId, setQuickReactionMessageId] = useState<string | null>(null);
+  const [fullReactionPickerMessageId, setFullReactionPickerMessageId] = useState<string | null>(null);
+  const [isComposerEmojiPickerOpen, setIsComposerEmojiPickerOpen] = useState(false);
   const [otherReceipt, setOtherReceipt] = useState<ParticipantReceiptCursor | null>(null);
   const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
   const otherName = getProfileDisplayName(conversation.otherProfile);
@@ -191,6 +262,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       isMountedRef.current = false;
       if (comingSoonTimerRef.current !== null) window.clearTimeout(comingSoonTimerRef.current);
       if (readAcknowledgementTimerRef.current !== null) window.clearTimeout(readAcknowledgementTimerRef.current);
+      if (reactionErrorTimerRef.current !== null) window.clearTimeout(reactionErrorTimerRef.current);
     };
   }, []);
 
@@ -217,6 +289,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   useEffect(() => {
     const loadId = ++latestLoadRef.current;
     const loadStartRealtimeSequence = processedRealtimeSequenceRef.current;
+    const loadStartReactionSequence = processedReactionSequenceRef.current;
     const abortController = new AbortController();
     let isCancelled = false;
 
@@ -230,9 +303,8 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
 
-      setIsLoading(false);
-
       if (historyResult.error || introductionResult.error || participantResult.error) {
+        setIsLoading(false);
         if (!hasLoadedMessagesRef.current) setHistoryError("We couldn’t load this conversation. Please try again.");
         if (import.meta.env.DEV) console.error("Loading conversation messages failed", { conversationId: conversation.id, historyError: historyResult.error, introductionError: introductionResult.error, participantError: participantResult.error });
         return;
@@ -240,6 +312,19 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
 
       const serverRowsById = new Map([...(historyResult.data ?? []), ...(introductionResult.data ?? [])].map((row) => [row.id, row as MessageRow]));
       const serverMessages = [...serverRowsById.values()].map(mapMessageRow).sort((first, second) => Date.parse(first.createdAt) - Date.parse(second.createdAt));
+      let serverReactions: MessageReaction[] = [];
+      const messageIds = [...serverRowsById.keys()];
+      if (messageIds.length > 0) {
+        const reactionResult = await supabase.from("message_reactions").select("id, message_id, user_id, emoji, created_at").in("message_id", messageIds).order("created_at", { ascending: true }).abortSignal(abortController.signal);
+        if (isCancelled || loadId !== latestLoadRef.current) return;
+        if (reactionResult.error) {
+          setReactionError("Reactions couldn’t be loaded. Messaging is still available.");
+          if (import.meta.env.DEV) console.warn("Loading message reactions failed", { conversationId: conversation.id, code: reactionResult.error.code });
+        } else {
+          serverReactions = ((reactionResult.data ?? []) as ReactionRow[]).map(mapReactionRow);
+        }
+      }
+      setIsLoading(false);
       const otherParticipant = ((participantResult.data ?? []) as ParticipantRow[]).find((participant) => participant.user_id !== currentUserId);
       if (otherParticipant) {
         const loadedReceipt: ParticipantReceiptCursor = { conversationId: conversation.id, userId: otherParticipant.user_id, lastDeliveredAt: otherParticipant.last_delivered_at, lastReadAt: otherParticipant.last_read_at };
@@ -258,6 +343,16 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
         });
         const confirmedById = new Map([...serverMessages, ...confirmedDuringLoad].map((message) => [message.id, message]));
         return sortMessages([...confirmedById.values(), ...optimisticMessages]);
+      });
+      setReactions((currentReactions) => {
+        const optimisticReactions = currentReactions.filter((reaction) => reaction.id.startsWith("optimistic:"));
+        const recentRealtimeReactions = currentReactions.filter((reaction) => (reactionInsertSequenceByIdRef.current.get(reaction.id) ?? 0) > loadStartReactionSequence);
+        const loadedReactions = serverReactions.filter((reaction) => {
+          const deletedByIdSequence = reactionDeleteSequenceByIdRef.current.get(reaction.id) ?? 0;
+          const deletedByTupleSequence = reactionDeleteSequenceByTupleRef.current.get(getReactionTupleKey(reaction)) ?? 0;
+          return Math.max(deletedByIdSequence, deletedByTupleSequence) <= loadStartReactionSequence;
+        });
+        return [...loadedReactions, ...recentRealtimeReactions, ...optimisticReactions].reduce((merged, reaction) => mergeReaction(merged, reaction), [] as MessageReaction[]);
       });
       setHistoryError("");
       hasLoadedMessagesRef.current = true;
@@ -304,6 +399,29 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       else setShowJumpToLatest(true);
     }
   }, [conversation.id, currentUserId, isNearBottom, otherName, realtimeMessageEvents, scrollToLatest]);
+
+  useEffect(() => {
+    const newEvents = realtimeReactionEvents.filter((event) => event.sequence > processedReactionSequenceRef.current).sort((first, second) => first.sequence - second.sequence);
+    if (newEvents.length === 0) return;
+    processedReactionSequenceRef.current = Math.max(processedReactionSequenceRef.current, ...newEvents.map((event) => event.sequence));
+
+    setReactions((currentReactions) => newEvents.reduce((nextReactions, event) => {
+      if (event.action === "insert") {
+        const tupleKey = getReactionTupleKey(event.reaction);
+        const latestDeleteSequence = Math.max(reactionDeleteSequenceByIdRef.current.get(event.reaction.id) ?? 0, reactionDeleteSequenceByTupleRef.current.get(tupleKey) ?? 0);
+        if (latestDeleteSequence >= event.sequence) return nextReactions;
+        reactionInsertSequenceByIdRef.current.set(event.reaction.id, event.sequence);
+        reactionDeleteSequenceByIdRef.current.delete(event.reaction.id);
+        reactionDeleteSequenceByTupleRef.current.delete(tupleKey);
+        return mergeReaction(nextReactions, event.reaction);
+      }
+
+      if (event.reaction.id) reactionDeleteSequenceByIdRef.current.set(event.reaction.id, event.sequence);
+      const deletedTupleKey = getDeletedReactionTupleKey(event.reaction);
+      if (deletedTupleKey) reactionDeleteSequenceByTupleRef.current.set(deletedTupleKey, event.sequence);
+      return nextReactions.filter((reaction) => !matchesDeletedReaction(reaction, event.reaction));
+    }, currentReactions));
+  }, [realtimeReactionEvents]);
 
   useEffect(() => {
     const newEvents = realtimeReceiptEvents.filter((event) => event.sequence > processedReceiptSequenceRef.current);
@@ -371,6 +489,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   function handleHistoryRetry() {
     latestLoadRef.current += 1;
     setMessages((currentMessages) => currentMessages.filter((message) => message.kind === "optimistic"));
+    setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.id.startsWith("optimistic:")));
     setIsLoading(true);
     setHistoryError("");
     hasLoadedMessagesRef.current = false;
@@ -467,6 +586,91 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     if (isNearBottom()) setShowJumpToLatest(false);
   }
 
+  function showReactionError(message: string) {
+    if (reactionErrorTimerRef.current !== null) window.clearTimeout(reactionErrorTimerRef.current);
+    setReactionError(message);
+    reactionErrorTimerRef.current = window.setTimeout(() => {
+      setReactionError("");
+      reactionErrorTimerRef.current = null;
+    }, 4000);
+  }
+
+  function openQuickReactions(messageId: string, trigger: HTMLButtonElement) {
+    reactionAnchorRef.current = trigger;
+    setFullReactionPickerMessageId(null);
+    setQuickReactionMessageId((currentId) => currentId === messageId ? null : messageId);
+  }
+
+  async function toggleReaction(messageId: string, emoji: string) {
+    if (!currentUserId) return;
+    const tuple = { messageId, userId: currentUserId, emoji };
+    const mutationKey = getReactionTupleKey(tuple);
+    if (pendingReactionKeysRef.current.has(mutationKey)) return;
+    pendingReactionKeysRef.current.add(mutationKey);
+    setPendingReactionKeys((currentKeys) => new Set(currentKeys).add(mutationKey));
+    setReactionError("");
+
+    const existingReaction = reactions.find((reaction) => getReactionTupleKey(reaction) === mutationKey);
+    if (existingReaction) {
+      const mutationStartSequence = processedReactionSequenceRef.current;
+      setReactions((currentReactions) => currentReactions.filter((reaction) => getReactionTupleKey(reaction) !== mutationKey));
+      const { error } = await supabase.from("message_reactions").delete().eq("message_id", messageId).eq("user_id", currentUserId).eq("emoji", emoji);
+      pendingReactionKeysRef.current.delete(mutationKey);
+      setPendingReactionKeys((currentKeys) => { const nextKeys = new Set(currentKeys); nextKeys.delete(mutationKey); return nextKeys; });
+      const confirmedDeleteSequence = Math.max(reactionDeleteSequenceByIdRef.current.get(existingReaction.id) ?? 0, reactionDeleteSequenceByTupleRef.current.get(mutationKey) ?? 0);
+      if (error && confirmedDeleteSequence <= mutationStartSequence) {
+        setReactions((currentReactions) => mergeReaction(currentReactions, existingReaction));
+        showReactionError("We couldn’t remove that reaction. Please try again.");
+        if (import.meta.env.DEV) console.warn("Removing message reaction failed", { messageId, code: error.code });
+      }
+      return;
+    }
+
+    const optimisticReaction: MessageReaction = { id: `optimistic:${mutationKey}`, messageId, userId: currentUserId, emoji, createdAt: new Date().toISOString() };
+    setReactions((currentReactions) => mergeReaction(currentReactions, optimisticReaction));
+    const { data, error } = await supabase.from("message_reactions").insert({ message_id: messageId, user_id: currentUserId, emoji }).select("id, message_id, user_id, emoji, created_at").single();
+    pendingReactionKeysRef.current.delete(mutationKey);
+    setPendingReactionKeys((currentKeys) => { const nextKeys = new Set(currentKeys); nextKeys.delete(mutationKey); return nextKeys; });
+
+    if (error || !data) {
+      setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.id !== optimisticReaction.id));
+      showReactionError("We couldn’t add that reaction. Please try again.");
+      if (import.meta.env.DEV) console.warn("Adding message reaction failed", { messageId, code: error?.code });
+      return;
+    }
+
+    const confirmedReaction = mapReactionRow(data as ReactionRow);
+    setReactions((currentReactions) => mergeReaction(currentReactions, confirmedReaction));
+  }
+
+  function openComposerEmojiPicker() {
+    const textarea = textareaRef.current;
+    composerSelectionRef.current = { start: textarea?.selectionStart ?? draft.length, end: textarea?.selectionEnd ?? draft.length };
+    setIsComposerEmojiPickerOpen((isOpen) => !isOpen);
+  }
+
+  function insertComposerEmoji(emoji: string) {
+    const { start, end } = composerSelectionRef.current;
+    const nextDraft = `${draft.slice(0, start)}${emoji}${draft.slice(end)}`;
+    if (nextDraft.length > messageMaxLength) {
+      showComingSoon("That emoji would exceed the 2,000-character limit.");
+      return;
+    }
+
+    const nextCaret = start + emoji.length;
+    setDraft(nextDraft);
+    notifyTyping(nextDraft.trim().length > 0);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        textarea.setSelectionRange(nextCaret, nextCaret);
+        resizeTextarea(textarea);
+      });
+    });
+  }
+
   function showComingSoon(message: string) {
     if (comingSoonTimerRef.current !== null) window.clearTimeout(comingSoonTimerRef.current);
     setComingSoonMessage(message);
@@ -510,15 +714,20 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
                 const shouldShowStatus = isCurrentUser && statusMessageKey === getMessageKey(message);
                 const confirmedStatus = message.kind === "confirmed" ? getConfirmedMessageStatus(message, otherReceipt) : null;
                 const statusLabel = isSending ? "Sending…" : isFailed ? "Failed" : confirmedStatus === "seen" ? "Seen" : confirmedStatus === "delivered" ? "Delivered" : "Sent";
+                const reactionGroups = message.kind === "confirmed" ? groupMessageReactions(reactions, message.id, currentUserId) : [];
 
                 return (
-                  <article key={getMessageKey(message)} className={`flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
-                    <div className={`flex min-w-0 max-w-[85%] flex-col sm:max-w-[75%] ${isCurrentUser ? "items-end" : "items-start"}`}>
-                      <div className={`min-w-0 rounded-3xl px-4 py-3 shadow-soft ${isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"}`}>
-                        <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p>
-                        <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}</div>
-                        {isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}
+                  <article key={getMessageKey(message)} className={`group/message flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
+                    <div className={`flex min-w-0 max-w-[92%] flex-col sm:max-w-[80%] ${isCurrentUser ? "items-end" : "items-start"}`}>
+                      <div className={`flex min-w-0 items-center gap-1.5 ${isCurrentUser ? "flex-row-reverse" : ""}`}>
+                        <div className={`min-w-0 rounded-3xl px-4 py-3 shadow-soft ${isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"}`}>
+                          <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p>
+                          <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}</div>
+                          {isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}
+                        </div>
+                        {message.kind === "confirmed" && <button type="button" onClick={(event) => openQuickReactions(message.id, event.currentTarget)} aria-label="React to this message" aria-haspopup="dialog" aria-expanded={quickReactionMessageId === message.id || fullReactionPickerMessageId === message.id} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted opacity-100 transition hover:bg-accent hover:text-heading focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100"><ReactionIcon /></button>}
                       </div>
+                      {reactionGroups.length > 0 && <div className={`mt-1.5 flex max-w-full flex-wrap gap-1 ${isCurrentUser ? "justify-end" : "justify-start"}`}>{reactionGroups.map((group) => { const peopleLabel = `${group.count} ${group.count === 1 ? "person" : "people"}`; const pendingKey = currentUserId ? getReactionTupleKey({ messageId: message.kind === "confirmed" ? message.id : "", userId: currentUserId, emoji: group.emoji }) : ""; return <button key={group.emoji} type="button" onClick={() => message.kind === "confirmed" && void toggleReaction(message.id, group.emoji)} disabled={!currentUserId || pendingReactionKeys.has(pendingKey)} aria-pressed={group.reactedByCurrentUser} aria-label={`${getEmojiLabel(group.emoji)} reaction, ${peopleLabel}${group.reactedByCurrentUser ? ", including you" : ""}`} className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-60 ${group.reactedByCurrentUser ? "border-primary/30 bg-accent text-heading" : "border-border bg-surface text-body hover:bg-accent"}`}><span aria-hidden="true" className="text-sm">{group.emoji}</span><span aria-hidden="true" className="font-semibold">{group.count}</span></button>; })}</div>}
                       {shouldShowStatus && <p role={isFailed ? "alert" : isSending ? "status" : undefined} className={`mt-1.5 px-1 text-right text-xs font-medium ${isFailed ? "text-primary" : "text-muted"}`}>{statusLabel}</p>}
                     </div>
                   </article>
@@ -531,12 +740,13 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
         {showJumpToLatest && <button type="button" onClick={() => scrollToLatest("smooth")} className="absolute bottom-4 left-1/2 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-heading shadow-soft transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m7 10 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>Jump to latest</button>}
       </div>
 
+      {reactionError && <p role="status" aria-live="polite" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{reactionError}</p>}
       <form onSubmit={handleSend} className="shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
         <TypingIndicator isVisible={isOtherUserTyping} name={otherName} shouldReduceMotion={shouldReduceMotion} />
         <label htmlFor={`message-composer-${conversation.id}`} className="sr-only">Message {otherName}</label>
         <div className="grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)_auto] items-end gap-x-2 rounded-2xl bg-surface px-3 py-3 shadow-soft focus-within:ring-2 focus-within:ring-primary/20 sm:gap-x-3 sm:px-4">
           <button type="button" onClick={() => showComingSoon("Media sharing is coming soon.")} aria-label="Add media — coming soon" title="Media sharing is coming soon" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 sm:h-11 sm:w-11"><MediaIcon /></button>
-          <button type="button" onClick={() => showComingSoon("Emoji choices are coming soon.")} aria-label="Choose emoji — coming soon" title="Emoji choices are coming soon" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 sm:h-11 sm:w-11"><EmojiIcon /></button>
+          <button ref={composerEmojiButtonRef} type="button" onClick={openComposerEmojiPicker} aria-label="Choose an emoji" title="Choose an emoji" aria-haspopup="dialog" aria-expanded={isComposerEmojiPickerOpen} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 sm:h-11 sm:w-11"><EmojiIcon /></button>
           <textarea ref={textareaRef} id={`message-composer-${conversation.id}`} value={draft} onChange={(event) => { setDraft(event.target.value); resizeTextarea(event.target); notifyTyping(event.target.value.trim().length > 0); }} onBlur={stopTyping} onKeyDown={handleComposerKeyDown} maxLength={messageMaxLength} rows={1} disabled={!currentUserId} aria-describedby={composerDescription} placeholder="Write a message…" className="max-h-32 min-h-12 min-w-0 resize-none overflow-y-auto border-0 bg-transparent px-1 py-3 text-sm leading-6 text-heading outline-none ring-0 placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60 sm:px-2" />
           <button type="submit" disabled={isSendDisabled} aria-label={isSubmitting ? `Sending message to ${otherName}` : `Send message to ${otherName}`} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-primary text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-12 sm:w-12"><SendIcon /><span className="sr-only">{isSubmitting ? "Sending…" : "Send"}</span></button>
           <div aria-live="polite" aria-atomic="true" className={`col-start-1 col-end-5 row-start-2 flex min-w-0 items-start justify-between gap-3 px-1 sm:col-start-3 sm:col-end-4 ${comingSoonMessage || showCharacterCount ? "mt-2 min-h-5" : "mt-0 min-h-0 sm:mt-2 sm:min-h-5"}`}>
@@ -545,11 +755,14 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
           </div>
         </div>
       </form>
+      {quickReactionMessageId && <QuickReactionMenu anchorRef={reactionAnchorRef} quickReactions={quickReactions} messageLabel="this message" onSelect={(emoji) => void toggleReaction(quickReactionMessageId, emoji)} onClose={() => setQuickReactionMessageId(null)} onOpenPicker={() => setFullReactionPickerMessageId(quickReactionMessageId)} />}
+      {fullReactionPickerMessageId && <EmojiPicker anchorRef={reactionAnchorRef} ariaLabel="Choose a message reaction" onSelect={(emoji) => void toggleReaction(fullReactionPickerMessageId, emoji)} onClose={() => setFullReactionPickerMessageId(null)} placement="top" />}
+      {isComposerEmojiPickerOpen && <EmojiPicker anchorRef={composerEmojiButtonRef} ariaLabel="Insert an emoji into your message" onSelect={insertComposerEmoji} onClose={() => setIsComposerEmojiPickerOpen(false)} placement="top" />}
     </div>
   );
 }
 
-function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshKey, realtimeMessageEvents, realtimeReceiptEvents, onlineUserIds, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onStartConversation, onMobileBack }: ChatPanelProps) {
+function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshKey, realtimeMessageEvents, realtimeReactionEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onStartConversation, onMobileBack }: ChatPanelProps) {
   const visibilityClasses = isMobileVisible ? "flex" : "hidden lg:flex";
 
   if (chatState?.kind === "pending") {
@@ -564,7 +777,7 @@ function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshK
   }
 
   if (chatState?.kind === "accepted") {
-    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMobileBack={onMobileBack} /></main>;
+    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMobileBack={onMobileBack} /></main>;
   }
 
   return (

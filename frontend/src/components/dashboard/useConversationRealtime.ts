@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, ParticipantReceiptCursor, RealtimeProfileLastSeenEvent } from "../../types/conversations";
+import type { ChatMessage, MessageReaction, MessageReactionDeleteIdentity, MessageReactionRealtimeChange, ParticipantReceiptCursor, RealtimeProfileLastSeenEvent } from "../../types/conversations";
 
 type UseConversationRealtimeOptions = {
   currentUserId: string | null;
   onRequestsChanged: () => void;
   onConversationDataChanged: () => void;
   onMessageInserted: (message: ChatMessage) => void;
+  onMessageReactionChanged: (change: MessageReactionRealtimeChange) => void;
   onParticipantReceiptUpdated: (receipt: ParticipantReceiptCursor) => void;
   onProfileLastSeenUpdated: (profile: RealtimeProfileLastSeenEvent) => void;
   onOpenConversationMessagesChanged: () => void;
@@ -58,18 +59,37 @@ function parseProfileLastSeen(value: unknown): RealtimeProfileLastSeenEvent | nu
   return { profileId: row.id, lastSeenAt: row.last_seen_at };
 }
 
-function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
-  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged });
+function parseInsertedMessageReaction(value: unknown): MessageReaction | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || typeof row.message_id !== "string" || typeof row.user_id !== "string" || typeof row.emoji !== "string") return null;
+  return { id: row.id, messageId: row.message_id, userId: row.user_id, emoji: row.emoji, createdAt: typeof row.created_at === "string" ? row.created_at : "" };
+}
+
+function parseDeletedMessageReaction(value: unknown): MessageReactionDeleteIdentity | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = typeof row.id === "string" && row.id ? row.id : null;
+  const messageId = typeof row.message_id === "string" && row.message_id ? row.message_id : null;
+  const userId = typeof row.user_id === "string" && row.user_id ? row.user_id : null;
+  const emoji = typeof row.emoji === "string" && row.emoji ? row.emoji : null;
+  const hasCompleteTuple = Boolean(messageId && userId && emoji);
+  return id || hasCompleteTuple ? { id, messageId, userId, emoji } : null;
+}
+
+function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
+  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged });
 
   useEffect(() => {
-    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged };
-  }, [onConversationDataChanged, onMessageInserted, onOpenConversationMessagesChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onRequestsChanged]);
+    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged };
+  }, [onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onOpenConversationMessagesChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onRequestsChanged]);
 
   useEffect(() => {
     if (!currentUserId) return;
 
     let debounceTimer: ReturnType<typeof window.setTimeout> | null = null;
     let hasSubscribed = false;
+    let hasWarnedAboutReactionDeleteIdentity = false;
     let isCleaningUp = false;
     const pendingInvalidations: InvalidationState = { requests: false, conversationData: false, openConversationMessages: false };
 
@@ -129,6 +149,21 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, () => {
         scheduleInvalidation({ conversationData: true, openConversationMessages: true });
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reactions" }, (payload) => {
+        const reaction = parseInsertedMessageReaction(payload.new);
+        if (reaction) callbacksRef.current.onMessageReactionChanged({ action: "insert", reaction });
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_reactions" }, (payload) => {
+        const reaction = parseDeletedMessageReaction(payload.old);
+        if (reaction) {
+          callbacksRef.current.onMessageReactionChanged({ action: "delete", reaction });
+          return;
+        }
+        if (!hasWarnedAboutReactionDeleteIdentity && import.meta.env.DEV) {
+          hasWarnedAboutReactionDeleteIdentity = true;
+          console.warn("Nemissive received a reaction DELETE event without enough identity to reconcile it.");
+        }
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
         const profile = parseProfileLastSeen(payload.new);
