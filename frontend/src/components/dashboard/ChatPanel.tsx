@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageReaction, MessageReactionDeleteIdentity, OptimisticChatMessage, ParticipantReceiptCursor, RealtimeChatMessageEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
+import type { ChatMessage, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, OptimisticChatMessage, ParticipantReceiptCursor, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
 import AnchoredPopover from "./AnchoredPopover";
 import EmojiPicker from "./EmojiPicker";
+import MessageActionSheet from "./MessageActionSheet";
 import PresenceAvatar from "./PresenceAvatar";
 import ProfileAvatar from "./ProfileAvatar";
 import { getEmojiLabel } from "./emojiData";
@@ -17,7 +18,9 @@ type MessageRow = {
   sender_id: string;
   body: string;
   created_at: string;
+  edited_at: string | null;
   source_request_id: string | null;
+  reply_to_message_id: string | null;
 };
 
 type ParticipantRow = {
@@ -34,12 +37,36 @@ type ReactionRow = {
   created_at: string;
 };
 
+type MessageEditState = {
+  messageId: string;
+  draft: string;
+  isSaving: boolean;
+  error: string;
+};
+
+type PendingMessageEdit = {
+  messageId: string;
+  attemptedBody: string;
+  previousMessage: ChatMessage;
+  confirmedMessage: ChatMessage | null;
+  deferredMessage: ChatMessage | null;
+};
+
+type MobileLongPressState = {
+  messageId: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  returnFocusElement: HTMLElement;
+};
+
 type ChatPanelProps = {
   chatState: DashboardChatState | null;
   currentUserId: string | null;
   isMobileVisible: boolean;
   realtimeRefreshKey: number;
   realtimeMessageEvents: RealtimeChatMessageEvent[];
+  realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[];
   realtimeReactionEvents: RealtimeMessageReactionEvent[];
   realtimeReceiptEvents: RealtimeParticipantReceiptEvent[];
   onlineUserIds: ReadonlySet<string>;
@@ -47,6 +74,7 @@ type ChatPanelProps = {
   onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void;
   onConversationRead: (conversationId: string, messageCreatedAt: string) => void;
   onMessageConfirmed: () => void;
+  onMessageEdited: (message: ChatMessage) => void;
   onStartConversation: () => void;
   onMobileBack: () => void;
 };
@@ -57,8 +85,12 @@ const characterCountThreshold = 200;
 const nearBottomThreshold = 140;
 const comingSoonMessageDurationMs = 3000;
 const readAcknowledgementDebounceMs = 280;
+const replyPreviewMaxLength = 120;
+const replyHighlightDurationMs = 1400;
+const mobileLongPressDurationMs = 450;
+const mobileLongPressMovementThreshold = 12;
 
-function mapMessageRow(row: MessageRow): ChatMessage {
+function mapMessageRow(row: MessageRow, replyPreview: MessageReplyPreview | null = null): ChatMessage {
   return {
     kind: "confirmed",
     id: row.id,
@@ -66,8 +98,61 @@ function mapMessageRow(row: MessageRow): ChatMessage {
     senderId: row.sender_id,
     body: row.body,
     createdAt: row.created_at,
+    editedAt: row.edited_at,
     isIntroduction: Boolean(row.source_request_id),
+    replyToMessageId: row.reply_to_message_id,
+    replyPreview,
   };
+}
+
+function normalizeReplyPreviewBody(body: string) {
+  const normalizedBody = body.replace(/\s+/g, " ").trim();
+  if (normalizedBody.length <= replyPreviewMaxLength) return normalizedBody;
+  return `${normalizedBody.slice(0, replyPreviewMaxLength - 1).trimEnd()}…`;
+}
+
+function createReplyPreview(message: Pick<ChatMessage, "id" | "senderId" | "body">, currentUserId: string | null, otherName: string): MessageReplyPreview {
+  return {
+    id: message.id,
+    senderId: message.senderId,
+    senderName: message.senderId === currentUserId ? "You" : otherName,
+    body: normalizeReplyPreviewBody(message.body),
+    unavailable: false,
+  };
+}
+
+function createUnavailableReplyPreview(replyToMessageId: string): MessageReplyPreview {
+  return { id: replyToMessageId, senderId: "", senderName: "Original message", body: null, unavailable: true };
+}
+
+function attachReplyPreview(message: ChatMessage, target: ChatMessage | undefined, currentUserId: string | null, otherName: string) {
+  if (!message.replyToMessageId) return message;
+  return { ...message, replyPreview: target ? createReplyPreview(target, currentUserId, otherName) : message.replyPreview ?? createUnavailableReplyPreview(message.replyToMessageId) };
+}
+
+function getEditedTimestamp(message: Pick<ChatMessage, "editedAt">) {
+  if (!message.editedAt) return null;
+  const timestamp = Date.parse(message.editedAt);
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function shouldApplyAuthoritativeEdit(currentMessage: ChatMessage | undefined, incomingMessage: ChatMessage) {
+  if (!currentMessage) return true;
+  const currentTimestamp = getEditedTimestamp(currentMessage);
+  const incomingTimestamp = getEditedTimestamp(incomingMessage);
+  if (incomingTimestamp === null) return currentTimestamp === null && currentMessage.body === incomingMessage.body;
+  if (currentTimestamp === null) return true;
+  if (incomingTimestamp !== currentTimestamp) return incomingTimestamp > currentTimestamp;
+  return currentMessage.body === incomingMessage.body;
+}
+
+function patchEditedMessageAndReplies(messages: DisplayChatMessage[], editedMessage: ChatMessage, currentUserId: string | null, otherName: string) {
+  const replyPreview = createReplyPreview(editedMessage, currentUserId, otherName);
+  return messages.map((message) => {
+    if (message.kind === "confirmed" && message.id === editedMessage.id) return { ...message, body: editedMessage.body, editedAt: editedMessage.editedAt };
+    if (message.replyToMessageId === editedMessage.id) return { ...message, replyPreview };
+    return message;
+  });
 }
 
 function getMessageKey(message: DisplayChatMessage) {
@@ -187,6 +272,14 @@ function ReactionIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M9 10h.01M15 10h.01M8.5 14.5c1 1.2 2.1 1.8 3.5 1.8s2.5-.6 3.5-1.8M18.5 4.5v4M16.5 6.5h4" strokeLinecap="round" /></svg>;
 }
 
+function ReplyIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m10 8-5 4 5 4" strokeLinecap="round" strokeLinejoin="round" /><path d="M6 12h6.5c3.6 0 5.5 1.8 5.5 5" strokeLinecap="round" /></svg>;
+}
+
+function EditIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m5 15.5-.8 4.3 4.3-.8L18 9.5 14.5 6 5 15.5Z" strokeLinecap="round" strokeLinejoin="round" /><path d="m12.8 7.7 3.5 3.5" strokeLinecap="round" /></svg>;
+}
+
 function QuickReactionMenu({ anchorRef, quickReactions, messageLabel, onClose, onOpenPicker, onSelect }: { anchorRef: RefObject<HTMLElement | null>; quickReactions: string[]; messageLabel: string; onClose: () => void; onOpenPicker: () => void; onSelect: (emoji: string) => void }) {
   return (
     <AnchoredPopover anchorRef={anchorRef} ariaLabel={`Quick reactions for ${messageLabel}`} onClose={onClose} placement="top" panelClassName="max-w-[calc(100vw-1rem)] rounded-2xl border border-border bg-surface p-1.5 shadow-soft">
@@ -210,28 +303,48 @@ function TypingIndicator({ isVisible, name, shouldReduceMotion }: { isVisible: b
   );
 }
 
-function AcceptedConversationPanel({ conversation, currentUserId, compactVisibilitySignal, realtimeRefreshKey, realtimeMessageEvents, realtimeReactionEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMobileBack }: { conversation: SelectedConversation; currentUserId: string | null; compactVisibilitySignal: boolean; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMobileBack: () => void }) {
+function ReplyQuote({ preview, isStrongOutgoing, canJump, onJump }: { preview: MessageReplyPreview; isStrongOutgoing: boolean; canJump: boolean; onJump: () => void }) {
+  const content = <><span className={`block truncate text-xs font-semibold ${isStrongOutgoing ? "text-white" : "text-heading"}`}>{preview.senderName}</span><span className={`mt-0.5 block break-words text-xs leading-5 ${isStrongOutgoing ? "text-white/80" : "text-body"}`}>{preview.unavailable ? "Original message unavailable" : preview.body}</span></>;
+  const className = `mb-2 block w-full min-w-0 rounded-xl border-l-2 px-3 py-2 text-left ${isStrongOutgoing ? "border-white/60 bg-background/10" : "border-primary/40 bg-background"}`;
+
+  if (canJump) return <button type="button" onClick={onJump} aria-label={`Jump to original message from ${preview.senderName}`} className={`${className} transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30`}>{content}</button>;
+  return <div aria-label={`Reply to ${preview.senderName}: ${preview.unavailable ? "Original message unavailable" : preview.body ?? ""}`} className={className}>{content}</div>;
+}
+
+function AcceptedConversationPanel({ conversation, currentUserId, compactVisibilitySignal, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageEdited, onMobileBack }: { conversation: SelectedConversation; currentUserId: string | null; compactVisibilitySignal: boolean; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageEdited: (message: ChatMessage) => void; onMobileBack: () => void }) {
   const shouldReduceMotion = useReducedMotion();
   const latestLoadRef = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const editTriggerRef = useRef<HTMLElement | null>(null);
   const comingSoonTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const readAcknowledgementTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const reactionErrorTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const replyHighlightTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const mobileLongPressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const mobileLongPressStateRef = useRef<MobileLongPressState | null>(null);
+  const mobileActionReturnFocusRef = useRef<HTMLElement | null>(null);
   const hasLoadedMessagesRef = useRef(false);
   const isMountedRef = useRef(true);
   const isSubmittingRef = useRef(false);
-  const inFlightMessageRef = useRef<{ optimisticId: string; conversationId: string; body: string } | null>(null);
+  const pendingEditRef = useRef<PendingMessageEdit | null>(null);
+  const inFlightMessageRef = useRef<{ optimisticId: string; conversationId: string; body: string; replyToMessageId: string | null } | null>(null);
   const processedRealtimeSequenceRef = useRef(realtimeMessageEvents.at(-1)?.sequence ?? 0);
+  const processedMessageUpdateSequenceRef = useRef(realtimeMessageUpdateEvents.at(-1)?.sequence ?? 0);
   const processedReactionSequenceRef = useRef(realtimeReactionEvents.at(-1)?.sequence ?? 0);
   const processedReceiptSequenceRef = useRef(realtimeReceiptEvents.at(-1)?.sequence ?? 0);
   const realtimeSequenceByMessageIdRef = useRef(new Map<string, number>());
+  const messageUpdateSequenceByIdRef = useRef(new Map<string, number>());
   const reactionInsertSequenceByIdRef = useRef(new Map<string, number>());
   const reactionDeleteSequenceByIdRef = useRef(new Map<string, number>());
   const reactionDeleteSequenceByTupleRef = useRef(new Map<string, number>());
   const locallyConfirmedMessageIdsRef = useRef(new Set<string>());
   const pendingReactionKeysRef = useRef(new Set<string>());
+  const replyTargetCacheRef = useRef(new Map<string, ChatMessage>());
+  const replyTargetFetchesRef = useRef(new Map<string, Promise<void>>());
+  const messageElementsRef = useRef(new Map<string, HTMLElement>());
   const reactionAnchorRef = useRef<HTMLElement | null>(null);
   const composerEmojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const composerSelectionRef = useRef({ start: 0, end: 0 });
@@ -250,6 +363,11 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   const [quickReactionMessageId, setQuickReactionMessageId] = useState<string | null>(null);
   const [fullReactionPickerMessageId, setFullReactionPickerMessageId] = useState<string | null>(null);
   const [isComposerEmojiPickerOpen, setIsComposerEmojiPickerOpen] = useState(false);
+  const [mobileActionMessageId, setMobileActionMessageId] = useState<string | null>(null);
+  const [mobileEmphasizedMessageId, setMobileEmphasizedMessageId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<MessageReplyPreview | null>(null);
+  const [messageEditState, setMessageEditState] = useState<MessageEditState | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [otherReceipt, setOtherReceipt] = useState<ParticipantReceiptCursor | null>(null);
   const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
   const otherName = getProfileDisplayName(conversation.otherProfile);
@@ -263,7 +381,20 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       if (comingSoonTimerRef.current !== null) window.clearTimeout(comingSoonTimerRef.current);
       if (readAcknowledgementTimerRef.current !== null) window.clearTimeout(readAcknowledgementTimerRef.current);
       if (reactionErrorTimerRef.current !== null) window.clearTimeout(reactionErrorTimerRef.current);
+      if (replyHighlightTimerRef.current !== null) window.clearTimeout(replyHighlightTimerRef.current);
+      if (mobileLongPressTimerRef.current !== null) window.clearTimeout(mobileLongPressTimerRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    function handleSelectionChange() {
+      if (!window.getSelection()?.toString()) return;
+      if (mobileLongPressTimerRef.current !== null) window.clearTimeout(mobileLongPressTimerRef.current);
+      mobileLongPressTimerRef.current = null;
+      mobileLongPressStateRef.current = null;
+    }
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, []);
 
   useEffect(() => {
@@ -271,6 +402,18 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     const timer = window.setInterval(() => setRelativeTimeNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, [conversation.otherProfile.last_seen_at, isOtherUserOnline]);
+
+  useEffect(() => {
+    if (!messageEditState?.messageId || messageEditState.isSaving) return;
+    const frame = window.requestAnimationFrame(() => {
+      const textarea = editTextareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      resizeTextarea(textarea);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [messageEditState?.isSaving, messageEditState?.messageId]);
 
   const isNearBottom = useCallback(() => {
     const viewport = scrollViewportRef.current;
@@ -286,9 +429,34 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     });
   }, [shouldReduceMotion]);
 
+  const loadReplyTarget = useCallback((replyToMessageId: string) => {
+    if (replyTargetCacheRef.current.has(replyToMessageId) || replyTargetFetchesRef.current.has(replyToMessageId)) return;
+
+    const request = (async () => {
+      const { data, error } = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").eq("id", replyToMessageId).eq("conversation_id", conversation.id).maybeSingle();
+      if (!isMountedRef.current) return;
+      if (error || !data) {
+        if (error && import.meta.env.DEV) console.warn("Loading a realtime reply target failed", { conversationId: conversation.id, code: error.code });
+        return;
+      }
+
+      const target = mapMessageRow(data as MessageRow);
+      replyTargetCacheRef.current.set(target.id, target);
+      setMessages((currentMessages) => currentMessages.map((message) => {
+        if (message.replyToMessageId !== target.id) return message;
+        return { ...message, replyPreview: createReplyPreview(target, currentUserId, otherName) };
+      }));
+    })().finally(() => {
+      replyTargetFetchesRef.current.delete(replyToMessageId);
+    });
+
+    replyTargetFetchesRef.current.set(replyToMessageId, request);
+  }, [conversation.id, currentUserId, otherName]);
+
   useEffect(() => {
     const loadId = ++latestLoadRef.current;
     const loadStartRealtimeSequence = processedRealtimeSequenceRef.current;
+    const loadStartMessageUpdateSequence = processedMessageUpdateSequenceRef.current;
     const loadStartReactionSequence = processedReactionSequenceRef.current;
     const abortController = new AbortController();
     let isCancelled = false;
@@ -296,8 +464,8 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     async function loadMessages() {
       const shouldScrollAfterLoad = !hasLoadedMessagesRef.current || isNearBottom();
       const [historyResult, introductionResult, participantResult] = await Promise.all([
-        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, source_request_id").eq("conversation_id", conversation.id).order("created_at", { ascending: false }).limit(initialMessageLimit).abortSignal(abortController.signal),
-        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, source_request_id").eq("conversation_id", conversation.id).not("source_request_id", "is", null).order("created_at", { ascending: true }).limit(1).abortSignal(abortController.signal),
+        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).order("created_at", { ascending: false }).limit(initialMessageLimit).abortSignal(abortController.signal),
+        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).not("source_request_id", "is", null).order("created_at", { ascending: true }).limit(1).abortSignal(abortController.signal),
         supabase.from("conversation_participants").select("user_id, last_delivered_at, last_read_at").eq("conversation_id", conversation.id).abortSignal(abortController.signal),
       ]);
 
@@ -311,7 +479,23 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       }
 
       const serverRowsById = new Map([...(historyResult.data ?? []), ...(introductionResult.data ?? [])].map((row) => [row.id, row as MessageRow]));
-      const serverMessages = [...serverRowsById.values()].map(mapMessageRow).sort((first, second) => Date.parse(first.createdAt) - Date.parse(second.createdAt));
+      const baseServerMessages = [...serverRowsById.values()].map((row) => mapMessageRow(row));
+      const replyTargetById = new Map(baseServerMessages.map((message) => [message.id, message]));
+      const replyTargetIds = [...new Set(baseServerMessages.flatMap((message) => message.replyToMessageId ? [message.replyToMessageId] : []))];
+      const missingReplyTargetIds = replyTargetIds.filter((messageId) => !replyTargetById.has(messageId));
+
+      if (missingReplyTargetIds.length > 0) {
+        const replyTargetsResult = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).in("id", missingReplyTargetIds).abortSignal(abortController.signal);
+        if (isCancelled || loadId !== latestLoadRef.current) return;
+        if (replyTargetsResult.error) {
+          if (import.meta.env.DEV) console.warn("Loading reply targets failed", { conversationId: conversation.id, code: replyTargetsResult.error.code });
+        } else {
+          ((replyTargetsResult.data ?? []) as MessageRow[]).map((row) => mapMessageRow(row)).forEach((message) => replyTargetById.set(message.id, message));
+        }
+      }
+
+      replyTargetById.forEach((message, messageId) => replyTargetCacheRef.current.set(messageId, message));
+      const serverMessages = baseServerMessages.map((message) => attachReplyPreview(message, message.replyToMessageId ? replyTargetById.get(message.replyToMessageId) : undefined, currentUserId, otherName)).sort((first, second) => Date.parse(first.createdAt) - Date.parse(second.createdAt));
       let serverReactions: MessageReaction[] = [];
       const messageIds = [...serverRowsById.keys()];
       if (messageIds.length > 0) {
@@ -342,7 +526,20 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
           return realtimeSequence > loadStartRealtimeSequence || locallyConfirmedMessageIdsRef.current.has(message.id);
         });
         const confirmedById = new Map([...serverMessages, ...confirmedDuringLoad].map((message) => [message.id, message]));
-        return sortMessages([...confirmedById.values(), ...optimisticMessages]);
+        currentMessages.forEach((message) => {
+          if (message.kind !== "confirmed" || !confirmedById.has(message.id)) return;
+          const serverMessage = confirmedById.get(message.id);
+          const updatedDuringLoad = (messageUpdateSequenceByIdRef.current.get(message.id) ?? 0) > loadStartMessageUpdateSequence;
+          const hasPendingEdit = pendingEditRef.current?.messageId === message.id;
+          if (updatedDuringLoad || hasPendingEdit || (serverMessage && shouldApplyAuthoritativeEdit(serverMessage, message))) confirmedById.set(message.id, message);
+        });
+        confirmedById.forEach((message, messageId) => replyTargetCacheRef.current.set(messageId, message));
+        const hydratedMessages = [...confirmedById.values(), ...optimisticMessages].map((message) => {
+          if (!message.replyToMessageId) return message;
+          const target = confirmedById.get(message.replyToMessageId) ?? replyTargetCacheRef.current.get(message.replyToMessageId);
+          return target ? { ...message, replyPreview: createReplyPreview(target, currentUserId, otherName) } : message;
+        });
+        return sortMessages(hydratedMessages);
       });
       setReactions((currentReactions) => {
         const optimisticReactions = currentReactions.filter((reaction) => reaction.id.startsWith("optimistic:"));
@@ -365,7 +562,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       isCancelled = true;
       abortController.abort();
     };
-  }, [conversation.id, currentUserId, isNearBottom, onIncomingMessagesSynchronized, realtimeRefreshKey, retryKey, scrollToLatest]);
+  }, [conversation.id, currentUserId, isNearBottom, onIncomingMessagesSynchronized, otherName, realtimeRefreshKey, retryKey, scrollToLatest]);
 
   useEffect(() => {
     const newEvents = realtimeMessageEvents.filter((event) => event.sequence > processedRealtimeSequenceRef.current);
@@ -377,20 +574,29 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
 
     const shouldAutoScroll = isNearBottom();
     const receivedIncomingMessage = relevantEvents.some((event) => event.message.senderId !== currentUserId);
+    relevantEvents.forEach((event) => replyTargetCacheRef.current.set(event.message.id, event.message));
 
     setMessages((currentMessages) => {
       let nextMessages = currentMessages;
 
       relevantEvents.forEach((event) => {
-        const message = event.message;
+        const incomingMessage = event.message;
+        const message = attachReplyPreview(incomingMessage, incomingMessage.replyToMessageId ? replyTargetCacheRef.current.get(incomingMessage.replyToMessageId) : undefined, currentUserId, otherName);
         realtimeSequenceByMessageIdRef.current.set(message.id, event.sequence);
         const inFlightMessage = inFlightMessageRef.current;
-        const matchingOptimisticMessage = nextMessages.find((item): item is OptimisticChatMessage => item.kind === "optimistic" && item.senderId === message.senderId && item.body === message.body && (item.deliveryState === "sending" || item.deliveryState === "failed"));
-        const optimisticId = message.senderId === currentUserId && inFlightMessage?.conversationId === message.conversationId && inFlightMessage.body === message.body ? inFlightMessage.optimisticId : message.senderId === currentUserId ? matchingOptimisticMessage?.optimisticId : undefined;
+        const matchingOptimisticMessage = nextMessages.find((item): item is OptimisticChatMessage => item.kind === "optimistic" && item.senderId === message.senderId && item.body === message.body && item.replyToMessageId === message.replyToMessageId && (item.deliveryState === "sending" || item.deliveryState === "failed"));
+        const optimisticId = message.senderId === currentUserId && inFlightMessage?.conversationId === message.conversationId && inFlightMessage.body === message.body && inFlightMessage.replyToMessageId === message.replyToMessageId ? inFlightMessage.optimisticId : message.senderId === currentUserId ? matchingOptimisticMessage?.optimisticId : undefined;
         nextMessages = reconcileConfirmedMessage(nextMessages, message, optimisticId);
+        const newTargetPreview = createReplyPreview(message, currentUserId, otherName);
+        nextMessages = nextMessages.map((item) => item.replyToMessageId === message.id ? { ...item, replyPreview: newTargetPreview } : item);
       });
 
       return nextMessages;
+    });
+
+    relevantEvents.forEach((event) => {
+      const replyToMessageId = event.message.replyToMessageId;
+      if (replyToMessageId && !replyTargetCacheRef.current.has(replyToMessageId)) loadReplyTarget(replyToMessageId);
     });
 
     if (receivedIncomingMessage) {
@@ -398,7 +604,36 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       if (shouldAutoScroll) scrollToLatest("auto");
       else setShowJumpToLatest(true);
     }
-  }, [conversation.id, currentUserId, isNearBottom, otherName, realtimeMessageEvents, scrollToLatest]);
+  }, [conversation.id, currentUserId, isNearBottom, loadReplyTarget, otherName, realtimeMessageEvents, scrollToLatest]);
+
+  useEffect(() => {
+    const newEvents = realtimeMessageUpdateEvents.filter((event) => event.sequence > processedMessageUpdateSequenceRef.current).sort((first, second) => first.sequence - second.sequence);
+    if (newEvents.length === 0) return;
+    processedMessageUpdateSequenceRef.current = newEvents[newEvents.length - 1]?.sequence ?? processedMessageUpdateSequenceRef.current;
+    const relevantEvents = newEvents.filter((event) => event.message.conversationId === conversation.id);
+    if (relevantEvents.length === 0) return;
+
+    setMessages((currentMessages) => {
+      let nextMessages = currentMessages;
+      relevantEvents.forEach((event) => {
+        const incomingMessage = event.message;
+        const pendingEdit = pendingEditRef.current;
+        if (pendingEdit?.messageId === incomingMessage.id && incomingMessage.body !== pendingEdit.attemptedBody) {
+          const deferredMessage = pendingEdit.deferredMessage;
+          if (shouldApplyAuthoritativeEdit(deferredMessage ?? pendingEdit.previousMessage, incomingMessage)) pendingEdit.deferredMessage = incomingMessage;
+          return;
+        }
+        const currentMessage = nextMessages.find((message): message is ChatMessage => message.kind === "confirmed" && message.id === incomingMessage.id) ?? replyTargetCacheRef.current.get(incomingMessage.id);
+        if (!shouldApplyAuthoritativeEdit(currentMessage, incomingMessage) && incomingMessage.body !== pendingEdit?.attemptedBody) return;
+        const normalizedMessage = { ...incomingMessage, replyPreview: currentMessage?.replyPreview ?? incomingMessage.replyPreview };
+        if (pendingEdit?.messageId === incomingMessage.id && incomingMessage.body === pendingEdit.attemptedBody) pendingEdit.confirmedMessage = normalizedMessage;
+        messageUpdateSequenceByIdRef.current.set(incomingMessage.id, event.sequence);
+        replyTargetCacheRef.current.set(incomingMessage.id, normalizedMessage);
+        nextMessages = patchEditedMessageAndReplies(nextMessages, normalizedMessage, currentUserId, otherName);
+      });
+      return nextMessages;
+    });
+  }, [conversation.id, currentUserId, otherName, realtimeMessageUpdateEvents]);
 
   useEffect(() => {
     const newEvents = realtimeReactionEvents.filter((event) => event.sequence > processedReactionSequenceRef.current).sort((first, second) => first.sequence - second.sequence);
@@ -505,7 +740,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
   }
 
-  async function submitMessage(body: string, existingOptimisticId?: string) {
+  async function submitMessage(body: string, existingOptimisticId?: string, retryReplyTarget?: MessageReplyPreview | null, retryReplyToMessageId?: string | null) {
     if (!currentUserId || isSubmittingRef.current) return;
 
     const trimmedBody = body.trim();
@@ -513,6 +748,8 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     stopTyping();
 
     const optimisticId = existingOptimisticId ?? createOptimisticId();
+    const replyTarget = existingOptimisticId ? retryReplyTarget ?? null : replyingTo;
+    const replyToMessageId = existingOptimisticId ? retryReplyToMessageId ?? replyTarget?.id ?? null : replyTarget?.id ?? null;
     const optimisticMessage: OptimisticChatMessage = {
       kind: "optimistic",
       optimisticId,
@@ -521,10 +758,12 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       body: trimmedBody,
       createdAt: new Date().toISOString(),
       deliveryState: "sending",
+      replyToMessageId,
+      replyPreview: replyTarget,
     };
 
     isSubmittingRef.current = true;
-    inFlightMessageRef.current = { optimisticId, conversationId: conversation.id, body: trimmedBody };
+    inFlightMessageRef.current = { optimisticId, conversationId: conversation.id, body: trimmedBody, replyToMessageId };
     setIsSubmitting(true);
     setMessages((currentMessages) => {
       const withoutExistingOptimistic = currentMessages.filter((message) => message.kind === "confirmed" || message.optimisticId !== optimisticId);
@@ -538,7 +777,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     setShowJumpToLatest(false);
     scrollToLatest("smooth");
 
-    const { data, error } = await supabase.from("messages").insert({ conversation_id: conversation.id, sender_id: currentUserId, body: trimmedBody }).select("id, conversation_id, sender_id, body, created_at, source_request_id").single();
+    const { data, error } = await supabase.from("messages").insert({ conversation_id: conversation.id, sender_id: currentUserId, body: trimmedBody, reply_to_message_id: replyToMessageId }).select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").single();
 
     if (error || !data) {
       if (isMountedRef.current) {
@@ -551,11 +790,12 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       return;
     }
 
-    const confirmedMessage = mapMessageRow(data as MessageRow);
+    const confirmedMessage = mapMessageRow(data as MessageRow, replyTarget ?? (replyToMessageId ? createUnavailableReplyPreview(replyToMessageId) : null));
     locallyConfirmedMessageIdsRef.current.add(confirmedMessage.id);
     if (isMountedRef.current) {
       setMessages((currentMessages) => reconcileConfirmedMessage(currentMessages, confirmedMessage, optimisticId));
       setIsSubmitting(false);
+      if (replyTarget) setReplyingTo((currentTarget) => currentTarget?.id === replyTarget.id ? null : currentTarget);
       window.requestAnimationFrame(() => textareaRef.current?.focus());
     }
     isSubmittingRef.current = false;
@@ -565,24 +805,79 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
 
   function handleSend(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault();
+    if (messageEditState) return;
     void submitMessage(draft);
   }
 
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape" && replyingTo && !isComposerEmojiPickerOpen && !quickReactionMessageId && !fullReactionPickerMessageId) {
+      event.preventDefault();
+      setReplyingTo(null);
+      return;
+    }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     if (!isSubmittingRef.current) handleSend();
   }
 
   function handleRetryMessage(message: OptimisticChatMessage) {
-    void submitMessage(message.body, message.optimisticId);
+    void submitMessage(message.body, message.optimisticId, message.replyPreview, message.replyToMessageId);
   }
 
   function handleRemoveFailedMessage(optimisticId: string) {
     setMessages((currentMessages) => currentMessages.filter((message) => message.kind === "confirmed" || message.optimisticId !== optimisticId));
   }
 
+  function cancelMobileLongPress() {
+    if (mobileLongPressTimerRef.current !== null) window.clearTimeout(mobileLongPressTimerRef.current);
+    mobileLongPressTimerRef.current = null;
+    mobileLongPressStateRef.current = null;
+  }
+
+  function openMobileActionSheet(messageId: string, returnFocusElement: HTMLElement) {
+    cancelMobileLongPress();
+    mobileActionReturnFocusRef.current = returnFocusElement;
+    reactionAnchorRef.current = returnFocusElement;
+    setQuickReactionMessageId(null);
+    setFullReactionPickerMessageId(null);
+    setMobileEmphasizedMessageId(messageId);
+    setMobileActionMessageId(messageId);
+  }
+
+  function handleMessagePointerDown(message: ChatMessage, event: React.PointerEvent<HTMLElement>) {
+    if (event.pointerType !== "touch" || !event.isPrimary || event.button !== 0 || window.matchMedia("(min-width: 768px)").matches) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest("button, a, input, textarea, select, [role='button']")) return;
+    if (window.getSelection()?.toString()) return;
+
+    cancelMobileLongPress();
+    const pointerId = event.pointerId;
+    const returnFocusElement = event.currentTarget;
+    mobileLongPressStateRef.current = { messageId: message.id, pointerId, startX: event.clientX, startY: event.clientY, returnFocusElement };
+    mobileLongPressTimerRef.current = window.setTimeout(() => {
+      const pressState = mobileLongPressStateRef.current;
+      if (!pressState || pressState.pointerId !== pointerId || window.getSelection()?.toString()) {
+        cancelMobileLongPress();
+        return;
+      }
+      openMobileActionSheet(pressState.messageId, pressState.returnFocusElement);
+    }, mobileLongPressDurationMs);
+  }
+
+  function handleMessagePointerMove(event: React.PointerEvent<HTMLElement>) {
+    const pressState = mobileLongPressStateRef.current;
+    if (!pressState || pressState.pointerId !== event.pointerId) return;
+    const movedX = Math.abs(event.clientX - pressState.startX);
+    const movedY = Math.abs(event.clientY - pressState.startY);
+    if (movedX > mobileLongPressMovementThreshold || movedY > mobileLongPressMovementThreshold) cancelMobileLongPress();
+  }
+
+  function handleMessagePointerEnd(event: React.PointerEvent<HTMLElement>) {
+    if (mobileLongPressStateRef.current?.pointerId === event.pointerId) cancelMobileLongPress();
+  }
+
   function handleScroll() {
+    cancelMobileLongPress();
     if (isNearBottom()) setShowJumpToLatest(false);
   }
 
@@ -680,15 +975,128 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     }, comingSoonMessageDurationMs);
   }
 
+  function finishMessageEditing() {
+    setMessageEditState(null);
+    window.requestAnimationFrame(() => editTriggerRef.current?.focus());
+  }
+
+  function startEditingMessage(message: ChatMessage, trigger: HTMLElement) {
+    if (message.senderId !== currentUserId || message.isIntroduction || pendingEditRef.current) return;
+    editTriggerRef.current = trigger;
+    setQuickReactionMessageId(null);
+    setFullReactionPickerMessageId(null);
+    setMessageEditState({ messageId: message.id, draft: message.body, isSaving: false, error: "" });
+  }
+
+  function cancelMessageEditing() {
+    if (messageEditState?.isSaving) return;
+    finishMessageEditing();
+  }
+
+  async function saveMessageEdit() {
+    if (!currentUserId || !messageEditState || messageEditState.isSaving || pendingEditRef.current) return;
+    const message = messages.find((item): item is ChatMessage => item.kind === "confirmed" && item.id === messageEditState.messageId);
+    if (!message || message.senderId !== currentUserId || message.isIntroduction) {
+      setMessageEditState((currentState) => currentState ? { ...currentState, error: "This message is no longer available for editing." } : currentState);
+      return;
+    }
+
+    const normalizedBody = messageEditState.draft.trim();
+    if (!normalizedBody) {
+      setMessageEditState((currentState) => currentState ? { ...currentState, error: "A message cannot be empty." } : currentState);
+      return;
+    }
+    if (normalizedBody.length > messageMaxLength) {
+      setMessageEditState((currentState) => currentState ? { ...currentState, error: "A message must be 2,000 characters or fewer." } : currentState);
+      return;
+    }
+    if (normalizedBody === message.body) {
+      finishMessageEditing();
+      return;
+    }
+
+    const optimisticMessage = { ...message, body: normalizedBody };
+    pendingEditRef.current = { messageId: message.id, attemptedBody: normalizedBody, previousMessage: message, confirmedMessage: null, deferredMessage: null };
+    replyTargetCacheRef.current.set(message.id, optimisticMessage);
+    setMessages((currentMessages) => patchEditedMessageAndReplies(currentMessages, optimisticMessage, currentUserId, otherName));
+    setMessageEditState((currentState) => currentState ? { ...currentState, isSaving: true, error: "" } : currentState);
+
+    const { data, error } = await supabase.rpc("edit_message", { target_message_id: message.id, new_body: normalizedBody }).single();
+    const pendingEdit = pendingEditRef.current;
+    if (!isMountedRef.current || pendingEdit?.messageId !== message.id) return;
+
+    if (error || !data) {
+      const realtimeMessage = pendingEdit.deferredMessage && shouldApplyAuthoritativeEdit(pendingEdit.confirmedMessage ?? pendingEdit.previousMessage, pendingEdit.deferredMessage) ? pendingEdit.deferredMessage : pendingEdit.confirmedMessage;
+      if (realtimeMessage) {
+        pendingEditRef.current = null;
+        replyTargetCacheRef.current.set(message.id, realtimeMessage);
+        setMessages((currentMessages) => patchEditedMessageAndReplies(currentMessages, realtimeMessage, currentUserId, otherName));
+        onMessageEdited(realtimeMessage);
+        finishMessageEditing();
+        return;
+      }
+
+      replyTargetCacheRef.current.set(message.id, pendingEdit.previousMessage);
+      setMessages((currentMessages) => patchEditedMessageAndReplies(currentMessages, pendingEdit.previousMessage, currentUserId, otherName));
+      pendingEditRef.current = null;
+      setMessageEditState((currentState) => currentState?.messageId === message.id ? { ...currentState, isSaving: false, error: "We couldn’t save that edit. Please try again." } : currentState);
+      if (import.meta.env.DEV) console.warn("Editing message failed", { messageId: message.id, code: error?.code });
+      return;
+    }
+
+    const rpcMessage = mapMessageRow(data as MessageRow, message.replyPreview);
+    const authoritativeMessage = pendingEdit.deferredMessage && shouldApplyAuthoritativeEdit(rpcMessage, pendingEdit.deferredMessage) ? pendingEdit.deferredMessage : rpcMessage;
+    pendingEditRef.current = null;
+    const cachedMessage = replyTargetCacheRef.current.get(message.id);
+    if (shouldApplyAuthoritativeEdit(cachedMessage, authoritativeMessage)) {
+      replyTargetCacheRef.current.set(message.id, authoritativeMessage);
+      setMessages((currentMessages) => patchEditedMessageAndReplies(currentMessages, authoritativeMessage, currentUserId, otherName));
+    }
+    onMessageEdited(authoritativeMessage);
+    finishMessageEditing();
+  }
+
+  function handleEditKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelMessageEditing();
+      return;
+    }
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    void saveMessageEdit();
+  }
+
+  function handleReplyToMessage(message: ChatMessage) {
+    setQuickReactionMessageId(null);
+    setFullReactionPickerMessageId(null);
+    setReplyingTo(createReplyPreview(message, currentUserId, otherName));
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  function jumpToOriginalMessage(messageId: string) {
+    const element = messageElementsRef.current.get(messageId);
+    if (!element) return;
+    element.scrollIntoView({ behavior: shouldReduceMotion ? "auto" : "smooth", block: "center" });
+    setHighlightedMessageId(messageId);
+    if (replyHighlightTimerRef.current !== null) window.clearTimeout(replyHighlightTimerRef.current);
+    replyHighlightTimerRef.current = window.setTimeout(() => {
+      setHighlightedMessageId((currentMessageId) => currentMessageId === messageId ? null : currentMessageId);
+      replyHighlightTimerRef.current = null;
+    }, replyHighlightDurationMs);
+  }
+
   const remainingCharacters = messageMaxLength - draft.length;
   const showCharacterCount = remainingCharacters <= characterCountThreshold;
-  const isSendDisabled = !currentUserId || !draft.trim() || isSubmitting || draft.length > messageMaxLength;
+  const isSendDisabled = !currentUserId || !draft.trim() || isSubmitting || Boolean(messageEditState) || draft.length > messageMaxLength;
   const shouldShowIntroductoryFallback = Boolean(conversation.introductoryMessage) && !messages.some((message) => message.kind === "confirmed" && message.isIntroduction);
   const newestDisplayedMessage = messages.at(-1);
   const statusMessageKey = newestDisplayedMessage?.senderId === currentUserId ? getMessageKey(newestDisplayedMessage) : null;
   const composerHelpId = `message-composer-help-${conversation.id}`;
   const characterCountId = `message-character-count-${conversation.id}`;
   const composerDescription = showCharacterCount ? `${composerHelpId} ${characterCountId}` : composerHelpId;
+  const loadedConfirmedMessageIds = new Set(messages.flatMap((message) => message.kind === "confirmed" ? [message.id] : []));
+  const mobileActionMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && message.id === mobileActionMessageId) ?? null;
 
   return (
     <div ref={panelRef} className="flex min-h-0 flex-1 flex-col">
@@ -715,21 +1123,29 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
                 const confirmedStatus = message.kind === "confirmed" ? getConfirmedMessageStatus(message, otherReceipt) : null;
                 const statusLabel = isSending ? "Sending…" : isFailed ? "Failed" : confirmedStatus === "seen" ? "Seen" : confirmedStatus === "delivered" ? "Delivered" : "Sent";
                 const reactionGroups = message.kind === "confirmed" ? groupMessageReactions(reactions, message.id, currentUserId) : [];
+                const replyPreview = message.replyPreview;
+                const canJumpToReplyTarget = Boolean(message.replyToMessageId && loadedConfirmedMessageIds.has(message.replyToMessageId));
+                const replyActionSenderName = isCurrentUser ? "yourself" : otherName;
+                const isEditingThisMessage = message.kind === "confirmed" && messageEditState?.messageId === message.id;
+                const isSavingThisEdit = Boolean(isEditingThisMessage && messageEditState?.isSaving);
+                const canEditMessage = message.kind === "confirmed" && isCurrentUser && !message.isIntroduction;
 
                 return (
-                  <article key={getMessageKey(message)} className={`group/message flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
+                  <article ref={(element) => { if (message.kind !== "confirmed") return; if (element) messageElementsRef.current.set(message.id, element); else messageElementsRef.current.delete(message.id); }} key={getMessageKey(message)} tabIndex={message.kind === "confirmed" ? -1 : undefined} onPointerDown={message.kind === "confirmed" ? (event) => handleMessagePointerDown(message, event) : undefined} onPointerMove={message.kind === "confirmed" ? handleMessagePointerMove : undefined} onPointerUp={message.kind === "confirmed" ? handleMessagePointerEnd : undefined} onPointerCancel={message.kind === "confirmed" ? handleMessagePointerEnd : undefined} onPointerLeave={message.kind === "confirmed" ? handleMessagePointerEnd : undefined} className={`group/message relative flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
                     <div className={`flex min-w-0 max-w-[92%] flex-col sm:max-w-[80%] ${isCurrentUser ? "items-end" : "items-start"}`}>
                       <div className={`flex min-w-0 items-center gap-1.5 ${isCurrentUser ? "flex-row-reverse" : ""}`}>
-                        <div className={`min-w-0 rounded-3xl px-4 py-3 shadow-soft ${isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"}`}>
-                          <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p>
-                          <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}</div>
+                        <motion.div animate={{ scale: message.kind === "confirmed" && mobileEmphasizedMessageId === message.id && !shouldReduceMotion ? 0.985 : 1 }} transition={{ duration: shouldReduceMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }} className={`min-w-0 rounded-3xl px-4 py-3 shadow-soft transition-shadow ${isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"} ${message.kind === "confirmed" && (highlightedMessageId === message.id || mobileEmphasizedMessageId === message.id) ? "ring-2 ring-primary/30 ring-offset-4 ring-offset-background" : ""}`}>
+                          {replyPreview && <ReplyQuote preview={replyPreview} isStrongOutgoing={isCurrentUser && !isFailed} canJump={canJumpToReplyTarget} onJump={() => message.replyToMessageId && jumpToOriginalMessage(message.replyToMessageId)} />}
+                          {isEditingThisMessage && messageEditState ? <div className="min-w-0"><label htmlFor={`edit-message-${message.id}`} className="sr-only">Edit your message</label><textarea ref={editTextareaRef} id={`edit-message-${message.id}`} value={messageEditState.draft} onChange={(event) => { const draft = event.target.value; setMessageEditState((currentState) => currentState?.messageId === message.id ? { ...currentState, draft, error: "" } : currentState); resizeTextarea(event.target); }} onKeyDown={handleEditKeyDown} rows={2} maxLength={messageMaxLength} disabled={messageEditState.isSaving} aria-describedby={messageEditState.error ? `edit-message-error-${message.id}` : undefined} className="max-h-32 min-h-20 w-full min-w-0 resize-none overflow-y-auto rounded-xl border border-border bg-surface px-3 py-2 text-sm leading-6 text-heading outline-none placeholder:text-muted focus:ring-2 focus:ring-primary/20 disabled:cursor-wait disabled:opacity-70" /><div className="mt-2 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => void saveMessageEdit()} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">{messageEditState.isSaving ? "Saving…" : "Save"}</button><button type="button" onClick={cancelMessageEditing} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-background/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-background/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">Cancel</button></div>{messageEditState.error && <p id={`edit-message-error-${message.id}`} role="alert" className="mt-2 text-xs leading-5 text-white">{messageEditState.error}</p>}</div> : <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p>}
+                          <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}{message.kind === "confirmed" && (message.editedAt || isSavingThisEdit) && <span>Edited</span>}</div>
                           {isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}
-                        </div>
-                        {message.kind === "confirmed" && <button type="button" onClick={(event) => openQuickReactions(message.id, event.currentTarget)} aria-label="React to this message" aria-haspopup="dialog" aria-expanded={quickReactionMessageId === message.id || fullReactionPickerMessageId === message.id} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted opacity-100 transition hover:bg-accent hover:text-heading focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100"><ReactionIcon /></button>}
+                        </motion.div>
+                        {message.kind === "confirmed" && <div className="hidden shrink-0 flex-col gap-1 transition md:flex md:opacity-0 md:group-hover/message:opacity-100 md:group-focus-within/message:opacity-100">{canEditMessage && <button type="button" onClick={(event) => startEditingMessage(message, event.currentTarget)} disabled={Boolean(messageEditState?.isSaving)} aria-label="Edit your message" title="Edit" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50"><EditIcon /></button>}<button type="button" onClick={() => handleReplyToMessage(message)} aria-label={`Reply to message from ${replyActionSenderName}`} title="Reply" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><ReplyIcon /></button><button type="button" onClick={(event) => openQuickReactions(message.id, event.currentTarget)} aria-label="React to this message" aria-haspopup="dialog" aria-expanded={quickReactionMessageId === message.id || fullReactionPickerMessageId === message.id} className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><ReactionIcon /></button></div>}
                       </div>
                       {reactionGroups.length > 0 && <div className={`mt-1.5 flex max-w-full flex-wrap gap-1 ${isCurrentUser ? "justify-end" : "justify-start"}`}>{reactionGroups.map((group) => { const peopleLabel = `${group.count} ${group.count === 1 ? "person" : "people"}`; const pendingKey = currentUserId ? getReactionTupleKey({ messageId: message.kind === "confirmed" ? message.id : "", userId: currentUserId, emoji: group.emoji }) : ""; return <button key={group.emoji} type="button" onClick={() => message.kind === "confirmed" && void toggleReaction(message.id, group.emoji)} disabled={!currentUserId || pendingReactionKeys.has(pendingKey)} aria-pressed={group.reactedByCurrentUser} aria-label={`${getEmojiLabel(group.emoji)} reaction, ${peopleLabel}${group.reactedByCurrentUser ? ", including you" : ""}`} className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-60 ${group.reactedByCurrentUser ? "border-primary/30 bg-accent text-heading" : "border-border bg-surface text-body hover:bg-accent"}`}><span aria-hidden="true" className="text-sm">{group.emoji}</span><span aria-hidden="true" className="font-semibold">{group.count}</span></button>; })}</div>}
                       {shouldShowStatus && <p role={isFailed ? "alert" : isSending ? "status" : undefined} className={`mt-1.5 px-1 text-right text-xs font-medium ${isFailed ? "text-primary" : "text-muted"}`}>{statusLabel}</p>}
                     </div>
+                    {message.kind === "confirmed" && <button type="button" onClick={(event) => openMobileActionSheet(message.id, event.currentTarget)} aria-label={`Open actions for message from ${replyActionSenderName}`} aria-haspopup="dialog" aria-expanded={mobileActionMessageId === message.id} className="pointer-events-none absolute right-0 top-0 z-10 flex h-9 w-9 items-center justify-center rounded-xl bg-surface text-muted opacity-0 shadow-soft transition focus:pointer-events-auto focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 md:hidden"><svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg></button>}
                   </article>
                 );
               })}
@@ -743,6 +1159,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       {reactionError && <p role="status" aria-live="polite" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{reactionError}</p>}
       <form onSubmit={handleSend} className="shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
         <TypingIndicator isVisible={isOtherUserTyping} name={otherName} shouldReduceMotion={shouldReduceMotion} />
+        {replyingTo && <div aria-label={`Replying to ${replyingTo.senderName}`} className="mb-2 flex min-w-0 items-start gap-3 rounded-2xl bg-surface px-4 py-3 shadow-soft"><div className="min-w-0 flex-1 border-l-2 border-primary/40 pl-3"><p className="truncate text-xs font-semibold text-heading">Replying to {replyingTo.senderName}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-body">{replyingTo.body ?? "Original message unavailable"}</p></div><button type="button" onClick={() => { setReplyingTo(null); window.requestAnimationFrame(() => textareaRef.current?.focus()); }} aria-label={`Cancel reply to ${replyingTo.senderName}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>}
         <label htmlFor={`message-composer-${conversation.id}`} className="sr-only">Message {otherName}</label>
         <div className="grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)_auto] items-end gap-x-2 rounded-2xl bg-surface px-3 py-3 shadow-soft focus-within:ring-2 focus-within:ring-primary/20 sm:gap-x-3 sm:px-4">
           <button type="button" onClick={() => showComingSoon("Media sharing is coming soon.")} aria-label="Add media — coming soon" title="Media sharing is coming soon" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 sm:h-11 sm:w-11"><MediaIcon /></button>
@@ -755,6 +1172,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
           </div>
         </div>
       </form>
+      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} onClose={() => setMobileActionMessageId(null)} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
       {quickReactionMessageId && <QuickReactionMenu anchorRef={reactionAnchorRef} quickReactions={quickReactions} messageLabel="this message" onSelect={(emoji) => void toggleReaction(quickReactionMessageId, emoji)} onClose={() => setQuickReactionMessageId(null)} onOpenPicker={() => setFullReactionPickerMessageId(quickReactionMessageId)} />}
       {fullReactionPickerMessageId && <EmojiPicker anchorRef={reactionAnchorRef} ariaLabel="Choose a message reaction" onSelect={(emoji) => void toggleReaction(fullReactionPickerMessageId, emoji)} onClose={() => setFullReactionPickerMessageId(null)} placement="top" />}
       {isComposerEmojiPickerOpen && <EmojiPicker anchorRef={composerEmojiButtonRef} ariaLabel="Insert an emoji into your message" onSelect={insertComposerEmoji} onClose={() => setIsComposerEmojiPickerOpen(false)} placement="top" />}
@@ -762,7 +1180,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   );
 }
 
-function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshKey, realtimeMessageEvents, realtimeReactionEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onStartConversation, onMobileBack }: ChatPanelProps) {
+function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageEdited, onStartConversation, onMobileBack }: ChatPanelProps) {
   const visibilityClasses = isMobileVisible ? "flex" : "hidden lg:flex";
 
   if (chatState?.kind === "pending") {
@@ -777,7 +1195,7 @@ function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshK
   }
 
   if (chatState?.kind === "accepted") {
-    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMobileBack={onMobileBack} /></main>;
+    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageEdited={onMessageEdited} onMobileBack={onMobileBack} /></main>;
   }
 
   return (

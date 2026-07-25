@@ -11,7 +11,7 @@ import useUserPresence from "../components/dashboard/useUserPresence";
 import { normalizeQuickReactions } from "../components/dashboard/emojiData";
 import { supabase } from "../lib/supabase";
 import type { DashboardSection } from "../types/dashboard";
-import type { ChatMessage, DashboardChatState, MessageReactionRealtimeChange, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileRelationship, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeMessageReactionEvent, RealtimeProfileLastSeenEvent, SelectedConversation } from "../types/conversations";
+import type { ChatMessage, DashboardChatState, MessageReactionRealtimeChange, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileRelationship, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeMessageReactionEvent, RealtimeProfileLastSeenEvent, SelectedConversation } from "../types/conversations";
 
 function DashboardPage() {
   const [activeSection, setActiveSection] = useState<DashboardSection>("messages");
@@ -20,8 +20,10 @@ function DashboardPage() {
   const [isCompactChatVisible, setIsCompactChatVisible] = useState(false);
   const [chatRealtimeRefreshKey, setChatRealtimeRefreshKey] = useState(0);
   const [realtimeMessageEvents, setRealtimeMessageEvents] = useState<RealtimeChatMessageEvent[]>([]);
+  const [realtimeMessageUpdateEvents, setRealtimeMessageUpdateEvents] = useState<RealtimeChatMessageUpdateEvent[]>([]);
   const [realtimeReactionEvents, setRealtimeReactionEvents] = useState<RealtimeMessageReactionEvent[]>([]);
   const realtimeMessageSequenceRef = useRef(0);
+  const realtimeMessageUpdateSequenceRef = useRef(0);
   const realtimeReactionSequenceRef = useRef(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentProfile, setCurrentProfile] = useState<ProfileSearchResult | null>(null);
@@ -78,6 +80,7 @@ function DashboardPage() {
   const { receiptEvents, currentUserReceiptsByConversationId, advanceDelivered, advanceRead, handleRealtimeReceipt } = receiptsController;
   const messagesController = useMessagesData({ currentUserId, isAccountResolved, currentUserReceiptsByConversationId, onIncomingMessageSynchronized: advanceDelivered });
   const mergeProfileLastSeen = messagesController.mergeProfileLastSeen;
+  const patchEditedMessagePreview = messagesController.patchEditedMessagePreview;
   const refreshMessages = messagesController.refresh;
   const refreshMessagesSilently = messagesController.refreshSilently;
   const requestsController = useMessageRequests({ currentUserId, isAccountResolved, onConversationReady: handleConversationReady, onRequestsChanged: refreshMessages });
@@ -96,6 +99,11 @@ function DashboardPage() {
     setRealtimeMessageEvents((currentEvents) => [...currentEvents.slice(-99), event]);
     if (currentUserId && message.senderId !== currentUserId) advanceDelivered(message.conversationId, message.createdAt);
   }, [advanceDelivered, currentUserId]);
+  const handleRealtimeMessageUpdated = useCallback((message: ChatMessage) => {
+    const event = { sequence: ++realtimeMessageUpdateSequenceRef.current, message };
+    setRealtimeMessageUpdateEvents((currentEvents) => [...currentEvents.slice(-99), event]);
+    patchEditedMessagePreview(message);
+  }, [patchEditedMessagePreview]);
   const handleRealtimeMessageReactionChanged = useCallback((change: MessageReactionRealtimeChange) => {
     const event = { sequence: ++realtimeReactionSequenceRef.current, ...change };
     setRealtimeReactionEvents((currentEvents) => [...currentEvents.slice(-199), event]);
@@ -112,6 +120,7 @@ function DashboardPage() {
     onRequestsChanged: handleRealtimeRequestsChanged,
     onConversationDataChanged: handleRealtimeConversationDataChanged,
     onMessageInserted: handleRealtimeMessageInserted,
+    onMessageUpdated: handleRealtimeMessageUpdated,
     onMessageReactionChanged: handleRealtimeMessageReactionChanged,
     onParticipantReceiptUpdated: handleRealtimeParticipantReceiptUpdated,
     onProfileLastSeenUpdated: handleRealtimeProfileLastSeenUpdated,
@@ -201,7 +210,7 @@ function DashboardPage() {
       <div className="flex h-screen w-full min-w-0 flex-col overflow-hidden bg-background md:flex-row">
         <NavigationRail activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} unreadMessageCount={messagesController.aggregateUnreadCount} isCompactChatVisible={effectiveCompactChatVisible} onSectionChange={handleSectionChange} />
         <Sidebar activeSection={activeSection} currentProfile={currentProfile} isAccountResolved={isAccountResolved} accountError={accountError} isCompactChatVisible={effectiveCompactChatVisible} requestsController={requestsController} messagesController={messagesController} chatState={resolvedChatState} onlineUserIds={presenceController.onlineUserIds} quickReactions={quickReactions} onSaveQuickReactions={saveQuickReactions} onBeforeSignOut={() => void presenceController.markLastSeenNow()} onNewConversation={openNewConversation} onPendingRequestSelected={handlePendingRequestSelected} onConversationReady={handleConversationReady} />
-        <ChatPanel chatState={resolvedChatState} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={receiptEvents} onlineUserIds={presenceController.onlineUserIds} quickReactions={quickReactions} onIncomingMessagesSynchronized={advanceDelivered} onConversationRead={advanceRead} onMessageConfirmed={refreshMessagesSilently} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
+        <ChatPanel chatState={resolvedChatState} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={receiptEvents} onlineUserIds={presenceController.onlineUserIds} quickReactions={quickReactions} onIncomingMessagesSynchronized={advanceDelivered} onConversationRead={advanceRead} onMessageConfirmed={refreshMessagesSilently} onMessageEdited={patchEditedMessagePreview} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
       </div>
 
       <NewConversationModal isOpen={isNewConversationOpen} currentUserId={currentUserId} isAccountResolved={isAccountResolved} accountError={accountError} relationshipsByProfileId={relationshipsByProfileId} isRelationshipsLoading={messagesController.isLoading || requestsController.isLoading} relationshipsError={messagesController.loadError || requestsController.loadError} onClose={() => setIsNewConversationOpen(false)} onConversationSelected={handleConversationReady} onPendingRequestSelected={handlePendingRequestSelected} onRequestCreated={handleRequestCreated} onOpenIncomingRequests={openMessageRequestsSection} onRefreshRelationships={refreshRelationships} />

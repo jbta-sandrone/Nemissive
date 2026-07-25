@@ -7,6 +7,7 @@ type UseConversationRealtimeOptions = {
   onRequestsChanged: () => void;
   onConversationDataChanged: () => void;
   onMessageInserted: (message: ChatMessage) => void;
+  onMessageUpdated: (message: ChatMessage) => void;
   onMessageReactionChanged: (change: MessageReactionRealtimeChange) => void;
   onParticipantReceiptUpdated: (receipt: ParticipantReceiptCursor) => void;
   onProfileLastSeenUpdated: (profile: RealtimeProfileLastSeenEvent) => void;
@@ -33,7 +34,10 @@ function parseRealtimeMessage(value: unknown): ChatMessage | null {
     senderId: row.sender_id,
     body: row.body,
     createdAt: row.created_at,
+    editedAt: typeof row.edited_at === "string" ? row.edited_at : null,
     isIntroduction: typeof row.source_request_id === "string",
+    replyToMessageId: typeof row.reply_to_message_id === "string" ? row.reply_to_message_id : null,
+    replyPreview: null,
   };
 }
 
@@ -77,12 +81,12 @@ function parseDeletedMessageReaction(value: unknown): MessageReactionDeleteIdent
   return id || hasCompleteTuple ? { id, messageId, userId, emoji } : null;
 }
 
-function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
-  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged });
+function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
+  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged });
 
   useEffect(() => {
-    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged };
-  }, [onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onOpenConversationMessagesChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onRequestsChanged]);
+    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged };
+  }, [onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onMessageUpdated, onOpenConversationMessagesChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onRequestsChanged]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -144,8 +148,10 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
         if (message) callbacksRef.current.onMessageInserted(message);
         scheduleInvalidation({ conversationData: true, openConversationMessages: !message });
       })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages" }, () => {
-        scheduleInvalidation({ conversationData: true, openConversationMessages: true });
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages" }, (payload) => {
+        const message = parseRealtimeMessage(payload.new);
+        if (message) callbacksRef.current.onMessageUpdated(message);
+        else scheduleInvalidation({ conversationData: true, openConversationMessages: true });
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, () => {
         scheduleInvalidation({ conversationData: true, openConversationMessages: true });

@@ -33,8 +33,10 @@ export type MessageSidebarItem =
       kind: "conversation";
       conversationId: string;
       otherProfile: ProfileSearchResult;
+      latestMessageId: string | null;
       latestMessage: string | null;
       latestMessageAt: string | null;
+      latestMessageEditedAt: string | null;
       latestMessageSentByCurrentUser: boolean | null;
       updatedAt: string;
       unreadCount: number;
@@ -45,6 +47,14 @@ export type MessageSidebarItem =
 export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;
 export type AcceptedConversationItem = Extract<MessageSidebarItem, { kind: "conversation" }>;
 
+export type MessageReplyPreview = {
+  id: string;
+  senderId: string;
+  senderName: string;
+  body: string | null;
+  unavailable: boolean;
+};
+
 export type ChatMessage = {
   kind: "confirmed";
   id: string;
@@ -52,7 +62,10 @@ export type ChatMessage = {
   senderId: string;
   body: string;
   createdAt: string;
+  editedAt: string | null;
   isIntroduction: boolean;
+  replyToMessageId: string | null;
+  replyPreview: MessageReplyPreview | null;
 };
 
 export type OptimisticChatMessage = {
@@ -63,11 +76,18 @@ export type OptimisticChatMessage = {
   body: string;
   createdAt: string;
   deliveryState: "sending" | "failed";
+  replyToMessageId: string | null;
+  replyPreview: MessageReplyPreview | null;
 };
 
 export type DisplayChatMessage = ChatMessage | OptimisticChatMessage;
 
 export type RealtimeChatMessageEvent = {
+  sequence: number;
+  message: ChatMessage;
+};
+
+export type RealtimeChatMessageUpdateEvent = {
   sequence: number;
   message: ChatMessage;
 };
