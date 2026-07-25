@@ -4,11 +4,13 @@ import { motion, useReducedMotion } from "motion/react";
 import { getEmojiLabel } from "./emojiData";
 
 type MessageActionSheetProps = {
+  canDelete: boolean;
   canEdit: boolean;
   messageLabel: string;
   quickReactions: string[];
   returnFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;
+  onDelete: () => void;
   onEdit: () => void;
   onOpenEmojiPicker: () => void;
   onReact: (emoji: string) => void;
@@ -23,7 +25,11 @@ function EditIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="m5 15.5-.8 4.3 4.3-.8L18 9.5 14.5 6 5 15.5Z" strokeLinecap="round" strokeLinejoin="round" /><path d="m12.8 7.7 3.5 3.5" strokeLinecap="round" /></svg>;
 }
 
-function MessageActionSheet({ canEdit, messageLabel, quickReactions, returnFocusRef, onClose, onEdit, onOpenEmojiPicker, onReact, onReply }: MessageActionSheetProps) {
+function DeleteIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v5m4-5v5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+
+function MessageActionSheet({ canDelete, canEdit, messageLabel, quickReactions, returnFocusRef, onClose, onDelete, onEdit, onOpenEmojiPicker, onReact, onReply }: MessageActionSheetProps) {
   const shouldReduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const shouldRestoreFocusRef = useRef(true);
@@ -86,6 +92,7 @@ function MessageActionSheet({ canEdit, messageLabel, quickReactions, returnFocus
         <section aria-label="Message actions" className="border-b border-border py-2">
           <button type="button" onClick={() => runAction(onReply)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ReplyIcon /></span><span>Reply</span></button>
           {canEdit && <button type="button" onClick={() => runAction(onEdit)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><EditIcon /></span><span>Edit</span></button>}
+          {canDelete && <button type="button" onClick={() => runAction(onDelete)} aria-label="Delete your message" className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><DeleteIcon /></span><span>Delete</span></button>}
         </section>
         <button type="button" onClick={onClose} className="mt-2 min-h-12 w-full rounded-2xl px-4 py-3 text-sm font-semibold text-body transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Cancel</button>
       </motion.div>

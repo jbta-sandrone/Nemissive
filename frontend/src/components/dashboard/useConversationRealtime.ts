@@ -26,6 +26,8 @@ function parseRealtimeMessage(value: unknown): ChatMessage | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
   if (typeof row.id !== "string" || typeof row.conversation_id !== "string" || typeof row.sender_id !== "string" || typeof row.body !== "string" || typeof row.created_at !== "string") return null;
+  if (typeof row.is_deleted !== "boolean") return null;
+  if (row.deleted_at !== null && typeof row.deleted_at !== "string") return null;
 
   return {
     kind: "confirmed",
@@ -35,6 +37,8 @@ function parseRealtimeMessage(value: unknown): ChatMessage | null {
     body: row.body,
     createdAt: row.created_at,
     editedAt: typeof row.edited_at === "string" ? row.edited_at : null,
+    isDeleted: row.is_deleted,
+    deletedAt: typeof row.deleted_at === "string" ? row.deleted_at : null,
     isIntroduction: typeof row.source_request_id === "string",
     replyToMessageId: typeof row.reply_to_message_id === "string" ? row.reply_to_message_id : null,
     replyPreview: null,

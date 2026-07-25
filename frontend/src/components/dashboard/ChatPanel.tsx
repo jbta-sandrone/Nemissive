@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, OptimisticChatMessage, ParticipantReceiptCursor, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
+import type { ChatMessage, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, OptimisticChatMessage, ParticipantReceiptCursor, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
 import AnchoredPopover from "./AnchoredPopover";
 import EmojiPicker from "./EmojiPicker";
 import MessageActionSheet from "./MessageActionSheet";
+import MessageDeleteDialog from "./MessageDeleteDialog";
 import PresenceAvatar from "./PresenceAvatar";
 import ProfileAvatar from "./ProfileAvatar";
+import ReactionDetails from "./ReactionDetails";
 import { getEmojiLabel } from "./emojiData";
 import { formatLastSeen } from "./presenceUtils";
 import { getProfileDisplayName } from "./profileUtils";
@@ -19,6 +21,8 @@ type MessageRow = {
   body: string;
   created_at: string;
   edited_at: string | null;
+  is_deleted: boolean;
+  deleted_at: string | null;
   source_request_id: string | null;
   reply_to_message_id: string | null;
 };
@@ -52,6 +56,20 @@ type PendingMessageEdit = {
   deferredMessage: ChatMessage | null;
 };
 
+type MessageDeleteState = {
+  messageId: string;
+  isDeleting: boolean;
+  error: string;
+};
+
+type PendingMessageDelete = {
+  messageId: string;
+  previousMessage: ChatMessage;
+  previousReactions: MessageReaction[];
+  confirmedMessage: ChatMessage | null;
+  deferredMessage: ChatMessage | null;
+};
+
 type MobileLongPressState = {
   messageId: string;
   pointerId: number;
@@ -62,6 +80,7 @@ type MobileLongPressState = {
 
 type ChatPanelProps = {
   chatState: DashboardChatState | null;
+  currentProfile: ProfileSearchResult | null;
   currentUserId: string | null;
   isMobileVisible: boolean;
   realtimeRefreshKey: number;
@@ -74,7 +93,8 @@ type ChatPanelProps = {
   onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void;
   onConversationRead: (conversationId: string, messageCreatedAt: string) => void;
   onMessageConfirmed: () => void;
-  onMessageEdited: (message: ChatMessage) => void;
+  onMessageUpdated: (message: ChatMessage) => void;
+  onMessageDeletionRolledBack: (message: ChatMessage) => void;
   onStartConversation: () => void;
   onMobileBack: () => void;
 };
@@ -99,6 +119,8 @@ function mapMessageRow(row: MessageRow, replyPreview: MessageReplyPreview | null
     body: row.body,
     createdAt: row.created_at,
     editedAt: row.edited_at,
+    isDeleted: row.is_deleted,
+    deletedAt: row.deleted_at,
     isIntroduction: Boolean(row.source_request_id),
     replyToMessageId: row.reply_to_message_id,
     replyPreview,
@@ -111,18 +133,19 @@ function normalizeReplyPreviewBody(body: string) {
   return `${normalizedBody.slice(0, replyPreviewMaxLength - 1).trimEnd()}…`;
 }
 
-function createReplyPreview(message: Pick<ChatMessage, "id" | "senderId" | "body">, currentUserId: string | null, otherName: string): MessageReplyPreview {
+function createReplyPreview(message: Pick<ChatMessage, "id" | "senderId" | "body" | "isDeleted">, currentUserId: string | null, otherName: string): MessageReplyPreview {
   return {
     id: message.id,
     senderId: message.senderId,
     senderName: message.senderId === currentUserId ? "You" : otherName,
-    body: normalizeReplyPreviewBody(message.body),
+    body: message.isDeleted ? null : normalizeReplyPreviewBody(message.body),
     unavailable: false,
+    isDeleted: message.isDeleted,
   };
 }
 
 function createUnavailableReplyPreview(replyToMessageId: string): MessageReplyPreview {
-  return { id: replyToMessageId, senderId: "", senderName: "Original message", body: null, unavailable: true };
+  return { id: replyToMessageId, senderId: "", senderName: "Original message", body: null, unavailable: true, isDeleted: false };
 }
 
 function attachReplyPreview(message: ChatMessage, target: ChatMessage | undefined, currentUserId: string | null, otherName: string) {
@@ -136,8 +159,17 @@ function getEditedTimestamp(message: Pick<ChatMessage, "editedAt">) {
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
-function shouldApplyAuthoritativeEdit(currentMessage: ChatMessage | undefined, incomingMessage: ChatMessage) {
+function shouldApplyAuthoritativeMessage(currentMessage: ChatMessage | undefined, incomingMessage: ChatMessage) {
   if (!currentMessage) return true;
+  if (currentMessage.isDeleted && !incomingMessage.isDeleted) return false;
+  if (incomingMessage.isDeleted) {
+    if (!currentMessage.isDeleted) return true;
+    const currentDeletedTimestamp = getNormalizedTimestamp(currentMessage.deletedAt);
+    const incomingDeletedTimestamp = getNormalizedTimestamp(incomingMessage.deletedAt);
+    if (currentDeletedTimestamp === null) return true;
+    if (incomingDeletedTimestamp === null) return false;
+    return incomingDeletedTimestamp >= currentDeletedTimestamp;
+  }
   const currentTimestamp = getEditedTimestamp(currentMessage);
   const incomingTimestamp = getEditedTimestamp(incomingMessage);
   if (incomingTimestamp === null) return currentTimestamp === null && currentMessage.body === incomingMessage.body;
@@ -146,11 +178,11 @@ function shouldApplyAuthoritativeEdit(currentMessage: ChatMessage | undefined, i
   return currentMessage.body === incomingMessage.body;
 }
 
-function patchEditedMessageAndReplies(messages: DisplayChatMessage[], editedMessage: ChatMessage, currentUserId: string | null, otherName: string) {
-  const replyPreview = createReplyPreview(editedMessage, currentUserId, otherName);
+function patchMessageAndReplies(messages: DisplayChatMessage[], updatedMessage: ChatMessage, currentUserId: string | null, otherName: string) {
+  const replyPreview = createReplyPreview(updatedMessage, currentUserId, otherName);
   return messages.map((message) => {
-    if (message.kind === "confirmed" && message.id === editedMessage.id) return { ...message, body: editedMessage.body, editedAt: editedMessage.editedAt };
-    if (message.replyToMessageId === editedMessage.id) return { ...message, replyPreview };
+    if (message.kind === "confirmed" && message.id === updatedMessage.id) return { ...message, ...updatedMessage, replyPreview: message.replyPreview };
+    if (message.replyToMessageId === updatedMessage.id) return { ...message, replyPreview };
     return message;
   });
 }
@@ -280,6 +312,10 @@ function EditIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m5 15.5-.8 4.3 4.3-.8L18 9.5 14.5 6 5 15.5Z" strokeLinecap="round" strokeLinejoin="round" /><path d="m12.8 7.7 3.5 3.5" strokeLinecap="round" /></svg>;
 }
 
+function DeleteIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v5m4-5v5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+
 function QuickReactionMenu({ anchorRef, quickReactions, messageLabel, onClose, onOpenPicker, onSelect }: { anchorRef: RefObject<HTMLElement | null>; quickReactions: string[]; messageLabel: string; onClose: () => void; onOpenPicker: () => void; onSelect: (emoji: string) => void }) {
   return (
     <AnchoredPopover anchorRef={anchorRef} ariaLabel={`Quick reactions for ${messageLabel}`} onClose={onClose} placement="top" panelClassName="max-w-[calc(100vw-1rem)] rounded-2xl border border-border bg-surface p-1.5 shadow-soft">
@@ -304,14 +340,15 @@ function TypingIndicator({ isVisible, name, shouldReduceMotion }: { isVisible: b
 }
 
 function ReplyQuote({ preview, isStrongOutgoing, canJump, onJump }: { preview: MessageReplyPreview; isStrongOutgoing: boolean; canJump: boolean; onJump: () => void }) {
-  const content = <><span className={`block truncate text-xs font-semibold ${isStrongOutgoing ? "text-white" : "text-heading"}`}>{preview.senderName}</span><span className={`mt-0.5 block break-words text-xs leading-5 ${isStrongOutgoing ? "text-white/80" : "text-body"}`}>{preview.unavailable ? "Original message unavailable" : preview.body}</span></>;
+  const previewText = preview.isDeleted ? "Original message was deleted." : preview.unavailable ? "Original message unavailable" : preview.body;
+  const content = <><span className={`block truncate text-xs font-semibold ${isStrongOutgoing ? "text-white" : "text-heading"}`}>{preview.senderName}</span><span className={`mt-0.5 block break-words text-xs leading-5 ${isStrongOutgoing ? "text-white/80" : "text-body"}`}>{previewText}</span></>;
   const className = `mb-2 block w-full min-w-0 rounded-xl border-l-2 px-3 py-2 text-left ${isStrongOutgoing ? "border-white/60 bg-background/10" : "border-primary/40 bg-background"}`;
 
   if (canJump) return <button type="button" onClick={onJump} aria-label={`Jump to original message from ${preview.senderName}`} className={`${className} transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30`}>{content}</button>;
-  return <div aria-label={`Reply to ${preview.senderName}: ${preview.unavailable ? "Original message unavailable" : preview.body ?? ""}`} className={className}>{content}</div>;
+  return <div aria-label={`Reply to ${preview.senderName}: ${previewText ?? ""}`} className={className}>{content}</div>;
 }
 
-function AcceptedConversationPanel({ conversation, currentUserId, compactVisibilitySignal, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageEdited, onMobileBack }: { conversation: SelectedConversation; currentUserId: string | null; compactVisibilitySignal: boolean; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageEdited: (message: ChatMessage) => void; onMobileBack: () => void }) {
+function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onMobileBack }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onMobileBack: () => void }) {
   const shouldReduceMotion = useReducedMotion();
   const latestLoadRef = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -319,6 +356,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const editTriggerRef = useRef<HTMLElement | null>(null);
+  const deleteTriggerRef = useRef<HTMLElement | null>(null);
   const comingSoonTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const readAcknowledgementTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const reactionErrorTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
@@ -330,6 +368,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   const isMountedRef = useRef(true);
   const isSubmittingRef = useRef(false);
   const pendingEditRef = useRef<PendingMessageEdit | null>(null);
+  const pendingDeleteRef = useRef<PendingMessageDelete | null>(null);
   const inFlightMessageRef = useRef<{ optimisticId: string; conversationId: string; body: string; replyToMessageId: string | null } | null>(null);
   const processedRealtimeSequenceRef = useRef(realtimeMessageEvents.at(-1)?.sequence ?? 0);
   const processedMessageUpdateSequenceRef = useRef(realtimeMessageUpdateEvents.at(-1)?.sequence ?? 0);
@@ -345,7 +384,11 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   const replyTargetCacheRef = useRef(new Map<string, ChatMessage>());
   const replyTargetFetchesRef = useRef(new Map<string, Promise<void>>());
   const messageElementsRef = useRef(new Map<string, HTMLElement>());
+  const deletedMessageIdsRef = useRef(new Set<string>());
   const reactionAnchorRef = useRef<HTMLElement | null>(null);
+  const reactionDetailsAnchorRef = useRef<HTMLElement | null>(null);
+  const lastReactionDetailsMessageIdRef = useRef<string | null>(null);
+  const resolvedReactionProfileIdsRef = useRef(new Set<string>());
   const composerEmojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const composerSelectionRef = useRef({ start: 0, end: 0 });
   const [messages, setMessages] = useState<DisplayChatMessage[]>([]);
@@ -360,6 +403,12 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   const [comingSoonMessage, setComingSoonMessage] = useState("");
   const [reactionError, setReactionError] = useState("");
   const [pendingReactionKeys, setPendingReactionKeys] = useState<Set<string>>(() => new Set());
+  const [reactionDetailsMessageId, setReactionDetailsMessageId] = useState<string | null>(null);
+  const [reactionDetailsMutationError, setReactionDetailsMutationError] = useState("");
+  const [reactionProfilesById, setReactionProfilesById] = useState<Map<string, ProfileSearchResult>>(() => new Map());
+  const [isReactionProfilesLoading, setIsReactionProfilesLoading] = useState(false);
+  const [reactionProfilesError, setReactionProfilesError] = useState("");
+  const [reactionProfilesRetryKey, setReactionProfilesRetryKey] = useState(0);
   const [quickReactionMessageId, setQuickReactionMessageId] = useState<string | null>(null);
   const [fullReactionPickerMessageId, setFullReactionPickerMessageId] = useState<string | null>(null);
   const [isComposerEmojiPickerOpen, setIsComposerEmojiPickerOpen] = useState(false);
@@ -367,6 +416,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   const [mobileEmphasizedMessageId, setMobileEmphasizedMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageReplyPreview | null>(null);
   const [messageEditState, setMessageEditState] = useState<MessageEditState | null>(null);
+  const [messageDeleteState, setMessageDeleteState] = useState<MessageDeleteState | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [otherReceipt, setOtherReceipt] = useState<ParticipantReceiptCursor | null>(null);
   const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
@@ -404,6 +454,60 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   }, [conversation.otherProfile.last_seen_at, isOtherUserOnline]);
 
   useEffect(() => {
+    if (!reactionDetailsMessageId) return;
+    const messageReactions = reactions.filter((reaction) => reaction.messageId === reactionDetailsMessageId);
+    const hasPendingReactionMutation = [...pendingReactionKeys].some((mutationKey) => mutationKey.startsWith(`${reactionDetailsMessageId}\u0000`));
+    if (messageReactions.length === 0 && !hasPendingReactionMutation) {
+      const closeTimer = window.setTimeout(() => setReactionDetailsMessageId(null), 0);
+      return () => window.clearTimeout(closeTimer);
+    }
+
+    const knownProfileIds = new Set([currentProfile?.id, conversation.otherProfile.id].filter((userId): userId is string => Boolean(userId)));
+    const missingProfileIds = [...new Set(messageReactions.map((reaction) => reaction.userId))].filter((userId) => !knownProfileIds.has(userId) && !resolvedReactionProfileIdsRef.current.has(userId)).slice(0, 100);
+    if (missingProfileIds.length === 0) {
+      const settleTimer = window.setTimeout(() => {
+        setIsReactionProfilesLoading(false);
+        setReactionProfilesError("");
+      }, 0);
+      return () => window.clearTimeout(settleTimer);
+    }
+
+    let isCancelled = false;
+    let abortController: AbortController | null = null;
+    const loadTimer = window.setTimeout(() => {
+      abortController = new AbortController();
+      setIsReactionProfilesLoading(true);
+      setReactionProfilesError("");
+
+      void supabase.from("profiles").select("id, username, display_name, avatar_url").in("id", missingProfileIds).abortSignal(abortController.signal).then(({ data, error }) => {
+        if (isCancelled) return;
+        if (error) {
+          setIsReactionProfilesLoading(false);
+          setReactionProfilesError("Some reaction profiles couldn’t be loaded.");
+          if (import.meta.env.DEV) console.warn("Loading reaction profiles failed", { conversationId: conversation.id, code: error.code });
+          return;
+        }
+
+        const loadedProfiles = (data ?? []) as ProfileSearchResult[];
+        missingProfileIds.forEach((userId) => resolvedReactionProfileIdsRef.current.add(userId));
+        setReactionProfilesById((currentProfiles) => {
+          const nextProfiles = new Map(currentProfiles);
+          loadedProfiles.forEach((profile) => nextProfiles.set(profile.id, profile));
+          return nextProfiles;
+        });
+        setIsReactionProfilesLoading(false);
+        setReactionProfilesError("");
+      });
+    }, 0);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(loadTimer);
+      abortController?.abort();
+    };
+  }, [conversation.id, conversation.otherProfile.id, currentProfile?.id, pendingReactionKeys, reactionDetailsMessageId, reactionProfilesRetryKey, reactions]);
+
+  useEffect(() => {
     if (!messageEditState?.messageId || messageEditState.isSaving) return;
     const frame = window.requestAnimationFrame(() => {
       const textarea = editTextareaRef.current;
@@ -433,7 +537,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     if (replyTargetCacheRef.current.has(replyToMessageId) || replyTargetFetchesRef.current.has(replyToMessageId)) return;
 
     const request = (async () => {
-      const { data, error } = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").eq("id", replyToMessageId).eq("conversation_id", conversation.id).maybeSingle();
+      const { data, error } = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").eq("id", replyToMessageId).eq("conversation_id", conversation.id).maybeSingle();
       if (!isMountedRef.current) return;
       if (error || !data) {
         if (error && import.meta.env.DEV) console.warn("Loading a realtime reply target failed", { conversationId: conversation.id, code: error.code });
@@ -441,6 +545,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       }
 
       const target = mapMessageRow(data as MessageRow);
+      if (target.isDeleted) deletedMessageIdsRef.current.add(target.id);
       replyTargetCacheRef.current.set(target.id, target);
       setMessages((currentMessages) => currentMessages.map((message) => {
         if (message.replyToMessageId !== target.id) return message;
@@ -464,8 +569,8 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     async function loadMessages() {
       const shouldScrollAfterLoad = !hasLoadedMessagesRef.current || isNearBottom();
       const [historyResult, introductionResult, participantResult] = await Promise.all([
-        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).order("created_at", { ascending: false }).limit(initialMessageLimit).abortSignal(abortController.signal),
-        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).not("source_request_id", "is", null).order("created_at", { ascending: true }).limit(1).abortSignal(abortController.signal),
+        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).order("created_at", { ascending: false }).limit(initialMessageLimit).abortSignal(abortController.signal),
+        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).not("source_request_id", "is", null).order("created_at", { ascending: true }).limit(1).abortSignal(abortController.signal),
         supabase.from("conversation_participants").select("user_id, last_delivered_at, last_read_at").eq("conversation_id", conversation.id).abortSignal(abortController.signal),
       ]);
 
@@ -480,12 +585,14 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
 
       const serverRowsById = new Map([...(historyResult.data ?? []), ...(introductionResult.data ?? [])].map((row) => [row.id, row as MessageRow]));
       const baseServerMessages = [...serverRowsById.values()].map((row) => mapMessageRow(row));
+      const loadedDeletedMessageIds = new Set(baseServerMessages.filter((message) => message.isDeleted).map((message) => message.id));
+      loadedDeletedMessageIds.forEach((messageId) => deletedMessageIdsRef.current.add(messageId));
       const replyTargetById = new Map(baseServerMessages.map((message) => [message.id, message]));
       const replyTargetIds = [...new Set(baseServerMessages.flatMap((message) => message.replyToMessageId ? [message.replyToMessageId] : []))];
       const missingReplyTargetIds = replyTargetIds.filter((messageId) => !replyTargetById.has(messageId));
 
       if (missingReplyTargetIds.length > 0) {
-        const replyTargetsResult = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).in("id", missingReplyTargetIds).abortSignal(abortController.signal);
+        const replyTargetsResult = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).in("id", missingReplyTargetIds).abortSignal(abortController.signal);
         if (isCancelled || loadId !== latestLoadRef.current) return;
         if (replyTargetsResult.error) {
           if (import.meta.env.DEV) console.warn("Loading reply targets failed", { conversationId: conversation.id, code: replyTargetsResult.error.code });
@@ -494,7 +601,10 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
         }
       }
 
-      replyTargetById.forEach((message, messageId) => replyTargetCacheRef.current.set(messageId, message));
+      replyTargetById.forEach((message, messageId) => {
+        if (message.isDeleted) deletedMessageIdsRef.current.add(messageId);
+        replyTargetCacheRef.current.set(messageId, message);
+      });
       const serverMessages = baseServerMessages.map((message) => attachReplyPreview(message, message.replyToMessageId ? replyTargetById.get(message.replyToMessageId) : undefined, currentUserId, otherName)).sort((first, second) => Date.parse(first.createdAt) - Date.parse(second.createdAt));
       let serverReactions: MessageReaction[] = [];
       const messageIds = [...serverRowsById.keys()];
@@ -505,7 +615,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
           setReactionError("Reactions couldn’t be loaded. Messaging is still available.");
           if (import.meta.env.DEV) console.warn("Loading message reactions failed", { conversationId: conversation.id, code: reactionResult.error.code });
         } else {
-          serverReactions = ((reactionResult.data ?? []) as ReactionRow[]).map(mapReactionRow);
+          serverReactions = ((reactionResult.data ?? []) as ReactionRow[]).map(mapReactionRow).filter((reaction) => !loadedDeletedMessageIds.has(reaction.messageId));
         }
       }
       setIsLoading(false);
@@ -531,7 +641,8 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
           const serverMessage = confirmedById.get(message.id);
           const updatedDuringLoad = (messageUpdateSequenceByIdRef.current.get(message.id) ?? 0) > loadStartMessageUpdateSequence;
           const hasPendingEdit = pendingEditRef.current?.messageId === message.id;
-          if (updatedDuringLoad || hasPendingEdit || (serverMessage && shouldApplyAuthoritativeEdit(serverMessage, message))) confirmedById.set(message.id, message);
+          const hasPendingDelete = pendingDeleteRef.current?.messageId === message.id;
+          if (updatedDuringLoad || hasPendingEdit || hasPendingDelete || (serverMessage && shouldApplyAuthoritativeMessage(serverMessage, message))) confirmedById.set(message.id, message);
         });
         confirmedById.forEach((message, messageId) => replyTargetCacheRef.current.set(messageId, message));
         const hydratedMessages = [...confirmedById.values(), ...optimisticMessages].map((message) => {
@@ -613,23 +724,43 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     const relevantEvents = newEvents.filter((event) => event.message.conversationId === conversation.id);
     if (relevantEvents.length === 0) return;
 
+    const deletedMessageIds = new Set(relevantEvents.filter((event) => event.message.isDeleted).map((event) => event.message.id));
+    deletedMessageIds.forEach((messageId) => deletedMessageIdsRef.current.add(messageId));
+    if (deletedMessageIds.size > 0) {
+      setReactions((currentReactions) => currentReactions.filter((reaction) => !deletedMessageIds.has(reaction.messageId)));
+      setMessageEditState((currentState) => currentState && deletedMessageIds.has(currentState.messageId) ? null : currentState);
+      setReplyingTo((currentTarget) => currentTarget && deletedMessageIds.has(currentTarget.id) ? null : currentTarget);
+      setQuickReactionMessageId((messageId) => messageId && deletedMessageIds.has(messageId) ? null : messageId);
+      setFullReactionPickerMessageId((messageId) => messageId && deletedMessageIds.has(messageId) ? null : messageId);
+      setReactionDetailsMessageId((messageId) => messageId && deletedMessageIds.has(messageId) ? null : messageId);
+      setMobileActionMessageId((messageId) => messageId && deletedMessageIds.has(messageId) ? null : messageId);
+      setMessageDeleteState((currentState) => currentState && deletedMessageIds.has(currentState.messageId) && pendingDeleteRef.current?.messageId !== currentState.messageId ? null : currentState);
+      if (pendingEditRef.current && deletedMessageIds.has(pendingEditRef.current.messageId)) pendingEditRef.current = null;
+    }
+
     setMessages((currentMessages) => {
       let nextMessages = currentMessages;
       relevantEvents.forEach((event) => {
         const incomingMessage = event.message;
+        const pendingDelete = pendingDeleteRef.current;
+        if (pendingDelete?.messageId === incomingMessage.id) {
+          if (incomingMessage.isDeleted) pendingDelete.confirmedMessage = incomingMessage;
+          else if (shouldApplyAuthoritativeMessage(pendingDelete.deferredMessage ?? pendingDelete.previousMessage, incomingMessage)) pendingDelete.deferredMessage = incomingMessage;
+          if (!incomingMessage.isDeleted) return;
+        }
         const pendingEdit = pendingEditRef.current;
-        if (pendingEdit?.messageId === incomingMessage.id && incomingMessage.body !== pendingEdit.attemptedBody) {
+        if (pendingEdit?.messageId === incomingMessage.id && !incomingMessage.isDeleted && incomingMessage.body !== pendingEdit.attemptedBody) {
           const deferredMessage = pendingEdit.deferredMessage;
-          if (shouldApplyAuthoritativeEdit(deferredMessage ?? pendingEdit.previousMessage, incomingMessage)) pendingEdit.deferredMessage = incomingMessage;
+          if (shouldApplyAuthoritativeMessage(deferredMessage ?? pendingEdit.previousMessage, incomingMessage)) pendingEdit.deferredMessage = incomingMessage;
           return;
         }
         const currentMessage = nextMessages.find((message): message is ChatMessage => message.kind === "confirmed" && message.id === incomingMessage.id) ?? replyTargetCacheRef.current.get(incomingMessage.id);
-        if (!shouldApplyAuthoritativeEdit(currentMessage, incomingMessage) && incomingMessage.body !== pendingEdit?.attemptedBody) return;
+        if (!shouldApplyAuthoritativeMessage(currentMessage, incomingMessage) && incomingMessage.body !== pendingEdit?.attemptedBody) return;
         const normalizedMessage = { ...incomingMessage, replyPreview: currentMessage?.replyPreview ?? incomingMessage.replyPreview };
         if (pendingEdit?.messageId === incomingMessage.id && incomingMessage.body === pendingEdit.attemptedBody) pendingEdit.confirmedMessage = normalizedMessage;
         messageUpdateSequenceByIdRef.current.set(incomingMessage.id, event.sequence);
         replyTargetCacheRef.current.set(incomingMessage.id, normalizedMessage);
-        nextMessages = patchEditedMessageAndReplies(nextMessages, normalizedMessage, currentUserId, otherName);
+        nextMessages = patchMessageAndReplies(nextMessages, normalizedMessage, currentUserId, otherName);
       });
       return nextMessages;
     });
@@ -642,6 +773,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
 
     setReactions((currentReactions) => newEvents.reduce((nextReactions, event) => {
       if (event.action === "insert") {
+        if (deletedMessageIdsRef.current.has(event.reaction.messageId)) return nextReactions;
         const tupleKey = getReactionTupleKey(event.reaction);
         const latestDeleteSequence = Math.max(reactionDeleteSequenceByIdRef.current.get(event.reaction.id) ?? 0, reactionDeleteSequenceByTupleRef.current.get(tupleKey) ?? 0);
         if (latestDeleteSequence >= event.sequence) return nextReactions;
@@ -777,7 +909,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     setShowJumpToLatest(false);
     scrollToLatest("smooth");
 
-    const { data, error } = await supabase.from("messages").insert({ conversation_id: conversation.id, sender_id: currentUserId, body: trimmedBody, reply_to_message_id: replyToMessageId }).select("id, conversation_id, sender_id, body, created_at, edited_at, source_request_id, reply_to_message_id").single();
+    const { data, error } = await supabase.from("messages").insert({ conversation_id: conversation.id, sender_id: currentUserId, body: trimmedBody, reply_to_message_id: replyToMessageId }).select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").single();
 
     if (error || !data) {
       if (isMountedRef.current) {
@@ -840,6 +972,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     reactionAnchorRef.current = returnFocusElement;
     setQuickReactionMessageId(null);
     setFullReactionPickerMessageId(null);
+    setReactionDetailsMessageId(null);
     setMobileEmphasizedMessageId(messageId);
     setMobileActionMessageId(messageId);
   }
@@ -892,15 +1025,39 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
 
   function openQuickReactions(messageId: string, trigger: HTMLButtonElement) {
     reactionAnchorRef.current = trigger;
+    setReactionDetailsMessageId(null);
     setFullReactionPickerMessageId(null);
     setQuickReactionMessageId((currentId) => currentId === messageId ? null : messageId);
   }
 
-  async function toggleReaction(messageId: string, emoji: string) {
-    if (!currentUserId) return;
+  function openReactionDetails(messageId: string, trigger: HTMLButtonElement) {
+    reactionDetailsAnchorRef.current = trigger;
+    lastReactionDetailsMessageIdRef.current = messageId;
+    setQuickReactionMessageId(null);
+    setFullReactionPickerMessageId(null);
+    setMobileActionMessageId(null);
+    setIsComposerEmojiPickerOpen(false);
+    setReactionProfilesError("");
+    setReactionDetailsMutationError("");
+    setReactionDetailsMessageId(messageId);
+  }
+
+  function closeReactionDetails() {
+    setReactionDetailsMessageId(null);
+  }
+
+  function retryReactionProfiles() {
+    setReactionProfilesError("");
+    setReactionProfilesRetryKey((key) => key + 1);
+  }
+
+  async function toggleReaction(messageId: string, emoji: string, options: { suppressGlobalError?: boolean } = {}) {
+    if (!currentUserId) return false;
+    const targetMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && message.id === messageId);
+    if (!targetMessage || targetMessage.isDeleted) return false;
     const tuple = { messageId, userId: currentUserId, emoji };
     const mutationKey = getReactionTupleKey(tuple);
-    if (pendingReactionKeysRef.current.has(mutationKey)) return;
+    if (pendingReactionKeysRef.current.has(mutationKey)) return false;
     pendingReactionKeysRef.current.add(mutationKey);
     setPendingReactionKeys((currentKeys) => new Set(currentKeys).add(mutationKey));
     setReactionError("");
@@ -913,12 +1070,14 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
       pendingReactionKeysRef.current.delete(mutationKey);
       setPendingReactionKeys((currentKeys) => { const nextKeys = new Set(currentKeys); nextKeys.delete(mutationKey); return nextKeys; });
       const confirmedDeleteSequence = Math.max(reactionDeleteSequenceByIdRef.current.get(existingReaction.id) ?? 0, reactionDeleteSequenceByTupleRef.current.get(mutationKey) ?? 0);
-      if (error && confirmedDeleteSequence <= mutationStartSequence) {
+      const deletionWasConfirmed = confirmedDeleteSequence > mutationStartSequence;
+      if (error && !deletionWasConfirmed && !deletedMessageIdsRef.current.has(messageId)) {
         setReactions((currentReactions) => mergeReaction(currentReactions, existingReaction));
-        showReactionError("We couldn’t remove that reaction. Please try again.");
+        if (!options.suppressGlobalError) showReactionError("We couldn’t remove that reaction. Please try again.");
         if (import.meta.env.DEV) console.warn("Removing message reaction failed", { messageId, code: error.code });
+        return false;
       }
-      return;
+      return true;
     }
 
     const optimisticReaction: MessageReaction = { id: `optimistic:${mutationKey}`, messageId, userId: currentUserId, emoji, createdAt: new Date().toISOString() };
@@ -929,18 +1088,27 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
 
     if (error || !data) {
       setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.id !== optimisticReaction.id));
-      showReactionError("We couldn’t add that reaction. Please try again.");
+      if (!options.suppressGlobalError) showReactionError("We couldn’t add that reaction. Please try again.");
       if (import.meta.env.DEV) console.warn("Adding message reaction failed", { messageId, code: error?.code });
-      return;
+      return false;
     }
 
     const confirmedReaction = mapReactionRow(data as ReactionRow);
     setReactions((currentReactions) => mergeReaction(currentReactions, confirmedReaction));
+    return true;
+  }
+
+  async function removeOwnReactionFromDetails(reaction: MessageReaction) {
+    if (!currentUserId || reaction.userId !== currentUserId || reaction.messageId !== reactionDetailsMessageId) return;
+    setReactionDetailsMutationError("");
+    const wasRemoved = await toggleReaction(reaction.messageId, reaction.emoji, { suppressGlobalError: true });
+    if (!wasRemoved && !deletedMessageIdsRef.current.has(reaction.messageId)) setReactionDetailsMutationError("We couldn’t remove that reaction. Select it to try again.");
   }
 
   function openComposerEmojiPicker() {
     const textarea = textareaRef.current;
     composerSelectionRef.current = { start: textarea?.selectionStart ?? draft.length, end: textarea?.selectionEnd ?? draft.length };
+    setReactionDetailsMessageId(null);
     setIsComposerEmojiPickerOpen((isOpen) => !isOpen);
   }
 
@@ -981,7 +1149,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   }
 
   function startEditingMessage(message: ChatMessage, trigger: HTMLElement) {
-    if (message.senderId !== currentUserId || message.isIntroduction || pendingEditRef.current) return;
+    if (message.senderId !== currentUserId || message.isIntroduction || message.isDeleted || pendingEditRef.current || pendingDeleteRef.current) return;
     editTriggerRef.current = trigger;
     setQuickReactionMessageId(null);
     setFullReactionPickerMessageId(null);
@@ -996,7 +1164,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   async function saveMessageEdit() {
     if (!currentUserId || !messageEditState || messageEditState.isSaving || pendingEditRef.current) return;
     const message = messages.find((item): item is ChatMessage => item.kind === "confirmed" && item.id === messageEditState.messageId);
-    if (!message || message.senderId !== currentUserId || message.isIntroduction) {
+    if (!message || message.senderId !== currentUserId || message.isIntroduction || message.isDeleted) {
       setMessageEditState((currentState) => currentState ? { ...currentState, error: "This message is no longer available for editing." } : currentState);
       return;
     }
@@ -1018,7 +1186,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     const optimisticMessage = { ...message, body: normalizedBody };
     pendingEditRef.current = { messageId: message.id, attemptedBody: normalizedBody, previousMessage: message, confirmedMessage: null, deferredMessage: null };
     replyTargetCacheRef.current.set(message.id, optimisticMessage);
-    setMessages((currentMessages) => patchEditedMessageAndReplies(currentMessages, optimisticMessage, currentUserId, otherName));
+    setMessages((currentMessages) => patchMessageAndReplies(currentMessages, optimisticMessage, currentUserId, otherName));
     setMessageEditState((currentState) => currentState ? { ...currentState, isSaving: true, error: "" } : currentState);
 
     const { data, error } = await supabase.rpc("edit_message", { target_message_id: message.id, new_body: normalizedBody }).single();
@@ -1026,18 +1194,18 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     if (!isMountedRef.current || pendingEdit?.messageId !== message.id) return;
 
     if (error || !data) {
-      const realtimeMessage = pendingEdit.deferredMessage && shouldApplyAuthoritativeEdit(pendingEdit.confirmedMessage ?? pendingEdit.previousMessage, pendingEdit.deferredMessage) ? pendingEdit.deferredMessage : pendingEdit.confirmedMessage;
+      const realtimeMessage = pendingEdit.deferredMessage && shouldApplyAuthoritativeMessage(pendingEdit.confirmedMessage ?? pendingEdit.previousMessage, pendingEdit.deferredMessage) ? pendingEdit.deferredMessage : pendingEdit.confirmedMessage;
       if (realtimeMessage) {
         pendingEditRef.current = null;
         replyTargetCacheRef.current.set(message.id, realtimeMessage);
-        setMessages((currentMessages) => patchEditedMessageAndReplies(currentMessages, realtimeMessage, currentUserId, otherName));
-        onMessageEdited(realtimeMessage);
+        setMessages((currentMessages) => patchMessageAndReplies(currentMessages, realtimeMessage, currentUserId, otherName));
+        onMessageUpdated(realtimeMessage);
         finishMessageEditing();
         return;
       }
 
       replyTargetCacheRef.current.set(message.id, pendingEdit.previousMessage);
-      setMessages((currentMessages) => patchEditedMessageAndReplies(currentMessages, pendingEdit.previousMessage, currentUserId, otherName));
+      setMessages((currentMessages) => patchMessageAndReplies(currentMessages, pendingEdit.previousMessage, currentUserId, otherName));
       pendingEditRef.current = null;
       setMessageEditState((currentState) => currentState?.messageId === message.id ? { ...currentState, isSaving: false, error: "We couldn’t save that edit. Please try again." } : currentState);
       if (import.meta.env.DEV) console.warn("Editing message failed", { messageId: message.id, code: error?.code });
@@ -1045,14 +1213,14 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     }
 
     const rpcMessage = mapMessageRow(data as MessageRow, message.replyPreview);
-    const authoritativeMessage = pendingEdit.deferredMessage && shouldApplyAuthoritativeEdit(rpcMessage, pendingEdit.deferredMessage) ? pendingEdit.deferredMessage : rpcMessage;
+    const authoritativeMessage = pendingEdit.deferredMessage && shouldApplyAuthoritativeMessage(rpcMessage, pendingEdit.deferredMessage) ? pendingEdit.deferredMessage : rpcMessage;
     pendingEditRef.current = null;
     const cachedMessage = replyTargetCacheRef.current.get(message.id);
-    if (shouldApplyAuthoritativeEdit(cachedMessage, authoritativeMessage)) {
+    if (shouldApplyAuthoritativeMessage(cachedMessage, authoritativeMessage)) {
       replyTargetCacheRef.current.set(message.id, authoritativeMessage);
-      setMessages((currentMessages) => patchEditedMessageAndReplies(currentMessages, authoritativeMessage, currentUserId, otherName));
+      setMessages((currentMessages) => patchMessageAndReplies(currentMessages, authoritativeMessage, currentUserId, otherName));
     }
-    onMessageEdited(authoritativeMessage);
+    onMessageUpdated(authoritativeMessage);
     finishMessageEditing();
   }
 
@@ -1067,7 +1235,83 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
     void saveMessageEdit();
   }
 
+  function openDeleteConfirmation(message: ChatMessage, trigger: HTMLElement) {
+    if (message.senderId !== currentUserId || message.isIntroduction || message.isDeleted || pendingEditRef.current || pendingDeleteRef.current) return;
+    deleteTriggerRef.current = trigger;
+    setQuickReactionMessageId(null);
+    setFullReactionPickerMessageId(null);
+    setMobileActionMessageId(null);
+    setMessageEditState(null);
+    setMessageDeleteState({ messageId: message.id, isDeleting: false, error: "" });
+  }
+
+  function cancelMessageDeletion() {
+    if (messageDeleteState?.isDeleting) return;
+    setMessageDeleteState(null);
+  }
+
+  async function confirmMessageDeletion() {
+    if (!currentUserId || !messageDeleteState || messageDeleteState.isDeleting || pendingDeleteRef.current || pendingEditRef.current) return;
+    const message = messages.find((item): item is ChatMessage => item.kind === "confirmed" && item.id === messageDeleteState.messageId);
+    if (!message || message.senderId !== currentUserId || message.isIntroduction || message.isDeleted) {
+      setMessageDeleteState((currentState) => currentState ? { ...currentState, error: "This message is no longer available for deletion." } : currentState);
+      return;
+    }
+
+    const previousReactions = reactions.filter((reaction) => reaction.messageId === message.id);
+    const optimisticMessage: ChatMessage = { ...message, body: "", isDeleted: true, deletedAt: null };
+    pendingDeleteRef.current = { messageId: message.id, previousMessage: message, previousReactions, confirmedMessage: null, deferredMessage: null };
+    deletedMessageIdsRef.current.add(message.id);
+    replyTargetCacheRef.current.set(message.id, optimisticMessage);
+    setMessages((currentMessages) => patchMessageAndReplies(currentMessages, optimisticMessage, currentUserId, otherName));
+    setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.messageId !== message.id));
+    setReplyingTo((currentTarget) => currentTarget?.id === message.id ? null : currentTarget);
+    setMessageDeleteState((currentState) => currentState ? { ...currentState, isDeleting: true, error: "" } : currentState);
+    onMessageUpdated(optimisticMessage);
+
+    const { data, error } = await supabase.rpc("delete_message", { target_message_id: message.id }).single();
+    const pendingDelete = pendingDeleteRef.current;
+    if (!isMountedRef.current || pendingDelete?.messageId !== message.id) return;
+
+    if (error || !data) {
+      if (pendingDelete.confirmedMessage?.isDeleted) {
+        const confirmedMessage = pendingDelete.confirmedMessage;
+        pendingDeleteRef.current = null;
+        replyTargetCacheRef.current.set(message.id, confirmedMessage);
+        setMessages((currentMessages) => patchMessageAndReplies(currentMessages, confirmedMessage, currentUserId, otherName));
+        setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.messageId !== message.id));
+        onMessageUpdated(confirmedMessage);
+        setMessageDeleteState(null);
+        window.requestAnimationFrame(() => messageElementsRef.current.get(message.id)?.focus());
+        return;
+      }
+
+      const rollbackMessage = pendingDelete.deferredMessage && shouldApplyAuthoritativeMessage(pendingDelete.previousMessage, pendingDelete.deferredMessage) ? pendingDelete.deferredMessage : pendingDelete.previousMessage;
+      pendingDeleteRef.current = null;
+      deletedMessageIdsRef.current.delete(message.id);
+      replyTargetCacheRef.current.set(message.id, rollbackMessage);
+      setMessages((currentMessages) => patchMessageAndReplies(currentMessages, rollbackMessage, currentUserId, otherName));
+      setReactions((currentReactions) => pendingDelete.previousReactions.reduce((nextReactions, reaction) => mergeReaction(nextReactions, reaction), currentReactions));
+      onMessageDeletionRolledBack(rollbackMessage);
+      setMessageDeleteState((currentState) => currentState?.messageId === message.id ? { ...currentState, isDeleting: false, error: "We couldn’t delete that message. Please try again." } : currentState);
+      if (import.meta.env.DEV) console.warn("Deleting message failed", { messageId: message.id, code: error?.code });
+      return;
+    }
+
+    const rpcMessage = mapMessageRow(data as MessageRow, message.replyPreview);
+    const authoritativeMessage = pendingDelete.confirmedMessage && shouldApplyAuthoritativeMessage(rpcMessage, pendingDelete.confirmedMessage) ? pendingDelete.confirmedMessage : rpcMessage;
+    pendingDeleteRef.current = null;
+    deletedMessageIdsRef.current.add(message.id);
+    replyTargetCacheRef.current.set(message.id, authoritativeMessage);
+    setMessages((currentMessages) => patchMessageAndReplies(currentMessages, authoritativeMessage, currentUserId, otherName));
+    setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.messageId !== message.id));
+    onMessageUpdated(authoritativeMessage);
+    setMessageDeleteState(null);
+    window.requestAnimationFrame(() => messageElementsRef.current.get(message.id)?.focus());
+  }
+
   function handleReplyToMessage(message: ChatMessage) {
+    if (message.isDeleted) return;
     setQuickReactionMessageId(null);
     setFullReactionPickerMessageId(null);
     setReplyingTo(createReplyPreview(message, currentUserId, otherName));
@@ -1096,7 +1340,13 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   const characterCountId = `message-character-count-${conversation.id}`;
   const composerDescription = showCharacterCount ? `${composerHelpId} ${characterCountId}` : composerHelpId;
   const loadedConfirmedMessageIds = new Set(messages.flatMap((message) => message.kind === "confirmed" ? [message.id] : []));
-  const mobileActionMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && message.id === mobileActionMessageId) ?? null;
+  const mobileActionMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === mobileActionMessageId) ?? null;
+  const reactionDetailsMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === reactionDetailsMessageId) ?? null;
+  const reactionDetailsReactions = reactionDetailsMessage ? reactions.filter((reaction) => reaction.messageId === reactionDetailsMessage.id) : [];
+  const isReactionDetailsMutationPending = reactionDetailsMessage ? [...pendingReactionKeys].some((mutationKey) => mutationKey.startsWith(`${reactionDetailsMessage.id}\u0000`)) : false;
+  const availableReactionProfilesById = new Map(reactionProfilesById);
+  availableReactionProfilesById.set(conversation.otherProfile.id, conversation.otherProfile);
+  if (currentProfile) availableReactionProfilesById.set(currentProfile.id, currentProfile);
 
   return (
     <div ref={panelRef} className="flex min-h-0 flex-1 flex-col">
@@ -1122,30 +1372,31 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
                 const shouldShowStatus = isCurrentUser && statusMessageKey === getMessageKey(message);
                 const confirmedStatus = message.kind === "confirmed" ? getConfirmedMessageStatus(message, otherReceipt) : null;
                 const statusLabel = isSending ? "Sending…" : isFailed ? "Failed" : confirmedStatus === "seen" ? "Seen" : confirmedStatus === "delivered" ? "Delivered" : "Sent";
-                const reactionGroups = message.kind === "confirmed" ? groupMessageReactions(reactions, message.id, currentUserId) : [];
-                const replyPreview = message.replyPreview;
+                const reactionGroups = message.kind === "confirmed" && !message.isDeleted ? groupMessageReactions(reactions, message.id, currentUserId) : [];
+                const replyPreview = message.kind === "confirmed" && message.isDeleted ? null : message.replyPreview;
                 const canJumpToReplyTarget = Boolean(message.replyToMessageId && loadedConfirmedMessageIds.has(message.replyToMessageId));
                 const replyActionSenderName = isCurrentUser ? "yourself" : otherName;
                 const isEditingThisMessage = message.kind === "confirmed" && messageEditState?.messageId === message.id;
                 const isSavingThisEdit = Boolean(isEditingThisMessage && messageEditState?.isSaving);
-                const canEditMessage = message.kind === "confirmed" && isCurrentUser && !message.isIntroduction;
+                const canEditMessage = message.kind === "confirmed" && isCurrentUser && !message.isIntroduction && !message.isDeleted;
+                const canDeleteMessage = message.kind === "confirmed" && isCurrentUser && !message.isIntroduction && !message.isDeleted;
 
                 return (
-                  <article ref={(element) => { if (message.kind !== "confirmed") return; if (element) messageElementsRef.current.set(message.id, element); else messageElementsRef.current.delete(message.id); }} key={getMessageKey(message)} tabIndex={message.kind === "confirmed" ? -1 : undefined} onPointerDown={message.kind === "confirmed" ? (event) => handleMessagePointerDown(message, event) : undefined} onPointerMove={message.kind === "confirmed" ? handleMessagePointerMove : undefined} onPointerUp={message.kind === "confirmed" ? handleMessagePointerEnd : undefined} onPointerCancel={message.kind === "confirmed" ? handleMessagePointerEnd : undefined} onPointerLeave={message.kind === "confirmed" ? handleMessagePointerEnd : undefined} className={`group/message relative flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
+                  <article ref={(element) => { if (message.kind !== "confirmed") return; if (element) messageElementsRef.current.set(message.id, element); else messageElementsRef.current.delete(message.id); }} key={getMessageKey(message)} tabIndex={message.kind === "confirmed" ? -1 : undefined} onPointerDown={message.kind === "confirmed" && !message.isDeleted ? (event) => handleMessagePointerDown(message, event) : undefined} onPointerMove={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerMove : undefined} onPointerUp={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerCancel={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerLeave={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} className={`group/message relative flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
                     <div className={`flex min-w-0 max-w-[92%] flex-col sm:max-w-[80%] ${isCurrentUser ? "items-end" : "items-start"}`}>
-                      <div className={`flex min-w-0 items-center gap-1.5 ${isCurrentUser ? "flex-row-reverse" : ""}`}>
-                        <motion.div animate={{ scale: message.kind === "confirmed" && mobileEmphasizedMessageId === message.id && !shouldReduceMotion ? 0.985 : 1 }} transition={{ duration: shouldReduceMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }} className={`min-w-0 rounded-3xl px-4 py-3 shadow-soft transition-shadow ${isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"} ${message.kind === "confirmed" && (highlightedMessageId === message.id || mobileEmphasizedMessageId === message.id) ? "ring-2 ring-primary/30 ring-offset-4 ring-offset-background" : ""}`}>
+                      <div className="relative max-w-full">
+                        <motion.div animate={{ scale: message.kind === "confirmed" && mobileEmphasizedMessageId === message.id && !shouldReduceMotion ? 0.985 : 1 }} transition={{ duration: shouldReduceMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }} className={`max-w-full min-w-0 rounded-3xl px-4 py-3 shadow-soft transition-shadow ${message.kind === "confirmed" && message.isDeleted ? `${isCurrentUser ? "rounded-br-md" : "rounded-bl-md"} border border-border bg-card text-muted` : isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"} ${message.kind === "confirmed" && (highlightedMessageId === message.id || mobileEmphasizedMessageId === message.id) ? "ring-2 ring-primary/30 ring-offset-4 ring-offset-background" : ""}`}>
                           {replyPreview && <ReplyQuote preview={replyPreview} isStrongOutgoing={isCurrentUser && !isFailed} canJump={canJumpToReplyTarget} onJump={() => message.replyToMessageId && jumpToOriginalMessage(message.replyToMessageId)} />}
-                          {isEditingThisMessage && messageEditState ? <div className="min-w-0"><label htmlFor={`edit-message-${message.id}`} className="sr-only">Edit your message</label><textarea ref={editTextareaRef} id={`edit-message-${message.id}`} value={messageEditState.draft} onChange={(event) => { const draft = event.target.value; setMessageEditState((currentState) => currentState?.messageId === message.id ? { ...currentState, draft, error: "" } : currentState); resizeTextarea(event.target); }} onKeyDown={handleEditKeyDown} rows={2} maxLength={messageMaxLength} disabled={messageEditState.isSaving} aria-describedby={messageEditState.error ? `edit-message-error-${message.id}` : undefined} className="max-h-32 min-h-20 w-full min-w-0 resize-none overflow-y-auto rounded-xl border border-border bg-surface px-3 py-2 text-sm leading-6 text-heading outline-none placeholder:text-muted focus:ring-2 focus:ring-primary/20 disabled:cursor-wait disabled:opacity-70" /><div className="mt-2 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => void saveMessageEdit()} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">{messageEditState.isSaving ? "Saving…" : "Save"}</button><button type="button" onClick={cancelMessageEditing} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-background/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-background/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">Cancel</button></div>{messageEditState.error && <p id={`edit-message-error-${message.id}`} role="alert" className="mt-2 text-xs leading-5 text-white">{messageEditState.error}</p>}</div> : <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p>}
-                          <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}{message.kind === "confirmed" && (message.editedAt || isSavingThisEdit) && <span>Edited</span>}</div>
+                          {message.kind === "confirmed" && message.isDeleted ? <p className="break-words text-sm italic leading-6">This message was deleted.</p> : isEditingThisMessage && messageEditState ? <div className="min-w-0"><label htmlFor={`edit-message-${message.id}`} className="sr-only">Edit your message</label><textarea ref={editTextareaRef} id={`edit-message-${message.id}`} value={messageEditState.draft} onChange={(event) => { const draft = event.target.value; setMessageEditState((currentState) => currentState?.messageId === message.id ? { ...currentState, draft, error: "" } : currentState); resizeTextarea(event.target); }} onKeyDown={handleEditKeyDown} rows={2} maxLength={messageMaxLength} disabled={messageEditState.isSaving} aria-describedby={messageEditState.error ? `edit-message-error-${message.id}` : undefined} className="max-h-32 min-h-20 w-full min-w-0 resize-none overflow-y-auto rounded-xl border border-border bg-surface px-3 py-2 text-sm leading-6 text-heading outline-none placeholder:text-muted focus:ring-2 focus:ring-primary/20 disabled:cursor-wait disabled:opacity-70" /><div className="mt-2 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => void saveMessageEdit()} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">{messageEditState.isSaving ? "Saving…" : "Save"}</button><button type="button" onClick={cancelMessageEditing} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-background/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-background/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">Cancel</button></div>{messageEditState.error && <p id={`edit-message-error-${message.id}`} role="alert" className="mt-2 text-xs leading-5 text-white">{messageEditState.error}</p>}</div> : <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p>}
+                          <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed && !(message.kind === "confirmed" && message.isDeleted) ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}{message.kind === "confirmed" && !message.isDeleted && (message.editedAt || isSavingThisEdit) && <span>Edited</span>}</div>
                           {isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}
                         </motion.div>
-                        {message.kind === "confirmed" && <div className="hidden shrink-0 flex-col gap-1 transition md:flex md:opacity-0 md:group-hover/message:opacity-100 md:group-focus-within/message:opacity-100">{canEditMessage && <button type="button" onClick={(event) => startEditingMessage(message, event.currentTarget)} disabled={Boolean(messageEditState?.isSaving)} aria-label="Edit your message" title="Edit" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50"><EditIcon /></button>}<button type="button" onClick={() => handleReplyToMessage(message)} aria-label={`Reply to message from ${replyActionSenderName}`} title="Reply" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><ReplyIcon /></button><button type="button" onClick={(event) => openQuickReactions(message.id, event.currentTarget)} aria-label="React to this message" aria-haspopup="dialog" aria-expanded={quickReactionMessageId === message.id || fullReactionPickerMessageId === message.id} className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><ReactionIcon /></button></div>}
+                        {message.kind === "confirmed" && !message.isDeleted && <div className={`absolute top-1/2 hidden shrink-0 -translate-y-1/2 flex-col gap-1 transition md:flex md:opacity-0 md:group-hover/message:opacity-100 md:group-focus-within/message:opacity-100 ${isCurrentUser ? "right-full mr-1.5" : "left-full ml-1.5"}`}>{canEditMessage && <button type="button" onClick={(event) => startEditingMessage(message, event.currentTarget)} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} aria-label="Edit your message" title="Edit" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50"><EditIcon /></button>}<button type="button" onClick={() => handleReplyToMessage(message)} aria-label={`Reply to message from ${replyActionSenderName}`} title="Reply" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><ReplyIcon /></button><button type="button" onClick={(event) => openQuickReactions(message.id, event.currentTarget)} aria-label="React to this message" aria-haspopup="dialog" aria-expanded={quickReactionMessageId === message.id || fullReactionPickerMessageId === message.id} className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><ReactionIcon /></button>{canDeleteMessage && <button type="button" onClick={(event) => openDeleteConfirmation(message, event.currentTarget)} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} aria-label="Delete your message" title="Delete" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50"><DeleteIcon /></button>}</div>}
                       </div>
-                      {reactionGroups.length > 0 && <div className={`mt-1.5 flex max-w-full flex-wrap gap-1 ${isCurrentUser ? "justify-end" : "justify-start"}`}>{reactionGroups.map((group) => { const peopleLabel = `${group.count} ${group.count === 1 ? "person" : "people"}`; const pendingKey = currentUserId ? getReactionTupleKey({ messageId: message.kind === "confirmed" ? message.id : "", userId: currentUserId, emoji: group.emoji }) : ""; return <button key={group.emoji} type="button" onClick={() => message.kind === "confirmed" && void toggleReaction(message.id, group.emoji)} disabled={!currentUserId || pendingReactionKeys.has(pendingKey)} aria-pressed={group.reactedByCurrentUser} aria-label={`${getEmojiLabel(group.emoji)} reaction, ${peopleLabel}${group.reactedByCurrentUser ? ", including you" : ""}`} className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-60 ${group.reactedByCurrentUser ? "border-primary/30 bg-accent text-heading" : "border-border bg-surface text-body hover:bg-accent"}`}><span aria-hidden="true" className="text-sm">{group.emoji}</span><span aria-hidden="true" className="font-semibold">{group.count}</span></button>; })}</div>}
+                      {reactionGroups.length > 0 && <div className={`relative z-10 -mt-1 flex max-w-full flex-wrap gap-1 px-1 ${isCurrentUser ? "justify-end" : "justify-start"}`}>{reactionGroups.map((group) => { const reactionName = getEmojiLabel(group.emoji).toLowerCase(); return <button key={group.emoji} type="button" onClick={(event) => message.kind === "confirmed" && openReactionDetails(message.id, event.currentTarget)} aria-haspopup="dialog" aria-expanded={message.kind === "confirmed" && reactionDetailsMessageId === message.id} aria-label={`View ${group.count} ${reactionName} ${group.count === 1 ? "reaction" : "reactions"}${group.reactedByCurrentUser ? ", including you" : ""}`} className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 ${group.reactedByCurrentUser ? "border-primary/30 bg-accent text-heading" : "border-border bg-surface text-body hover:bg-accent"}`}><span aria-hidden="true" className="text-sm">{group.emoji}</span><span aria-hidden="true" className="font-semibold">{group.count}</span></button>; })}</div>}
                       {shouldShowStatus && <p role={isFailed ? "alert" : isSending ? "status" : undefined} className={`mt-1.5 px-1 text-right text-xs font-medium ${isFailed ? "text-primary" : "text-muted"}`}>{statusLabel}</p>}
                     </div>
-                    {message.kind === "confirmed" && <button type="button" onClick={(event) => openMobileActionSheet(message.id, event.currentTarget)} aria-label={`Open actions for message from ${replyActionSenderName}`} aria-haspopup="dialog" aria-expanded={mobileActionMessageId === message.id} className="pointer-events-none absolute right-0 top-0 z-10 flex h-9 w-9 items-center justify-center rounded-xl bg-surface text-muted opacity-0 shadow-soft transition focus:pointer-events-auto focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 md:hidden"><svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg></button>}
+                    {message.kind === "confirmed" && !message.isDeleted && <button type="button" onClick={(event) => openMobileActionSheet(message.id, event.currentTarget)} aria-label={`Open actions for message from ${replyActionSenderName}`} aria-haspopup="dialog" aria-expanded={mobileActionMessageId === message.id} className="pointer-events-none absolute right-0 top-0 z-10 flex h-9 w-9 items-center justify-center rounded-xl bg-surface text-muted opacity-0 shadow-soft transition focus:pointer-events-auto focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 md:hidden"><svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg></button>}
                   </article>
                 );
               })}
@@ -1172,7 +1423,9 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
           </div>
         </div>
       </form>
-      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} onClose={() => setMobileActionMessageId(null)} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
+      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} onClose={() => setMobileActionMessageId(null)} onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
+      <AnimatePresence initial={false} onExitComplete={() => { const anchor = reactionDetailsAnchorRef.current; if (anchor?.isConnected) anchor.focus(); else if (lastReactionDetailsMessageIdRef.current) messageElementsRef.current.get(lastReactionDetailsMessageIdRef.current)?.focus(); }}>{reactionDetailsMessage && (reactionDetailsReactions.length > 0 || isReactionDetailsMutationPending) && <ReactionDetails key={reactionDetailsMessage.id} anchorRef={reactionDetailsAnchorRef} currentUserId={currentUserId} error={reactionProfilesError} isLoading={isReactionProfilesLoading} isMutationPending={isReactionDetailsMutationPending} messageLabel={`message from ${reactionDetailsMessage.senderId === currentUserId ? "yourself" : otherName}`} mutationError={reactionDetailsMutationError} pendingReactionKeys={pendingReactionKeys} profilesById={availableReactionProfilesById} reactions={reactionDetailsReactions} onClose={closeReactionDetails} onRemoveOwnReaction={(reaction) => void removeOwnReactionFromDetails(reaction)} onRetry={retryReactionProfiles} />}</AnimatePresence>
+      <AnimatePresence initial={false}>{messageDeleteState && <MessageDeleteDialog key={messageDeleteState.messageId} error={messageDeleteState.error} isDeleting={messageDeleteState.isDeleting} returnFocusRef={deleteTriggerRef} onCancel={cancelMessageDeletion} onConfirm={() => void confirmMessageDeletion()} />}</AnimatePresence>
       {quickReactionMessageId && <QuickReactionMenu anchorRef={reactionAnchorRef} quickReactions={quickReactions} messageLabel="this message" onSelect={(emoji) => void toggleReaction(quickReactionMessageId, emoji)} onClose={() => setQuickReactionMessageId(null)} onOpenPicker={() => setFullReactionPickerMessageId(quickReactionMessageId)} />}
       {fullReactionPickerMessageId && <EmojiPicker anchorRef={reactionAnchorRef} ariaLabel="Choose a message reaction" onSelect={(emoji) => void toggleReaction(fullReactionPickerMessageId, emoji)} onClose={() => setFullReactionPickerMessageId(null)} placement="top" />}
       {isComposerEmojiPickerOpen && <EmojiPicker anchorRef={composerEmojiButtonRef} ariaLabel="Insert an emoji into your message" onSelect={insertComposerEmoji} onClose={() => setIsComposerEmojiPickerOpen(false)} placement="top" />}
@@ -1180,7 +1433,7 @@ function AcceptedConversationPanel({ conversation, currentUserId, compactVisibil
   );
 }
 
-function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageEdited, onStartConversation, onMobileBack }: ChatPanelProps) {
+function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onStartConversation, onMobileBack }: ChatPanelProps) {
   const visibilityClasses = isMobileVisible ? "flex" : "hidden lg:flex";
 
   if (chatState?.kind === "pending") {
@@ -1195,7 +1448,7 @@ function ChatPanel({ chatState, currentUserId, isMobileVisible, realtimeRefreshK
   }
 
   if (chatState?.kind === "accepted") {
-    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageEdited={onMessageEdited} onMobileBack={onMobileBack} /></main>;
+    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onMobileBack={onMobileBack} /></main>;
   }
 
   return (

@@ -37,6 +37,8 @@ export type MessageSidebarItem =
       latestMessage: string | null;
       latestMessageAt: string | null;
       latestMessageEditedAt: string | null;
+      latestMessageIsDeleted: boolean;
+      latestMessageDeletedAt: string | null;
       latestMessageSentByCurrentUser: boolean | null;
       updatedAt: string;
       unreadCount: number;
@@ -53,6 +55,7 @@ export type MessageReplyPreview = {
   senderName: string;
   body: string | null;
   unavailable: boolean;
+  isDeleted: boolean;
 };
 
 export type ChatMessage = {
@@ -63,6 +66,8 @@ export type ChatMessage = {
   body: string;
   createdAt: string;
   editedAt: string | null;
+  isDeleted: boolean;
+  deletedAt: string | null;
   isIntroduction: boolean;
   replyToMessageId: string | null;
   replyPreview: MessageReplyPreview | null;

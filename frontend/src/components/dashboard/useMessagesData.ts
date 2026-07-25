@@ -28,7 +28,7 @@ type DirectConversationRow = {
   created_at: string;
   updated_at: string;
   conversation_participants: Array<{ user_id: string }>;
-  messages: Array<{ id: string; body: string; created_at: string; edited_at: string | null; sender_id: string }>;
+  messages: Array<{ id: string; body: string; created_at: string; edited_at: string | null; is_deleted: boolean; deleted_at: string | null; sender_id: string }>;
 };
 
 function useMessagesData({ currentUserId, isAccountResolved, currentUserReceiptsByConversationId, onIncomingMessageSynchronized }: UseMessagesDataOptions) {
@@ -73,7 +73,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       if (conversationIds.length > 0) {
         const { data: conversationData, error: conversationError } = await supabase
           .from("conversations")
-          .select("id, created_at, updated_at, conversation_participants(user_id), messages(id, body, created_at, edited_at, sender_id)")
+          .select("id, created_at, updated_at, conversation_participants(user_id), messages(id, body, created_at, edited_at, is_deleted, deleted_at, sender_id)")
           .in("id", conversationIds)
           .eq("conversation_type", "direct")
           .order("created_at", { referencedTable: "messages", ascending: false })
@@ -159,9 +159,11 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           conversationId: conversation.id,
           otherProfile: profileById.get(otherUserId) ?? fallbackProfile(otherUserId),
           latestMessageId: latestMessage?.id ?? null,
-          latestMessage: latestMessage?.body ?? null,
+          latestMessage: latestMessage ? latestMessage.is_deleted ? "Message deleted" : latestMessage.body : null,
           latestMessageAt: latestMessage?.created_at ?? null,
           latestMessageEditedAt: latestMessage?.edited_at ?? null,
+          latestMessageIsDeleted: latestMessage?.is_deleted ?? false,
+          latestMessageDeletedAt: latestMessage?.deleted_at ?? null,
           latestMessageSentByCurrentUser: latestMessage ? latestMessage.sender_id === userId : null,
           updatedAt: conversation.updated_at || conversation.created_at,
           unreadCount: unreadCountByConversationId.get(conversation.id) ?? 0,
@@ -213,14 +215,24 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     }));
   }, []);
 
-  const patchEditedMessagePreview = useCallback((message: ChatMessage) => {
+  const patchMessagePreview = useCallback((message: ChatMessage, allowDeletedRestore = false) => {
     setConversations((currentConversations) => currentConversations.map((conversation) => {
       if (conversation.conversationId !== message.conversationId || conversation.latestMessageId !== message.id) return conversation;
+      if (conversation.latestMessageIsDeleted && !message.isDeleted && !allowDeletedRestore) return conversation;
+      if (message.isDeleted) {
+        return {
+          ...conversation,
+          latestMessage: "Message deleted",
+          latestMessageEditedAt: message.editedAt,
+          latestMessageIsDeleted: true,
+          latestMessageDeletedAt: message.deletedAt,
+        };
+      }
       const currentEditedTime = Date.parse(conversation.latestMessageEditedAt ?? "");
       const incomingEditedTime = Date.parse(message.editedAt ?? "");
       if (!Number.isNaN(currentEditedTime) && (Number.isNaN(incomingEditedTime) || incomingEditedTime < currentEditedTime)) return conversation;
       if (!Number.isNaN(currentEditedTime) && incomingEditedTime === currentEditedTime && conversation.latestMessage !== message.body) return conversation;
-      return { ...conversation, latestMessage: message.body, latestMessageEditedAt: message.editedAt };
+      return { ...conversation, latestMessage: message.body, latestMessageEditedAt: message.editedAt, latestMessageIsDeleted: false, latestMessageDeletedAt: null };
     }));
   }, []);
 
@@ -246,7 +258,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     refresh,
     refreshSilently,
     mergeProfileLastSeen,
-    patchEditedMessagePreview,
+    patchMessagePreview,
   };
 }
 

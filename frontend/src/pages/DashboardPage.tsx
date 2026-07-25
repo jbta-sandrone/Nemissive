@@ -80,7 +80,7 @@ function DashboardPage() {
   const { receiptEvents, currentUserReceiptsByConversationId, advanceDelivered, advanceRead, handleRealtimeReceipt } = receiptsController;
   const messagesController = useMessagesData({ currentUserId, isAccountResolved, currentUserReceiptsByConversationId, onIncomingMessageSynchronized: advanceDelivered });
   const mergeProfileLastSeen = messagesController.mergeProfileLastSeen;
-  const patchEditedMessagePreview = messagesController.patchEditedMessagePreview;
+  const patchMessagePreview = messagesController.patchMessagePreview;
   const refreshMessages = messagesController.refresh;
   const refreshMessagesSilently = messagesController.refreshSilently;
   const requestsController = useMessageRequests({ currentUserId, isAccountResolved, onConversationReady: handleConversationReady, onRequestsChanged: refreshMessages });
@@ -102,8 +102,11 @@ function DashboardPage() {
   const handleRealtimeMessageUpdated = useCallback((message: ChatMessage) => {
     const event = { sequence: ++realtimeMessageUpdateSequenceRef.current, message };
     setRealtimeMessageUpdateEvents((currentEvents) => [...currentEvents.slice(-99), event]);
-    patchEditedMessagePreview(message);
-  }, [patchEditedMessagePreview]);
+    patchMessagePreview(message);
+  }, [patchMessagePreview]);
+  const handleMessageDeletionRolledBack = useCallback((message: ChatMessage) => {
+    patchMessagePreview(message, true);
+  }, [patchMessagePreview]);
   const handleRealtimeMessageReactionChanged = useCallback((change: MessageReactionRealtimeChange) => {
     const event = { sequence: ++realtimeReactionSequenceRef.current, ...change };
     setRealtimeReactionEvents((currentEvents) => [...currentEvents.slice(-199), event]);
@@ -210,7 +213,7 @@ function DashboardPage() {
       <div className="flex h-screen w-full min-w-0 flex-col overflow-hidden bg-background md:flex-row">
         <NavigationRail activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} unreadMessageCount={messagesController.aggregateUnreadCount} isCompactChatVisible={effectiveCompactChatVisible} onSectionChange={handleSectionChange} />
         <Sidebar activeSection={activeSection} currentProfile={currentProfile} isAccountResolved={isAccountResolved} accountError={accountError} isCompactChatVisible={effectiveCompactChatVisible} requestsController={requestsController} messagesController={messagesController} chatState={resolvedChatState} onlineUserIds={presenceController.onlineUserIds} quickReactions={quickReactions} onSaveQuickReactions={saveQuickReactions} onBeforeSignOut={() => void presenceController.markLastSeenNow()} onNewConversation={openNewConversation} onPendingRequestSelected={handlePendingRequestSelected} onConversationReady={handleConversationReady} />
-        <ChatPanel chatState={resolvedChatState} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={receiptEvents} onlineUserIds={presenceController.onlineUserIds} quickReactions={quickReactions} onIncomingMessagesSynchronized={advanceDelivered} onConversationRead={advanceRead} onMessageConfirmed={refreshMessagesSilently} onMessageEdited={patchEditedMessagePreview} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
+        <ChatPanel chatState={resolvedChatState} currentProfile={currentProfile} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={receiptEvents} onlineUserIds={presenceController.onlineUserIds} quickReactions={quickReactions} onIncomingMessagesSynchronized={advanceDelivered} onConversationRead={advanceRead} onMessageConfirmed={refreshMessagesSilently} onMessageUpdated={patchMessagePreview} onMessageDeletionRolledBack={handleMessageDeletionRolledBack} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} />
       </div>
 
       <NewConversationModal isOpen={isNewConversationOpen} currentUserId={currentUserId} isAccountResolved={isAccountResolved} accountError={accountError} relationshipsByProfileId={relationshipsByProfileId} isRelationshipsLoading={messagesController.isLoading || requestsController.isLoading} relationshipsError={messagesController.loadError || requestsController.loadError} onClose={() => setIsNewConversationOpen(false)} onConversationSelected={handleConversationReady} onPendingRequestSelected={handlePendingRequestSelected} onRequestCreated={handleRequestCreated} onOpenIncomingRequests={openMessageRequestsSection} onRefreshRelationships={refreshRelationships} />
