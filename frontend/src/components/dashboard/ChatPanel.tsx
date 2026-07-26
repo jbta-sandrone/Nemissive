@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, OptimisticChatMessage, ParticipantReceiptCursor, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
+import type { ChatMessage, ComposerImageSelection, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
 import AnchoredPopover from "./AnchoredPopover";
+import ComposerMediaPreview from "./ComposerMediaPreview";
 import EmojiPicker from "./EmojiPicker";
+import ImageViewer from "./ImageViewer";
 import MessageActionSheet from "./MessageActionSheet";
+import MessageActionsToolbar from "./MessageActionsToolbar";
 import MessageDeleteDialog from "./MessageDeleteDialog";
+import MessageMediaGallery, { type GalleryMediaItem } from "./MessageMediaGallery";
 import PresenceAvatar from "./PresenceAvatar";
 import ProfileAvatar from "./ProfileAvatar";
 import ReactionDetails from "./ReactionDetails";
@@ -13,6 +17,7 @@ import { getEmojiLabel } from "./emojiData";
 import { formatLastSeen } from "./presenceUtils";
 import { getProfileDisplayName } from "./profileUtils";
 import useConversationTyping from "./useConversationTyping";
+import useSignedMessageMedia from "./useSignedMessageMedia";
 
 type MessageRow = {
   id: string;
@@ -24,7 +29,25 @@ type MessageRow = {
   is_deleted: boolean;
   deleted_at: string | null;
   source_request_id: string | null;
+  message_type: "text" | "image";
   reply_to_message_id: string | null;
+};
+
+type AttachmentRow = {
+  id: string;
+  message_id: string;
+  storage_path: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+  width: number;
+  height: number;
+  position: number;
+};
+
+type CreateImageMessageResult = {
+  message: MessageRow;
+  attachments: AttachmentRow[];
 };
 
 type ParticipantRow = {
@@ -109,8 +132,48 @@ const replyPreviewMaxLength = 120;
 const replyHighlightDurationMs = 1400;
 const mobileLongPressDurationMs = 450;
 const mobileLongPressMovementThreshold = 12;
+const imageMaxFileSize = 10 * 1024 * 1024;
+const imageMaxCount = 10;
+const messageMediaBucket = "message-media";
+const acceptedImageMimeTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const acceptedImageInputTypes = "image/png,image/jpeg,image/webp,image/gif,.jpg,.jpeg";
 
-function mapMessageRow(row: MessageRow, replyPreview: MessageReplyPreview | null = null): ChatMessage {
+function createUuid() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
+    const random = Math.floor(Math.random() * 16);
+    return (character === "x" ? random : (random & 0x3) | 0x8).toString(16);
+  });
+}
+
+function getImageExtension(mimeType: string) {
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  return "gif";
+}
+
+function getImageDimensions(objectUrl: string) {
+  return new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => reject(new Error("The selected image could not be read."));
+    image.src = objectUrl;
+  });
+}
+
+function hasControlCharacters(value: string) {
+  return [...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127;
+  });
+}
+
+function mapAttachmentRow(row: AttachmentRow): MessageAttachment {
+  return { id: row.id, messageId: row.message_id, storagePath: row.storage_path, originalName: row.original_name, mimeType: row.mime_type, size: row.size_bytes, width: row.width, height: row.height, position: row.position };
+}
+
+function mapMessageRow(row: MessageRow, replyPreview: MessageReplyPreview | null = null, attachments: MessageAttachment[] = []): ChatMessage {
   return {
     kind: "confirmed",
     id: row.id,
@@ -122,6 +185,8 @@ function mapMessageRow(row: MessageRow, replyPreview: MessageReplyPreview | null
     isDeleted: row.is_deleted,
     deletedAt: row.deleted_at,
     isIntroduction: Boolean(row.source_request_id),
+    messageType: row.message_type === "image" ? "image" : "text",
+    attachments,
     replyToMessageId: row.reply_to_message_id,
     replyPreview,
   };
@@ -133,12 +198,12 @@ function normalizeReplyPreviewBody(body: string) {
   return `${normalizedBody.slice(0, replyPreviewMaxLength - 1).trimEnd()}…`;
 }
 
-function createReplyPreview(message: Pick<ChatMessage, "id" | "senderId" | "body" | "isDeleted">, currentUserId: string | null, otherName: string): MessageReplyPreview {
+function createReplyPreview(message: Pick<ChatMessage, "id" | "senderId" | "body" | "isDeleted" | "messageType">, currentUserId: string | null, otherName: string): MessageReplyPreview {
   return {
     id: message.id,
     senderId: message.senderId,
     senderName: message.senderId === currentUserId ? "You" : otherName,
-    body: message.isDeleted ? null : normalizeReplyPreviewBody(message.body),
+    body: message.isDeleted ? null : message.messageType === "image" && !message.body ? "Photo" : normalizeReplyPreviewBody(message.body),
     unavailable: false,
     isDeleted: message.isDeleted,
   };
@@ -267,8 +332,7 @@ function reconcileConfirmedMessage(messages: DisplayChatMessage[], confirmedMess
 }
 
 function createOptimisticId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  return `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return createUuid();
 }
 
 function formatMessageTimestamp(value: string) {
@@ -298,22 +362,6 @@ function EmojiIcon() {
 
 function SendIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-5 w-5" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z" strokeLinejoin="round" /><path d="M7 12h13" strokeLinecap="round" /></svg>;
-}
-
-function ReactionIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M9 10h.01M15 10h.01M8.5 14.5c1 1.2 2.1 1.8 3.5 1.8s2.5-.6 3.5-1.8M18.5 4.5v4M16.5 6.5h4" strokeLinecap="round" /></svg>;
-}
-
-function ReplyIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m10 8-5 4 5 4" strokeLinecap="round" strokeLinejoin="round" /><path d="M6 12h6.5c3.6 0 5.5 1.8 5.5 5" strokeLinecap="round" /></svg>;
-}
-
-function EditIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m5 15.5-.8 4.3 4.3-.8L18 9.5 14.5 6 5 15.5Z" strokeLinecap="round" strokeLinejoin="round" /><path d="m12.8 7.7 3.5 3.5" strokeLinecap="round" /></svg>;
-}
-
-function DeleteIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v5m4-5v5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
 function QuickReactionMenu({ anchorRef, quickReactions, messageLabel, onClose, onOpenPicker, onSelect }: { anchorRef: RefObject<HTMLElement | null>; quickReactions: string[]; messageLabel: string; onClose: () => void; onOpenPicker: () => void; onSelect: (emoji: string) => void }) {
@@ -354,6 +402,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const editTriggerRef = useRef<HTMLElement | null>(null);
   const deleteTriggerRef = useRef<HTMLElement | null>(null);
@@ -383,7 +432,12 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const pendingReactionKeysRef = useRef(new Set<string>());
   const replyTargetCacheRef = useRef(new Map<string, ChatMessage>());
   const replyTargetFetchesRef = useRef(new Map<string, Promise<void>>());
+  const attachmentCacheRef = useRef(new Map<string, MessageAttachment[]>());
+  const attachmentFetchesRef = useRef(new Map<string, Promise<void>>());
   const messageElementsRef = useRef(new Map<string, HTMLElement>());
+  const selectedImagesRef = useRef<ComposerImageSelection[]>([]);
+  const optimisticPreviewUrlsRef = useRef(new Set<string>());
+  const imageViewerReturnFocusRef = useRef<HTMLElement | null>(null);
   const deletedMessageIdsRef = useRef(new Set<string>());
   const reactionAnchorRef = useRef<HTMLElement | null>(null);
   const reactionDetailsAnchorRef = useRef<HTMLElement | null>(null);
@@ -394,6 +448,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const [messages, setMessages] = useState<DisplayChatMessage[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   const [draft, setDraft] = useState("");
+  const [selectedImages, setSelectedImages] = useState<ComposerImageSelection[]>([]);
+  const [mediaError, setMediaError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [historyError, setHistoryError] = useState("");
@@ -418,14 +474,18 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const [messageEditState, setMessageEditState] = useState<MessageEditState | null>(null);
   const [messageDeleteState, setMessageDeleteState] = useState<MessageDeleteState | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [imageViewerState, setImageViewerState] = useState<{ messageId: string; initialIndex: number } | null>(null);
   const [otherReceipt, setOtherReceipt] = useState<ParticipantReceiptCursor | null>(null);
   const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
   const otherName = getProfileDisplayName(conversation.otherProfile);
   const presenceText = isOtherUserOnline ? "Online" : formatLastSeen(conversation.otherProfile.last_seen_at, relativeTimeNow);
   const { isOtherUserTyping, notifyTyping, stopTyping } = useConversationTyping({ conversationId: conversation.id, currentUserId, otherUserId: conversation.otherProfile.id });
+  const signedMediaPaths = messages.flatMap((message) => message.kind === "confirmed" && !message.isDeleted ? message.attachments.map((attachment) => attachment.storagePath) : []);
+  const signedMedia = useSignedMessageMedia(signedMediaPaths);
 
   useEffect(() => {
     isMountedRef.current = true;
+    const optimisticPreviewUrls = optimisticPreviewUrlsRef.current;
     return () => {
       isMountedRef.current = false;
       if (comingSoonTimerRef.current !== null) window.clearTimeout(comingSoonTimerRef.current);
@@ -433,8 +493,15 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (reactionErrorTimerRef.current !== null) window.clearTimeout(reactionErrorTimerRef.current);
       if (replyHighlightTimerRef.current !== null) window.clearTimeout(replyHighlightTimerRef.current);
       if (mobileLongPressTimerRef.current !== null) window.clearTimeout(mobileLongPressTimerRef.current);
+      selectedImagesRef.current.forEach((image) => URL.revokeObjectURL(image.objectUrl));
+      optimisticPreviewUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
+      optimisticPreviewUrls.clear();
     };
   }, []);
+
+  useEffect(() => {
+    selectedImagesRef.current = selectedImages;
+  }, [selectedImages]);
 
   useEffect(() => {
     function handleSelectionChange() {
@@ -537,7 +604,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     if (replyTargetCacheRef.current.has(replyToMessageId) || replyTargetFetchesRef.current.has(replyToMessageId)) return;
 
     const request = (async () => {
-      const { data, error } = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").eq("id", replyToMessageId).eq("conversation_id", conversation.id).maybeSingle();
+      const { data, error } = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id").eq("id", replyToMessageId).eq("conversation_id", conversation.id).maybeSingle();
       if (!isMountedRef.current) return;
       if (error || !data) {
         if (error && import.meta.env.DEV) console.warn("Loading a realtime reply target failed", { conversationId: conversation.id, code: error.code });
@@ -558,6 +625,27 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     replyTargetFetchesRef.current.set(replyToMessageId, request);
   }, [conversation.id, currentUserId, otherName]);
 
+  const loadMessageAttachments = useCallback((messageId: string) => {
+    if (attachmentCacheRef.current.has(messageId) || attachmentFetchesRef.current.has(messageId)) return;
+
+    const request = (async () => {
+      const { data, error } = await supabase.from("message_attachments").select("id, message_id, storage_path, original_name, mime_type, size_bytes, width, height, position").eq("message_id", messageId).order("position", { ascending: true });
+      if (!isMountedRef.current) return;
+      if (error) {
+        if (import.meta.env.DEV) console.warn("Loading realtime image attachments failed", { conversationId: conversation.id, messageId, code: error.code });
+        return;
+      }
+
+      const attachments = ((data ?? []) as AttachmentRow[]).map(mapAttachmentRow);
+      attachmentCacheRef.current.set(messageId, attachments);
+      setMessages((currentMessages) => currentMessages.map((message) => message.kind === "confirmed" && message.id === messageId ? { ...message, attachments } : message));
+    })().finally(() => {
+      attachmentFetchesRef.current.delete(messageId);
+    });
+
+    attachmentFetchesRef.current.set(messageId, request);
+  }, [conversation.id]);
+
   useEffect(() => {
     const loadId = ++latestLoadRef.current;
     const loadStartRealtimeSequence = processedRealtimeSequenceRef.current;
@@ -569,8 +657,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     async function loadMessages() {
       const shouldScrollAfterLoad = !hasLoadedMessagesRef.current || isNearBottom();
       const [historyResult, introductionResult, participantResult] = await Promise.all([
-        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).order("created_at", { ascending: false }).limit(initialMessageLimit).abortSignal(abortController.signal),
-        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).not("source_request_id", "is", null).order("created_at", { ascending: true }).limit(1).abortSignal(abortController.signal),
+        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id").eq("conversation_id", conversation.id).order("created_at", { ascending: false }).limit(initialMessageLimit).abortSignal(abortController.signal),
+        supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id").eq("conversation_id", conversation.id).not("source_request_id", "is", null).order("created_at", { ascending: true }).limit(1).abortSignal(abortController.signal),
         supabase.from("conversation_participants").select("user_id, last_delivered_at, last_read_at").eq("conversation_id", conversation.id).abortSignal(abortController.signal),
       ]);
 
@@ -584,7 +672,22 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       }
 
       const serverRowsById = new Map([...(historyResult.data ?? []), ...(introductionResult.data ?? [])].map((row) => [row.id, row as MessageRow]));
-      const baseServerMessages = [...serverRowsById.values()].map((row) => mapMessageRow(row));
+      const messageIds = [...serverRowsById.keys()];
+      const attachmentsByMessageId = new Map<string, MessageAttachment[]>();
+      if (messageIds.length > 0) {
+        const attachmentResult = await supabase.from("message_attachments").select("id, message_id, storage_path, original_name, mime_type, size_bytes, width, height, position").in("message_id", messageIds).order("position", { ascending: true }).abortSignal(abortController.signal);
+        if (isCancelled || loadId !== latestLoadRef.current) return;
+        if (attachmentResult.error) {
+          if (import.meta.env.DEV) console.warn("Loading message attachments failed", { conversationId: conversation.id, code: attachmentResult.error.code });
+        } else {
+          ((attachmentResult.data ?? []) as AttachmentRow[]).map(mapAttachmentRow).forEach((attachment) => {
+            const currentAttachments = attachmentsByMessageId.get(attachment.messageId) ?? [];
+            attachmentsByMessageId.set(attachment.messageId, [...currentAttachments, attachment]);
+          });
+        }
+      }
+      attachmentsByMessageId.forEach((attachments, messageId) => attachmentCacheRef.current.set(messageId, attachments));
+      const baseServerMessages = [...serverRowsById.values()].map((row) => mapMessageRow(row, null, attachmentsByMessageId.get(row.id) ?? []));
       const loadedDeletedMessageIds = new Set(baseServerMessages.filter((message) => message.isDeleted).map((message) => message.id));
       loadedDeletedMessageIds.forEach((messageId) => deletedMessageIdsRef.current.add(messageId));
       const replyTargetById = new Map(baseServerMessages.map((message) => [message.id, message]));
@@ -592,7 +695,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       const missingReplyTargetIds = replyTargetIds.filter((messageId) => !replyTargetById.has(messageId));
 
       if (missingReplyTargetIds.length > 0) {
-        const replyTargetsResult = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").eq("conversation_id", conversation.id).in("id", missingReplyTargetIds).abortSignal(abortController.signal);
+        const replyTargetsResult = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id").eq("conversation_id", conversation.id).in("id", missingReplyTargetIds).abortSignal(abortController.signal);
         if (isCancelled || loadId !== latestLoadRef.current) return;
         if (replyTargetsResult.error) {
           if (import.meta.env.DEV) console.warn("Loading reply targets failed", { conversationId: conversation.id, code: replyTargetsResult.error.code });
@@ -607,7 +710,6 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       });
       const serverMessages = baseServerMessages.map((message) => attachReplyPreview(message, message.replyToMessageId ? replyTargetById.get(message.replyToMessageId) : undefined, currentUserId, otherName)).sort((first, second) => Date.parse(first.createdAt) - Date.parse(second.createdAt));
       let serverReactions: MessageReaction[] = [];
-      const messageIds = [...serverRowsById.keys()];
       if (messageIds.length > 0) {
         const reactionResult = await supabase.from("message_reactions").select("id, message_id, user_id, emoji, created_at").in("message_id", messageIds).order("created_at", { ascending: true }).abortSignal(abortController.signal);
         if (isCancelled || loadId !== latestLoadRef.current) return;
@@ -691,11 +793,11 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       let nextMessages = currentMessages;
 
       relevantEvents.forEach((event) => {
-        const incomingMessage = event.message;
+        const incomingMessage = { ...event.message, attachments: attachmentCacheRef.current.get(event.message.id) ?? event.message.attachments };
         const message = attachReplyPreview(incomingMessage, incomingMessage.replyToMessageId ? replyTargetCacheRef.current.get(incomingMessage.replyToMessageId) : undefined, currentUserId, otherName);
         realtimeSequenceByMessageIdRef.current.set(message.id, event.sequence);
         const inFlightMessage = inFlightMessageRef.current;
-        const matchingOptimisticMessage = nextMessages.find((item): item is OptimisticChatMessage => item.kind === "optimistic" && item.senderId === message.senderId && item.body === message.body && item.replyToMessageId === message.replyToMessageId && (item.deliveryState === "sending" || item.deliveryState === "failed"));
+        const matchingOptimisticMessage = nextMessages.find((item): item is OptimisticChatMessage => item.kind === "optimistic" && (item.optimisticId === message.id || (item.senderId === message.senderId && item.body === message.body && item.messageType === message.messageType && item.replyToMessageId === message.replyToMessageId)) && (item.deliveryState === "sending" || item.deliveryState === "failed"));
         const optimisticId = message.senderId === currentUserId && inFlightMessage?.conversationId === message.conversationId && inFlightMessage.body === message.body && inFlightMessage.replyToMessageId === message.replyToMessageId ? inFlightMessage.optimisticId : message.senderId === currentUserId ? matchingOptimisticMessage?.optimisticId : undefined;
         nextMessages = reconcileConfirmedMessage(nextMessages, message, optimisticId);
         const newTargetPreview = createReplyPreview(message, currentUserId, otherName);
@@ -708,6 +810,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     relevantEvents.forEach((event) => {
       const replyToMessageId = event.message.replyToMessageId;
       if (replyToMessageId && !replyTargetCacheRef.current.has(replyToMessageId)) loadReplyTarget(replyToMessageId);
+      if (event.message.messageType === "image" && !attachmentCacheRef.current.has(event.message.id)) loadMessageAttachments(event.message.id);
     });
 
     if (receivedIncomingMessage) {
@@ -715,7 +818,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (shouldAutoScroll) scrollToLatest("auto");
       else setShowJumpToLatest(true);
     }
-  }, [conversation.id, currentUserId, isNearBottom, loadReplyTarget, otherName, realtimeMessageEvents, scrollToLatest]);
+  }, [conversation.id, currentUserId, isNearBottom, loadMessageAttachments, loadReplyTarget, otherName, realtimeMessageEvents, scrollToLatest]);
 
   useEffect(() => {
     const newEvents = realtimeMessageUpdateEvents.filter((event) => event.sequence > processedMessageUpdateSequenceRef.current).sort((first, second) => first.sequence - second.sequence);
@@ -734,6 +837,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       setFullReactionPickerMessageId((messageId) => messageId && deletedMessageIds.has(messageId) ? null : messageId);
       setReactionDetailsMessageId((messageId) => messageId && deletedMessageIds.has(messageId) ? null : messageId);
       setMobileActionMessageId((messageId) => messageId && deletedMessageIds.has(messageId) ? null : messageId);
+      setImageViewerState((currentState) => currentState && deletedMessageIds.has(currentState.messageId) ? null : currentState);
       setMessageDeleteState((currentState) => currentState && deletedMessageIds.has(currentState.messageId) && pendingDeleteRef.current?.messageId !== currentState.messageId ? null : currentState);
       if (pendingEditRef.current && deletedMessageIds.has(pendingEditRef.current.messageId)) pendingEditRef.current = null;
     }
@@ -756,7 +860,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
         }
         const currentMessage = nextMessages.find((message): message is ChatMessage => message.kind === "confirmed" && message.id === incomingMessage.id) ?? replyTargetCacheRef.current.get(incomingMessage.id);
         if (!shouldApplyAuthoritativeMessage(currentMessage, incomingMessage) && incomingMessage.body !== pendingEdit?.attemptedBody) return;
-        const normalizedMessage = { ...incomingMessage, replyPreview: currentMessage?.replyPreview ?? incomingMessage.replyPreview };
+        const normalizedMessage = { ...incomingMessage, attachments: currentMessage?.attachments ?? incomingMessage.attachments, replyPreview: currentMessage?.replyPreview ?? incomingMessage.replyPreview };
         if (pendingEdit?.messageId === incomingMessage.id && incomingMessage.body === pendingEdit.attemptedBody) pendingEdit.confirmedMessage = normalizedMessage;
         messageUpdateSequenceByIdRef.current.set(incomingMessage.id, event.sequence);
         replyTargetCacheRef.current.set(incomingMessage.id, normalizedMessage);
@@ -890,6 +994,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       body: trimmedBody,
       createdAt: new Date().toISOString(),
       deliveryState: "sending",
+      messageType: "text",
+      attachments: [],
       replyToMessageId,
       replyPreview: replyTarget,
     };
@@ -909,7 +1015,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     setShowJumpToLatest(false);
     scrollToLatest("smooth");
 
-    const { data, error } = await supabase.from("messages").insert({ conversation_id: conversation.id, sender_id: currentUserId, body: trimmedBody, reply_to_message_id: replyToMessageId }).select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, reply_to_message_id").single();
+    const { data, error } = await supabase.from("messages").insert({ conversation_id: conversation.id, sender_id: currentUserId, body: trimmedBody, reply_to_message_id: replyToMessageId }).select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id").single();
 
     if (error || !data) {
       if (isMountedRef.current) {
@@ -935,10 +1041,224 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     onMessageConfirmed();
   }
 
+  async function submitImageMessage(caption: string, sourceImages: ComposerImageSelection[] | OptimisticMessageAttachment[], existingOptimisticId?: string, retryReplyTarget?: MessageReplyPreview | null, retryReplyToMessageId?: string | null) {
+    if (!currentUserId || isSubmittingRef.current || sourceImages.length === 0 || sourceImages.length > imageMaxCount) return;
+
+    const trimmedCaption = caption.trim();
+    if (trimmedCaption.length > messageMaxLength) return;
+    const optimisticId = existingOptimisticId ?? createUuid();
+    const replyTarget = existingOptimisticId ? retryReplyTarget ?? null : replyingTo;
+    const replyToMessageId = existingOptimisticId ? retryReplyToMessageId ?? replyTarget?.id ?? null : replyTarget?.id ?? null;
+    const optimisticAttachments: OptimisticMessageAttachment[] = sourceImages.map((image, position) => {
+      if ("previewUrl" in image) return { ...image, position };
+      const previewUrl = URL.createObjectURL(image.file);
+      optimisticPreviewUrlsRef.current.add(previewUrl);
+      return { id: image.localId, messageId: optimisticId, storagePath: `${conversation.id}/${currentUserId}/${optimisticId}/${createUuid()}.${getImageExtension(image.mimeType)}`, originalName: image.originalName, mimeType: image.mimeType, size: image.size, width: image.width, height: image.height, position, file: image.file, previewUrl };
+    });
+    const optimisticMessage: OptimisticChatMessage = { kind: "optimistic", optimisticId, conversationId: conversation.id, senderId: currentUserId, body: trimmedCaption, createdAt: new Date().toISOString(), deliveryState: "sending", messageType: "image", attachments: optimisticAttachments, replyToMessageId, replyPreview: replyTarget };
+
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+    setIsComposerEmojiPickerOpen(false);
+    setMediaError("");
+    stopTyping();
+    setMessages((currentMessages) => sortMessages([...currentMessages.filter((message) => message.kind === "confirmed" || message.optimisticId !== optimisticId), optimisticMessage]));
+    setShowJumpToLatest(false);
+    scrollToLatest("smooth");
+
+    async function cleanupUploadedObjects(paths: string[]) {
+      if (paths.length === 0) return;
+      const { error } = await supabase.storage.from(messageMediaBucket).remove(paths);
+      if (error && import.meta.env.DEV) console.warn("Cleaning up message-media uploads failed", { conversationId: conversation.id, count: paths.length, code: error.message });
+    }
+
+    async function reconcileExistingMessage() {
+      const { data: existingMessage } = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id").eq("id", optimisticId).eq("conversation_id", conversation.id).eq("sender_id", currentUserId).maybeSingle();
+      if (!existingMessage) return null;
+      const { data: existingAttachments, error: attachmentError } = await supabase.from("message_attachments").select("id, message_id, storage_path, original_name, mime_type, size_bytes, width, height, position").eq("message_id", optimisticId).order("position", { ascending: true });
+      if (attachmentError) return null;
+      return { message: existingMessage as MessageRow, attachments: (existingAttachments ?? []) as AttachmentRow[] };
+    }
+
+    let result: CreateImageMessageResult | null = existingOptimisticId ? await reconcileExistingMessage() : null;
+    const uploadedPaths: string[] = [];
+
+    if (!result) {
+      if (existingOptimisticId) await cleanupUploadedObjects(optimisticAttachments.map((attachment) => attachment.storagePath));
+      for (const attachment of optimisticAttachments) {
+        const { error } = await supabase.storage.from(messageMediaBucket).upload(attachment.storagePath, attachment.file, { cacheControl: "3600", contentType: attachment.mimeType, upsert: false });
+        if (error) {
+          await cleanupUploadedObjects(optimisticAttachments.map((item) => item.storagePath));
+          if (isMountedRef.current) {
+            setMessages((currentMessages) => currentMessages.map((message) => message.kind === "optimistic" && message.optimisticId === optimisticId ? { ...message, deliveryState: "failed" } : message));
+            setMediaError("One or more images couldn’t be uploaded. Your selection is still available to retry.");
+          }
+          if (import.meta.env.DEV) console.error("Uploading message image failed", { conversationId: conversation.id, path: attachment.storagePath, code: error.message });
+          isSubmittingRef.current = false;
+          setIsSubmitting(false);
+          return;
+        }
+        uploadedPaths.push(attachment.storagePath);
+      }
+
+      const attachmentRecords = optimisticAttachments.map((attachment) => ({ storage_path: attachment.storagePath, original_name: attachment.originalName, mime_type: attachment.mimeType, size_bytes: attachment.size, width: attachment.width, height: attachment.height, position: attachment.position }));
+      const { data, error } = await supabase.rpc("create_image_message", { target_message_id: optimisticId, target_conversation_id: conversation.id, caption_text: trimmedCaption, target_reply_to_message_id: replyToMessageId, attachment_records: attachmentRecords });
+      if (!error && data && typeof data === "object" && "message" in data && "attachments" in data) result = data as unknown as CreateImageMessageResult;
+      if (!result) result = await reconcileExistingMessage();
+      if (!result) {
+        await cleanupUploadedObjects(uploadedPaths);
+        if (isMountedRef.current) {
+          setMessages((currentMessages) => currentMessages.map((message) => message.kind === "optimistic" && message.optimisticId === optimisticId ? { ...message, deliveryState: "failed" } : message));
+          setMediaError("The image message couldn’t be created. Your caption and images are still available.");
+        }
+        if (import.meta.env.DEV) console.error("Creating image message failed", { conversationId: conversation.id, code: error?.code });
+        isSubmittingRef.current = false;
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    const attachments = result.attachments.map(mapAttachmentRow);
+    const confirmedMessage = mapMessageRow(result.message, replyTarget ?? (replyToMessageId ? createUnavailableReplyPreview(replyToMessageId) : null), attachments);
+    attachmentCacheRef.current.set(confirmedMessage.id, attachments);
+    locallyConfirmedMessageIdsRef.current.add(confirmedMessage.id);
+    if (isMountedRef.current) {
+      setMessages((currentMessages) => reconcileConfirmedMessage(currentMessages, confirmedMessage, optimisticId));
+      const sentFiles = new Set(sourceImages.map((image) => image.file));
+      const sentSelectedImages = selectedImagesRef.current.filter((image) => sentFiles.has(image.file));
+      const remainingSelectedImages = selectedImagesRef.current.filter((image) => !sentFiles.has(image.file));
+      selectedImagesRef.current = remainingSelectedImages;
+      setSelectedImages(remainingSelectedImages);
+      if (draft.trim() === trimmedCaption && remainingSelectedImages.length === 0) {
+        setDraft("");
+        resetTextareaHeight();
+      }
+      setMediaError("");
+      if (mediaInputRef.current) mediaInputRef.current.value = "";
+      if (replyTarget) setReplyingTo((currentTarget) => currentTarget?.id === replyTarget.id ? null : currentTarget);
+      window.requestAnimationFrame(() => {
+        sentSelectedImages.forEach((image) => URL.revokeObjectURL(image.objectUrl));
+        optimisticAttachments.forEach((attachment) => {
+          optimisticPreviewUrlsRef.current.delete(attachment.previewUrl);
+          URL.revokeObjectURL(attachment.previewUrl);
+        });
+        textareaRef.current?.focus();
+      });
+    }
+    isSubmittingRef.current = false;
+    setIsSubmitting(false);
+    onMessageConfirmed();
+  }
+
   function handleSend(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     if (messageEditState) return;
+    if (selectedImages.length > 0) {
+      const failedAttempt = [...messages].reverse().find((message): message is OptimisticChatMessage => message.kind === "optimistic" && message.messageType === "image" && message.deliveryState === "failed" && message.body === draft.trim() && message.attachments.length === selectedImages.length && message.attachments.every((attachment, index) => attachment.file === selectedImages[index]?.file));
+      if (failedAttempt) {
+        void submitImageMessage(failedAttempt.body, failedAttempt.attachments, failedAttempt.optimisticId, failedAttempt.replyPreview, failedAttempt.replyToMessageId);
+        return;
+      }
+      void submitImageMessage(draft, selectedImages);
+      return;
+    }
     void submitMessage(draft);
+  }
+
+  function openImagePicker() {
+    const input = mediaInputRef.current;
+    if (!input) return;
+    setIsComposerEmojiPickerOpen(false);
+    input.value = "";
+    input.click();
+  }
+
+  async function handleImageSelection(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = [...(event.currentTarget.files ?? [])];
+    event.currentTarget.value = "";
+    if (files.length === 0) return;
+
+    const existingImages = selectedImagesRef.current;
+    const duplicateKeys = new Set(existingImages.map((image) => image.duplicateKey));
+    const availableSlots = imageMaxCount - existingImages.length;
+    const acceptedImages: ComposerImageSelection[] = [];
+    const rejectedReasons: string[] = [];
+
+    for (const file of files) {
+      const mimeType = file.type.toLowerCase();
+      const duplicateKey = `${file.name.toLowerCase()}:${file.size}:${file.lastModified}:${mimeType}`;
+      if (acceptedImages.length >= availableSlots) {
+        rejectedReasons.push(`${file.name}: the 10-image limit was reached`);
+        continue;
+      }
+      if (!acceptedImageMimeTypes.has(mimeType)) {
+        rejectedReasons.push(`${file.name}: unsupported file type`);
+        continue;
+      }
+      if (!file.name.trim() || file.name.length > 255 || hasControlCharacters(file.name)) {
+        rejectedReasons.push("An image filename is invalid");
+        continue;
+      }
+      if (file.size < 1 || file.size > imageMaxFileSize) {
+        rejectedReasons.push(`${file.name}: images must be 10 MB or smaller`);
+        continue;
+      }
+      if (duplicateKeys.has(duplicateKey)) {
+        rejectedReasons.push(`${file.name}: duplicate image`);
+        continue;
+      }
+
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const dimensions = await getImageDimensions(objectUrl);
+        if (dimensions.width < 1 || dimensions.height < 1 || dimensions.width > 20000 || dimensions.height > 20000) {
+          URL.revokeObjectURL(objectUrl);
+          rejectedReasons.push(`${file.name}: image dimensions are too large`);
+          continue;
+        }
+        acceptedImages.push({ localId: createUuid(), file, objectUrl, originalName: file.name, mimeType, size: file.size, width: dimensions.width, height: dimensions.height, duplicateKey });
+        duplicateKeys.add(duplicateKey);
+      } catch {
+        URL.revokeObjectURL(objectUrl);
+        rejectedReasons.push(`${file.name}: the image could not be read`);
+      }
+    }
+
+    if (!isMountedRef.current) {
+      acceptedImages.forEach((image) => URL.revokeObjectURL(image.objectUrl));
+      return;
+    }
+    if (acceptedImages.length > 0) {
+      const nextImages = [...existingImages, ...acceptedImages];
+      selectedImagesRef.current = nextImages;
+      setSelectedImages(nextImages);
+    }
+    setMediaError(rejectedReasons.length > 0 ? rejectedReasons.join(" · ") : "");
+  }
+
+  function removeSelectedImage(localId: string) {
+    const image = selectedImagesRef.current.find((item) => item.localId === localId);
+    const nextImages = selectedImagesRef.current.filter((item) => item.localId !== localId);
+    selectedImagesRef.current = nextImages;
+    setSelectedImages(nextImages);
+    setMediaError("");
+    if (mediaInputRef.current) mediaInputRef.current.value = "";
+    window.requestAnimationFrame(() => {
+      if (image) URL.revokeObjectURL(image.objectUrl);
+      textareaRef.current?.focus();
+    });
+  }
+
+  function removeAllSelectedImages() {
+    const images = selectedImagesRef.current;
+    selectedImagesRef.current = [];
+    setSelectedImages([]);
+    setMediaError("");
+    if (mediaInputRef.current) mediaInputRef.current.value = "";
+    window.requestAnimationFrame(() => {
+      images.forEach((image) => URL.revokeObjectURL(image.objectUrl));
+      textareaRef.current?.focus();
+    });
   }
 
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -953,11 +1273,22 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   function handleRetryMessage(message: OptimisticChatMessage) {
+    if (message.messageType === "image") {
+      void submitImageMessage(message.body, message.attachments, message.optimisticId, message.replyPreview, message.replyToMessageId);
+      return;
+    }
     void submitMessage(message.body, message.optimisticId, message.replyPreview, message.replyToMessageId);
   }
 
   function handleRemoveFailedMessage(optimisticId: string) {
+    const removedMessage = messages.find((message): message is OptimisticChatMessage => message.kind === "optimistic" && message.optimisticId === optimisticId);
     setMessages((currentMessages) => currentMessages.filter((message) => message.kind === "confirmed" || message.optimisticId !== optimisticId));
+    if (removedMessage?.messageType === "image") {
+      window.requestAnimationFrame(() => removedMessage.attachments.forEach((attachment) => {
+          optimisticPreviewUrlsRef.current.delete(attachment.previewUrl);
+          URL.revokeObjectURL(attachment.previewUrl);
+      }));
+    }
   }
 
   function cancelMobileLongPress() {
@@ -1170,7 +1501,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     }
 
     const normalizedBody = messageEditState.draft.trim();
-    if (!normalizedBody) {
+    if (!normalizedBody && message.messageType === "text") {
       setMessageEditState((currentState) => currentState ? { ...currentState, error: "A message cannot be empty." } : currentState);
       return;
     }
@@ -1212,7 +1543,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       return;
     }
 
-    const rpcMessage = mapMessageRow(data as MessageRow, message.replyPreview);
+    const rpcMessage = mapMessageRow(data as MessageRow, message.replyPreview, message.attachments);
     const authoritativeMessage = pendingEdit.deferredMessage && shouldApplyAuthoritativeMessage(rpcMessage, pendingEdit.deferredMessage) ? pendingEdit.deferredMessage : rpcMessage;
     pendingEditRef.current = null;
     const cachedMessage = replyTargetCacheRef.current.get(message.id);
@@ -1298,7 +1629,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       return;
     }
 
-    const rpcMessage = mapMessageRow(data as MessageRow, message.replyPreview);
+    const rpcMessage = mapMessageRow(data as MessageRow, message.replyPreview, message.attachments);
     const authoritativeMessage = pendingDelete.confirmedMessage && shouldApplyAuthoritativeMessage(rpcMessage, pendingDelete.confirmedMessage) ? pendingDelete.confirmedMessage : rpcMessage;
     pendingDeleteRef.current = null;
     deletedMessageIdsRef.current.add(message.id);
@@ -1332,13 +1663,14 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   const remainingCharacters = messageMaxLength - draft.length;
   const showCharacterCount = remainingCharacters <= characterCountThreshold;
-  const isSendDisabled = !currentUserId || !draft.trim() || isSubmitting || Boolean(messageEditState) || draft.length > messageMaxLength;
+  const isSendDisabled = !currentUserId || (!draft.trim() && selectedImages.length === 0) || isSubmitting || Boolean(messageEditState) || draft.length > messageMaxLength;
   const shouldShowIntroductoryFallback = Boolean(conversation.introductoryMessage) && !messages.some((message) => message.kind === "confirmed" && message.isIntroduction);
   const newestDisplayedMessage = messages.at(-1);
   const statusMessageKey = newestDisplayedMessage?.senderId === currentUserId ? getMessageKey(newestDisplayedMessage) : null;
   const composerHelpId = `message-composer-help-${conversation.id}`;
   const characterCountId = `message-character-count-${conversation.id}`;
-  const composerDescription = showCharacterCount ? `${composerHelpId} ${characterCountId}` : composerHelpId;
+  const mediaErrorId = `message-media-error-${conversation.id}`;
+  const composerDescription = [composerHelpId, showCharacterCount ? characterCountId : "", mediaError ? mediaErrorId : ""].filter(Boolean).join(" ");
   const loadedConfirmedMessageIds = new Set(messages.flatMap((message) => message.kind === "confirmed" ? [message.id] : []));
   const mobileActionMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === mobileActionMessageId) ?? null;
   const reactionDetailsMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === reactionDetailsMessageId) ?? null;
@@ -1347,6 +1679,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const availableReactionProfilesById = new Map(reactionProfilesById);
   availableReactionProfilesById.set(conversation.otherProfile.id, conversation.otherProfile);
   if (currentProfile) availableReactionProfilesById.set(currentProfile.id, currentProfile);
+  const imageViewerMessage = imageViewerState ? messages.find((message) => (message.kind === "confirmed" ? message.id : message.optimisticId) === imageViewerState.messageId && message.messageType === "image") ?? null : null;
+  const imageViewerImages: GalleryMediaItem[] = imageViewerMessage?.kind === "optimistic" ? imageViewerMessage.attachments.map((attachment) => ({ ...attachment, url: attachment.previewUrl })) : imageViewerMessage?.kind === "confirmed" ? imageViewerMessage.attachments.map((attachment) => ({ ...attachment, url: signedMedia.urls.get(attachment.storagePath) ?? null })) : [];
 
   return (
     <div ref={panelRef} className="flex min-h-0 flex-1 flex-col">
@@ -1380,18 +1714,21 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                 const isSavingThisEdit = Boolean(isEditingThisMessage && messageEditState?.isSaving);
                 const canEditMessage = message.kind === "confirmed" && isCurrentUser && !message.isIntroduction && !message.isDeleted;
                 const canDeleteMessage = message.kind === "confirmed" && isCurrentUser && !message.isIntroduction && !message.isDeleted;
+                const galleryAttachments: GalleryMediaItem[] = message.kind === "optimistic" ? message.attachments.map((attachment) => ({ ...attachment, url: attachment.previewUrl })) : message.attachments.map((attachment) => ({ ...attachment, url: signedMedia.urls.get(attachment.storagePath) ?? null }));
+                const isImageMessage = message.messageType === "image" && !("isDeleted" in message && message.isDeleted);
 
                 return (
                   <article ref={(element) => { if (message.kind !== "confirmed") return; if (element) messageElementsRef.current.set(message.id, element); else messageElementsRef.current.delete(message.id); }} key={getMessageKey(message)} tabIndex={message.kind === "confirmed" ? -1 : undefined} onPointerDown={message.kind === "confirmed" && !message.isDeleted ? (event) => handleMessagePointerDown(message, event) : undefined} onPointerMove={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerMove : undefined} onPointerUp={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerCancel={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerLeave={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} className={`group/message relative flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
-                    <div className={`flex min-w-0 max-w-[92%] flex-col sm:max-w-[80%] ${isCurrentUser ? "items-end" : "items-start"}`}>
+                    <div className={`flex min-w-0 max-w-[92%] flex-col sm:max-w-[80%] md:max-w-[75%] ${isCurrentUser ? "items-end" : "items-start"}`}>
                       <div className="relative max-w-full">
                         <motion.div animate={{ scale: message.kind === "confirmed" && mobileEmphasizedMessageId === message.id && !shouldReduceMotion ? 0.985 : 1 }} transition={{ duration: shouldReduceMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }} className={`max-w-full min-w-0 rounded-3xl px-4 py-3 shadow-soft transition-shadow ${message.kind === "confirmed" && message.isDeleted ? `${isCurrentUser ? "rounded-br-md" : "rounded-bl-md"} border border-border bg-card text-muted` : isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"} ${message.kind === "confirmed" && (highlightedMessageId === message.id || mobileEmphasizedMessageId === message.id) ? "ring-2 ring-primary/30 ring-offset-4 ring-offset-background" : ""}`}>
                           {replyPreview && <ReplyQuote preview={replyPreview} isStrongOutgoing={isCurrentUser && !isFailed} canJump={canJumpToReplyTarget} onJump={() => message.replyToMessageId && jumpToOriginalMessage(message.replyToMessageId)} />}
-                          {message.kind === "confirmed" && message.isDeleted ? <p className="break-words text-sm italic leading-6">This message was deleted.</p> : isEditingThisMessage && messageEditState ? <div className="min-w-0"><label htmlFor={`edit-message-${message.id}`} className="sr-only">Edit your message</label><textarea ref={editTextareaRef} id={`edit-message-${message.id}`} value={messageEditState.draft} onChange={(event) => { const draft = event.target.value; setMessageEditState((currentState) => currentState?.messageId === message.id ? { ...currentState, draft, error: "" } : currentState); resizeTextarea(event.target); }} onKeyDown={handleEditKeyDown} rows={2} maxLength={messageMaxLength} disabled={messageEditState.isSaving} aria-describedby={messageEditState.error ? `edit-message-error-${message.id}` : undefined} className="max-h-32 min-h-20 w-full min-w-0 resize-none overflow-y-auto rounded-xl border border-border bg-surface px-3 py-2 text-sm leading-6 text-heading outline-none placeholder:text-muted focus:ring-2 focus:ring-primary/20 disabled:cursor-wait disabled:opacity-70" /><div className="mt-2 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => void saveMessageEdit()} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">{messageEditState.isSaving ? "Saving…" : "Save"}</button><button type="button" onClick={cancelMessageEditing} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-background/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-background/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">Cancel</button></div>{messageEditState.error && <p id={`edit-message-error-${message.id}`} role="alert" className="mt-2 text-xs leading-5 text-white">{messageEditState.error}</p>}</div> : <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.body}</p>}
+                          {isImageMessage && <MessageMediaGallery attachments={galleryAttachments} isLoading={message.kind === "confirmed" && signedMedia.isLoading} onOpen={(index, trigger) => { imageViewerReturnFocusRef.current = trigger; setImageViewerState({ messageId: message.kind === "confirmed" ? message.id : message.optimisticId, initialIndex: index }); }} onRetry={galleryAttachments.length > 0 ? signedMedia.retry : handleHistoryRetry} />}
+                          {message.kind === "confirmed" && message.isDeleted ? <p className="break-words text-sm italic leading-6">This message was deleted.</p> : isEditingThisMessage && messageEditState ? <div className={`min-w-0 ${isImageMessage ? "mt-3" : ""}`}><label htmlFor={`edit-message-${message.id}`} className="sr-only">{isImageMessage ? "Edit image caption" : "Edit your message"}</label><textarea ref={editTextareaRef} id={`edit-message-${message.id}`} value={messageEditState.draft} onChange={(event) => { const draft = event.target.value; setMessageEditState((currentState) => currentState?.messageId === message.id ? { ...currentState, draft, error: "" } : currentState); resizeTextarea(event.target); }} onKeyDown={handleEditKeyDown} rows={2} maxLength={messageMaxLength} disabled={messageEditState.isSaving} placeholder={isImageMessage ? "Add a caption…" : undefined} aria-describedby={messageEditState.error ? `edit-message-error-${message.id}` : undefined} className="max-h-32 min-h-20 w-full min-w-0 resize-none overflow-y-auto rounded-xl border border-border bg-surface px-3 py-2 text-sm leading-6 text-heading outline-none placeholder:text-muted focus:ring-2 focus:ring-primary/20 disabled:cursor-wait disabled:opacity-70" /><div className="mt-2 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => void saveMessageEdit()} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">{messageEditState.isSaving ? "Saving…" : "Save"}</button><button type="button" onClick={cancelMessageEditing} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-background/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-background/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">Cancel</button></div>{messageEditState.error && <p id={`edit-message-error-${message.id}`} role="alert" className="mt-2 text-xs leading-5 text-white">{messageEditState.error}</p>}</div> : message.body ? <p className={`whitespace-pre-wrap break-words text-sm leading-6 ${isImageMessage ? "mt-3" : ""}`}>{message.body}</p> : null}
                           <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed && !(message.kind === "confirmed" && message.isDeleted) ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}{message.kind === "confirmed" && !message.isDeleted && (message.editedAt || isSavingThisEdit) && <span>Edited</span>}</div>
                           {isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}
                         </motion.div>
-                        {message.kind === "confirmed" && !message.isDeleted && <div className={`absolute top-1/2 hidden shrink-0 -translate-y-1/2 flex-col gap-1 transition md:flex md:opacity-0 md:group-hover/message:opacity-100 md:group-focus-within/message:opacity-100 ${isCurrentUser ? "right-full mr-1.5" : "left-full ml-1.5"}`}>{canEditMessage && <button type="button" onClick={(event) => startEditingMessage(message, event.currentTarget)} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} aria-label="Edit your message" title="Edit" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50"><EditIcon /></button>}<button type="button" onClick={() => handleReplyToMessage(message)} aria-label={`Reply to message from ${replyActionSenderName}`} title="Reply" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><ReplyIcon /></button><button type="button" onClick={(event) => openQuickReactions(message.id, event.currentTarget)} aria-label="React to this message" aria-haspopup="dialog" aria-expanded={quickReactionMessageId === message.id || fullReactionPickerMessageId === message.id} className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><ReactionIcon /></button>{canDeleteMessage && <button type="button" onClick={(event) => openDeleteConfirmation(message, event.currentTarget)} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} aria-label="Delete your message" title="Delete" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50"><DeleteIcon /></button>}</div>}
+                        {message.kind === "confirmed" && !message.isDeleted && <MessageActionsToolbar canDelete={canDeleteMessage} canEdit={canEditMessage} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} isOutgoing={isCurrentUser} replyLabel={`Reply to message from ${replyActionSenderName}`} onDelete={(button) => openDeleteConfirmation(message, button)} onEdit={(button) => startEditingMessage(message, button)} onReact={(button) => openQuickReactions(message.id, button)} onReply={() => handleReplyToMessage(message)} />}
                       </div>
                       {reactionGroups.length > 0 && <div className={`relative z-10 -mt-1 flex max-w-full flex-wrap gap-1 px-1 ${isCurrentUser ? "justify-end" : "justify-start"}`}>{reactionGroups.map((group) => { const reactionName = getEmojiLabel(group.emoji).toLowerCase(); return <button key={group.emoji} type="button" onClick={(event) => message.kind === "confirmed" && openReactionDetails(message.id, event.currentTarget)} aria-haspopup="dialog" aria-expanded={message.kind === "confirmed" && reactionDetailsMessageId === message.id} aria-label={`View ${group.count} ${reactionName} ${group.count === 1 ? "reaction" : "reactions"}${group.reactedByCurrentUser ? ", including you" : ""}`} className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 ${group.reactedByCurrentUser ? "border-primary/30 bg-accent text-heading" : "border-border bg-surface text-body hover:bg-accent"}`}><span aria-hidden="true" className="text-sm">{group.emoji}</span><span aria-hidden="true" className="font-semibold">{group.count}</span></button>; })}</div>}
                       {shouldShowStatus && <p role={isFailed ? "alert" : isSending ? "status" : undefined} className={`mt-1.5 px-1 text-right text-xs font-medium ${isFailed ? "text-primary" : "text-muted"}`}>{statusLabel}</p>}
@@ -1411,11 +1748,14 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       <form onSubmit={handleSend} className="shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
         <TypingIndicator isVisible={isOtherUserTyping} name={otherName} shouldReduceMotion={shouldReduceMotion} />
         {replyingTo && <div aria-label={`Replying to ${replyingTo.senderName}`} className="mb-2 flex min-w-0 items-start gap-3 rounded-2xl bg-surface px-4 py-3 shadow-soft"><div className="min-w-0 flex-1 border-l-2 border-primary/40 pl-3"><p className="truncate text-xs font-semibold text-heading">Replying to {replyingTo.senderName}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-body">{replyingTo.body ?? "Original message unavailable"}</p></div><button type="button" onClick={() => { setReplyingTo(null); window.requestAnimationFrame(() => textareaRef.current?.focus()); }} aria-label={`Cancel reply to ${replyingTo.senderName}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>}
+        <ComposerMediaPreview images={selectedImages} disabled={isSubmitting} onRemove={removeSelectedImage} onRemoveAll={removeAllSelectedImages} />
+        {mediaError && <p id={mediaErrorId} role="alert" className="mb-2 rounded-xl bg-accent px-3 py-2 text-xs leading-5 text-body">{mediaError}</p>}
+        <input ref={mediaInputRef} type="file" accept={acceptedImageInputTypes} multiple onChange={(event) => void handleImageSelection(event)} disabled={!currentUserId || isSubmitting} className="hidden" aria-hidden="true" tabIndex={-1} />
         <label htmlFor={`message-composer-${conversation.id}`} className="sr-only">Message {otherName}</label>
         <div className="grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)_auto] items-end gap-x-2 rounded-2xl bg-surface px-3 py-3 shadow-soft focus-within:ring-2 focus-within:ring-primary/20 sm:gap-x-3 sm:px-4">
-          <button type="button" onClick={() => showComingSoon("Media sharing is coming soon.")} aria-label="Add media — coming soon" title="Media sharing is coming soon" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 sm:h-11 sm:w-11"><MediaIcon /></button>
-          <button ref={composerEmojiButtonRef} type="button" onClick={openComposerEmojiPicker} aria-label="Choose an emoji" title="Choose an emoji" aria-haspopup="dialog" aria-expanded={isComposerEmojiPickerOpen} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 sm:h-11 sm:w-11"><EmojiIcon /></button>
-          <textarea ref={textareaRef} id={`message-composer-${conversation.id}`} value={draft} onChange={(event) => { setDraft(event.target.value); resizeTextarea(event.target); notifyTyping(event.target.value.trim().length > 0); }} onBlur={stopTyping} onKeyDown={handleComposerKeyDown} maxLength={messageMaxLength} rows={1} disabled={!currentUserId} aria-describedby={composerDescription} placeholder="Write a message…" className="max-h-32 min-h-12 min-w-0 resize-none overflow-y-auto border-0 bg-transparent px-1 py-3 text-sm leading-6 text-heading outline-none ring-0 placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60 sm:px-2" />
+          <button type="button" onClick={openImagePicker} disabled={!currentUserId || isSubmitting || selectedImages.length >= imageMaxCount} aria-label={selectedImages.length > 0 ? "Add more images" : "Choose images"} title={selectedImages.length >= imageMaxCount ? "Maximum 10 images selected" : selectedImages.length > 0 ? "Add more images" : "Choose images"} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"><MediaIcon /></button>
+          <button ref={composerEmojiButtonRef} type="button" onClick={openComposerEmojiPicker} disabled={isSubmitting} aria-label="Choose an emoji" title="Choose an emoji" aria-haspopup="dialog" aria-expanded={isComposerEmojiPickerOpen} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50 sm:h-11 sm:w-11"><EmojiIcon /></button>
+          <textarea ref={textareaRef} id={`message-composer-${conversation.id}`} value={draft} onChange={(event) => { setDraft(event.target.value); resizeTextarea(event.target); notifyTyping(event.target.value.trim().length > 0); }} onBlur={stopTyping} onKeyDown={handleComposerKeyDown} maxLength={messageMaxLength} rows={1} disabled={!currentUserId || isSubmitting} aria-describedby={composerDescription} placeholder="Write a message…" className="max-h-32 min-h-12 min-w-0 resize-none overflow-y-auto border-0 bg-transparent px-1 py-3 text-sm leading-6 text-heading outline-none ring-0 placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60 sm:px-2" />
           <button type="submit" disabled={isSendDisabled} aria-label={isSubmitting ? `Sending message to ${otherName}` : `Send message to ${otherName}`} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-primary text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-12 sm:w-12"><SendIcon /><span className="sr-only">{isSubmitting ? "Sending…" : "Send"}</span></button>
           <div aria-live="polite" aria-atomic="true" className={`col-start-1 col-end-5 row-start-2 flex min-w-0 items-start justify-between gap-3 px-1 sm:col-start-3 sm:col-end-4 ${comingSoonMessage || showCharacterCount ? "mt-2 min-h-5" : "mt-0 min-h-0 sm:mt-2 sm:min-h-5"}`}>
             {comingSoonMessage ? <p id={composerHelpId} className="min-w-0 text-xs leading-5 text-muted">{comingSoonMessage}</p> : <p id={composerHelpId} className={showCharacterCount ? "sr-only" : "sr-only sm:not-sr-only sm:min-w-0 sm:text-xs sm:leading-5 sm:text-muted"}>Enter to send · Shift+Enter for a new line</p>}
@@ -1426,6 +1766,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} onClose={() => setMobileActionMessageId(null)} onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
       <AnimatePresence initial={false} onExitComplete={() => { const anchor = reactionDetailsAnchorRef.current; if (anchor?.isConnected) anchor.focus(); else if (lastReactionDetailsMessageIdRef.current) messageElementsRef.current.get(lastReactionDetailsMessageIdRef.current)?.focus(); }}>{reactionDetailsMessage && (reactionDetailsReactions.length > 0 || isReactionDetailsMutationPending) && <ReactionDetails key={reactionDetailsMessage.id} anchorRef={reactionDetailsAnchorRef} currentUserId={currentUserId} error={reactionProfilesError} isLoading={isReactionProfilesLoading} isMutationPending={isReactionDetailsMutationPending} messageLabel={`message from ${reactionDetailsMessage.senderId === currentUserId ? "yourself" : otherName}`} mutationError={reactionDetailsMutationError} pendingReactionKeys={pendingReactionKeys} profilesById={availableReactionProfilesById} reactions={reactionDetailsReactions} onClose={closeReactionDetails} onRemoveOwnReaction={(reaction) => void removeOwnReactionFromDetails(reaction)} onRetry={retryReactionProfiles} />}</AnimatePresence>
       <AnimatePresence initial={false}>{messageDeleteState && <MessageDeleteDialog key={messageDeleteState.messageId} error={messageDeleteState.error} isDeleting={messageDeleteState.isDeleting} returnFocusRef={deleteTriggerRef} onCancel={cancelMessageDeletion} onConfirm={() => void confirmMessageDeletion()} />}</AnimatePresence>
+      <AnimatePresence initial={false}>{imageViewerState && imageViewerImages.length > 0 && <ImageViewer key={imageViewerState.messageId} images={imageViewerImages} initialIndex={imageViewerState.initialIndex} isLoading={signedMedia.isLoading} returnFocusRef={imageViewerReturnFocusRef} onClose={() => setImageViewerState(null)} onRetry={signedMedia.retry} />}</AnimatePresence>
       {quickReactionMessageId && <QuickReactionMenu anchorRef={reactionAnchorRef} quickReactions={quickReactions} messageLabel="this message" onSelect={(emoji) => void toggleReaction(quickReactionMessageId, emoji)} onClose={() => setQuickReactionMessageId(null)} onOpenPicker={() => setFullReactionPickerMessageId(quickReactionMessageId)} />}
       {fullReactionPickerMessageId && <EmojiPicker anchorRef={reactionAnchorRef} ariaLabel="Choose a message reaction" onSelect={(emoji) => void toggleReaction(fullReactionPickerMessageId, emoji)} onClose={() => setFullReactionPickerMessageId(null)} placement="top" />}
       {isComposerEmojiPickerOpen && <EmojiPicker anchorRef={composerEmojiButtonRef} ariaLabel="Insert an emoji into your message" onSelect={insertComposerEmoji} onClose={() => setIsComposerEmojiPickerOpen(false)} placement="top" />}

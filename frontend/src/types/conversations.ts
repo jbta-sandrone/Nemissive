@@ -58,6 +58,37 @@ export type MessageReplyPreview = {
   isDeleted: boolean;
 };
 
+export type MessageType = "text" | "image";
+
+export type MessageAttachment = {
+  id: string;
+  messageId: string;
+  storagePath: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  width: number;
+  height: number;
+  position: number;
+};
+
+export type OptimisticMessageAttachment = MessageAttachment & {
+  file: File;
+  previewUrl: string;
+};
+
+export type ComposerImageSelection = {
+  localId: string;
+  file: File;
+  objectUrl: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  width: number;
+  height: number;
+  duplicateKey: string;
+};
+
 export type ChatMessage = {
   kind: "confirmed";
   id: string;
@@ -69,6 +100,8 @@ export type ChatMessage = {
   isDeleted: boolean;
   deletedAt: string | null;
   isIntroduction: boolean;
+  messageType: MessageType;
+  attachments: MessageAttachment[];
   replyToMessageId: string | null;
   replyPreview: MessageReplyPreview | null;
 };
@@ -81,6 +114,8 @@ export type OptimisticChatMessage = {
   body: string;
   createdAt: string;
   deliveryState: "sending" | "failed";
+  messageType: MessageType;
+  attachments: OptimisticMessageAttachment[];
   replyToMessageId: string | null;
   replyPreview: MessageReplyPreview | null;
 };

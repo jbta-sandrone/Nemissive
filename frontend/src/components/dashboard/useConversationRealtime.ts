@@ -40,6 +40,8 @@ function parseRealtimeMessage(value: unknown): ChatMessage | null {
     isDeleted: row.is_deleted,
     deletedAt: typeof row.deleted_at === "string" ? row.deleted_at : null,
     isIntroduction: typeof row.source_request_id === "string",
+    messageType: row.message_type === "image" ? "image" : "text",
+    attachments: [],
     replyToMessageId: typeof row.reply_to_message_id === "string" ? row.reply_to_message_id : null,
     replyPreview: null,
   };
