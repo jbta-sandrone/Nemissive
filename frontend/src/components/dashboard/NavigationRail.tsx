@@ -7,6 +7,7 @@ type NavigationRailProps = {
   unreadMessageCount: number;
   isCompactChatVisible: boolean;
   onSectionChange: (section: DashboardSection) => void;
+  onSearch: (trigger: HTMLButtonElement) => void;
 };
 
 const navigationItems: Array<{ section: DashboardSection; label: string }> = [
@@ -28,6 +29,10 @@ function CountBadge({ count, label, compact = false }: { count: number; label: s
   return <span className={`${compact ? "-right-1 -top-1" : "-right-1.5 -top-1.5"} absolute z-20 inline-flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-surface bg-primary px-1 text-[10px] font-bold leading-none text-white shadow-soft`}><span aria-hidden="true">{count > 9 ? "9+" : count}</span><span className="sr-only">{label}</span></span>;
 }
 
+function SearchNavigationButton({ showLabel, onSearch }: { showLabel: boolean; onSearch: (trigger: HTMLButtonElement) => void }) {
+  return <button type="button" aria-label="Search Nemissive" title="Search (Ctrl or Command K)" onClick={(event) => onSearch(event.currentTarget)} className={`${showLabel ? "min-w-0 flex-1 flex-col gap-1 py-2" : "h-12 w-12"} relative flex items-center justify-center rounded-2xl text-sm font-medium text-muted transition-colors hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-5 w-5" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" strokeLinecap="round" /></svg>{showLabel && <span className="text-[11px] leading-none">Search</span>}</button>;
+}
+
 function NavigationButton({ section, label, activeSection, pendingRequestCount, unreadMessageCount, layoutId, showLabel, onSectionChange }: { section: DashboardSection; label: string; activeSection: DashboardSection; pendingRequestCount: number; unreadMessageCount: number; layoutId: string; showLabel: boolean; onSectionChange: (section: DashboardSection) => void }) {
   const shouldReduceMotion = useReducedMotion();
   const isActive = activeSection === section;
@@ -45,18 +50,19 @@ function NavigationButton({ section, label, activeSection, pendingRequestCount, 
   );
 }
 
-function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount, isCompactChatVisible, onSectionChange }: NavigationRailProps) {
+function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount, isCompactChatVisible, onSectionChange, onSearch }: NavigationRailProps) {
   return (
     <>
       <aside className="hidden h-full w-16 shrink-0 flex-col items-center border-r border-border bg-background py-4 md:flex lg:w-[72px]" aria-label="Dashboard navigation">
         <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-surface text-lg font-bold text-primary shadow-soft" aria-label="Nemissive">N</div>
         <nav className="mt-7 flex flex-col gap-2" aria-label="Dashboard sections">
+          <SearchNavigationButton showLabel={false} onSearch={onSearch} />
           {navigationItems.map((item) => <NavigationButton key={item.section} {...item} activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} layoutId="desktop-dashboard-section" showLabel={false} onSectionChange={onSectionChange} />)}
         </nav>
         <div className="mt-auto"><NavigationButton section="menu" label="Menu" activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} layoutId="desktop-dashboard-section" showLabel={false} onSectionChange={onSectionChange} /></div>
       </aside>
 
-      {!isCompactChatVisible && <nav className="order-last flex shrink-0 items-center gap-1 border-t border-border bg-surface px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden" aria-label="Dashboard sections">{[...navigationItems, { section: "menu" as const, label: "Menu" }].map((item) => <NavigationButton key={item.section} {...item} activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} layoutId="mobile-dashboard-section" showLabel onSectionChange={onSectionChange} />)}</nav>}
+      {!isCompactChatVisible && <nav className="order-last flex shrink-0 items-center gap-0.5 border-t border-border bg-surface px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden" aria-label="Dashboard sections"><SearchNavigationButton showLabel onSearch={onSearch} />{[...navigationItems, { section: "menu" as const, label: "Menu" }].map((item) => <NavigationButton key={item.section} {...item} activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} layoutId="mobile-dashboard-section" showLabel onSectionChange={onSectionChange} />)}</nav>}
     </>
   );
 }

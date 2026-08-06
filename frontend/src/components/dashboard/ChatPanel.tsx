@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, ComposerImageSelection, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
+import type { ChatMessage, ComposerImageSelection, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, MessageSearchTarget, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
 import AnchoredPopover from "./AnchoredPopover";
 import ComposerMediaPreview from "./ComposerMediaPreview";
 import EmojiPicker from "./EmojiPicker";
@@ -106,6 +106,7 @@ type ChatPanelProps = {
   currentProfile: ProfileSearchResult | null;
   currentUserId: string | null;
   isMobileVisible: boolean;
+  messageSearchTarget: MessageSearchTarget | null;
   realtimeRefreshKey: number;
   realtimeMessageEvents: RealtimeChatMessageEvent[];
   realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[];
@@ -129,7 +130,7 @@ const nearBottomThreshold = 140;
 const comingSoonMessageDurationMs = 3000;
 const readAcknowledgementDebounceMs = 280;
 const replyPreviewMaxLength = 120;
-const replyHighlightDurationMs = 1400;
+const replyHighlightDurationMs = 1700;
 const mobileLongPressDurationMs = 450;
 const mobileLongPressMovementThreshold = 12;
 const imageMaxFileSize = 10 * 1024 * 1024;
@@ -396,7 +397,7 @@ function ReplyQuote({ preview, isStrongOutgoing, canJump, onJump }: { preview: M
   return <div aria-label={`Reply to ${preview.senderName}: ${previewText ?? ""}`} className={className}>{content}</div>;
 }
 
-function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onMobileBack }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onMobileBack: () => void }) {
+function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onMobileBack }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; messageSearchTarget: MessageSearchTarget | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onMobileBack: () => void }) {
   const shouldReduceMotion = useReducedMotion();
   const latestLoadRef = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -439,6 +440,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const optimisticPreviewUrlsRef = useRef(new Set<string>());
   const imageViewerReturnFocusRef = useRef<HTMLElement | null>(null);
   const deletedMessageIdsRef = useRef(new Set<string>());
+  const processedSearchTargetTokenRef = useRef<string | null>(null);
   const reactionAnchorRef = useRef<HTMLElement | null>(null);
   const reactionDetailsAnchorRef = useRef<HTMLElement | null>(null);
   const lastReactionDetailsMessageIdRef = useRef<string | null>(null);
@@ -455,6 +457,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const [historyError, setHistoryError] = useState("");
   const [retryKey, setRetryKey] = useState(0);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [isViewingSearchContext, setIsViewingSearchContext] = useState(false);
+  const [isLoadingSearchContext, setIsLoadingSearchContext] = useState(false);
+  const [searchContextError, setSearchContextError] = useState("");
+  const [searchContextRetryKey, setSearchContextRetryKey] = useState(0);
   const [newMessageAnnouncement, setNewMessageAnnouncement] = useState("");
   const [comingSoonMessage, setComingSoonMessage] = useState("");
   const [reactionError, setReactionError] = useState("");
@@ -778,6 +784,124 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }, [conversation.id, currentUserId, isNearBottom, onIncomingMessagesSynchronized, otherName, realtimeRefreshKey, retryKey, scrollToLatest]);
 
   useEffect(() => {
+    if (isLoading || !messageSearchTarget || messageSearchTarget.conversationId !== conversation.id || processedSearchTargetTokenRef.current === messageSearchTarget.token) return;
+    const searchTarget = messageSearchTarget;
+    processedSearchTargetTokenRef.current = searchTarget.token;
+    const abortController = new AbortController();
+    let isCancelled = false;
+
+    function revealTarget() {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        if (isCancelled) return;
+        const element = messageElementsRef.current.get(searchTarget.messageId);
+        if (!element) {
+          setSearchContextError("That message is no longer available in this context.");
+          return;
+        }
+        element.scrollIntoView({ behavior: shouldReduceMotion ? "auto" : "smooth", block: "center" });
+        element.focus({ preventScroll: true });
+        setHighlightedMessageId(searchTarget.messageId);
+        if (replyHighlightTimerRef.current !== null) window.clearTimeout(replyHighlightTimerRef.current);
+        replyHighlightTimerRef.current = window.setTimeout(() => {
+          setHighlightedMessageId((currentMessageId) => currentMessageId === searchTarget.messageId ? null : currentMessageId);
+          replyHighlightTimerRef.current = null;
+        }, replyHighlightDurationMs);
+      }));
+    }
+
+    const targetWasAlreadyLoaded = messageElementsRef.current.has(searchTarget.messageId);
+
+    async function loadSearchContext() {
+      setIsLoadingSearchContext(true);
+      setSearchContextError("");
+      const { data, error } = await supabase.rpc("load_message_context", { target_message_id: searchTarget.messageId, before_count: 20, after_count: 20 }).abortSignal(abortController.signal);
+      if (isCancelled || abortController.signal.aborted) return;
+      if (error || !data) {
+        setIsLoadingSearchContext(false);
+        setSearchContextError(navigator.onLine ? "That message context couldn’t be loaded. Please try again." : "You appear to be offline. Reconnect and try again.");
+        if (error && import.meta.env.DEV) console.warn("Loading searched message context failed", { code: error.code, conversationId: conversation.id });
+        return;
+      }
+
+      const contextRows = (data as MessageRow[]).filter((row) => row.conversation_id === conversation.id);
+      const contextIds = contextRows.map((row) => row.id);
+      if (!contextIds.includes(searchTarget.messageId)) {
+        setIsLoadingSearchContext(false);
+        setSearchContextError("That message is no longer available.");
+        return;
+      }
+
+      if (targetWasAlreadyLoaded) {
+        const targetRow = contextRows.find((row) => row.id === searchTarget.messageId) as MessageRow;
+        const authoritativeTarget = attachReplyPreview(mapMessageRow(targetRow, null, attachmentCacheRef.current.get(targetRow.id) ?? []), targetRow.reply_to_message_id ? replyTargetCacheRef.current.get(targetRow.reply_to_message_id) : undefined, currentUserId, otherName);
+        replyTargetCacheRef.current.set(authoritativeTarget.id, authoritativeTarget);
+        if (authoritativeTarget.isDeleted) deletedMessageIdsRef.current.add(authoritativeTarget.id);
+        setMessages((currentMessages) => patchMessageAndReplies(currentMessages, authoritativeTarget, currentUserId, otherName));
+        if (authoritativeTarget.isDeleted) setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.messageId !== authoritativeTarget.id));
+        onMessageUpdated(authoritativeTarget);
+        setIsLoadingSearchContext(false);
+        setSearchContextError("");
+        revealTarget();
+        return;
+      }
+
+      const [attachmentResult, reactionResult] = await Promise.all([
+        contextIds.length > 0 ? supabase.from("message_attachments").select("id, message_id, storage_path, original_name, mime_type, size_bytes, width, height, position").in("message_id", contextIds).order("position", { ascending: true }).abortSignal(abortController.signal) : Promise.resolve({ data: [], error: null }),
+        contextIds.length > 0 ? supabase.from("message_reactions").select("id, message_id, user_id, emoji, created_at").in("message_id", contextIds).order("created_at", { ascending: true }).abortSignal(abortController.signal) : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (isCancelled || abortController.signal.aborted) return;
+      if (attachmentResult.error || reactionResult.error) {
+        setIsLoadingSearchContext(false);
+        setSearchContextError("The message context couldn’t be fully hydrated. Please retry.");
+        if (import.meta.env.DEV) console.warn("Hydrating searched message context failed", { attachmentCode: attachmentResult.error?.code, reactionCode: reactionResult.error?.code });
+        return;
+      }
+
+      const attachmentsByMessageId = new Map<string, MessageAttachment[]>();
+      ((attachmentResult.data ?? []) as AttachmentRow[]).map(mapAttachmentRow).forEach((attachment) => {
+        attachmentsByMessageId.set(attachment.messageId, [...(attachmentsByMessageId.get(attachment.messageId) ?? []), attachment]);
+      });
+      attachmentsByMessageId.forEach((attachments, messageId) => attachmentCacheRef.current.set(messageId, attachments));
+      const baseMessages = contextRows.map((row) => mapMessageRow(row, null, attachmentsByMessageId.get(row.id) ?? []));
+      const targetById = new Map(baseMessages.map((message) => [message.id, message]));
+      const missingReplyIds = [...new Set(baseMessages.flatMap((message) => message.replyToMessageId && !targetById.has(message.replyToMessageId) ? [message.replyToMessageId] : []))];
+
+      if (missingReplyIds.length > 0) {
+        const replyResult = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id").eq("conversation_id", conversation.id).in("id", missingReplyIds).abortSignal(abortController.signal);
+        if (isCancelled || abortController.signal.aborted) return;
+        if (replyResult.error) {
+          if (import.meta.env.DEV) console.warn("Hydrating searched reply targets failed", { code: replyResult.error.code, conversationId: conversation.id });
+        } else {
+          ((replyResult.data ?? []) as MessageRow[]).map((row) => mapMessageRow(row)).forEach((message) => targetById.set(message.id, message));
+        }
+      }
+
+      targetById.forEach((message) => {
+        replyTargetCacheRef.current.set(message.id, message);
+        if (message.isDeleted) deletedMessageIdsRef.current.add(message.id);
+      });
+      const hydratedMessages = baseMessages.map((message) => attachReplyPreview(message, message.replyToMessageId ? targetById.get(message.replyToMessageId) : undefined, currentUserId, otherName));
+      const contextIdSet = new Set(contextIds);
+      setMessages((currentMessages) => sortMessages([...hydratedMessages, ...currentMessages.filter((message) => message.kind === "optimistic")]));
+      setReactions((currentReactions) => {
+        const authoritative = ((reactionResult.data ?? []) as ReactionRow[]).map(mapReactionRow).filter((reaction) => !deletedMessageIdsRef.current.has(reaction.messageId));
+        const pending = currentReactions.filter((reaction) => reaction.id.startsWith("optimistic:") && contextIdSet.has(reaction.messageId));
+        return [...authoritative, ...pending].reduce((merged, reaction) => mergeReaction(merged, reaction), [] as MessageReaction[]);
+      });
+      setIsViewingSearchContext(true);
+      setShowJumpToLatest(true);
+      setIsLoadingSearchContext(false);
+      revealTarget();
+    }
+
+    void loadSearchContext();
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+    };
+  }, [conversation.id, currentUserId, isLoading, messageSearchTarget, onMessageUpdated, otherName, searchContextRetryKey, shouldReduceMotion]);
+
+  useEffect(() => {
     const newEvents = realtimeMessageEvents.filter((event) => event.sequence > processedRealtimeSequenceRef.current);
     if (newEvents.length === 0) return;
 
@@ -785,7 +909,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     const relevantEvents = newEvents.filter((event) => event.message.conversationId === conversation.id);
     if (relevantEvents.length === 0) return;
 
-    const shouldAutoScroll = isNearBottom();
+    const shouldAutoScroll = !isViewingSearchContext && isNearBottom();
     const receivedIncomingMessage = relevantEvents.some((event) => event.message.senderId !== currentUserId);
     relevantEvents.forEach((event) => replyTargetCacheRef.current.set(event.message.id, event.message));
 
@@ -818,7 +942,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (shouldAutoScroll) scrollToLatest("auto");
       else setShowJumpToLatest(true);
     }
-  }, [conversation.id, currentUserId, isNearBottom, loadMessageAttachments, loadReplyTarget, otherName, realtimeMessageEvents, scrollToLatest]);
+  }, [conversation.id, currentUserId, isNearBottom, isViewingSearchContext, loadMessageAttachments, loadReplyTarget, otherName, realtimeMessageEvents, scrollToLatest]);
 
   useEffect(() => {
     const newEvents = realtimeMessageUpdateEvents.filter((event) => event.sequence > processedMessageUpdateSequenceRef.current).sort((first, second) => first.sequence - second.sequence);
@@ -963,6 +1087,19 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.id.startsWith("optimistic:")));
     setIsLoading(true);
     setHistoryError("");
+    hasLoadedMessagesRef.current = false;
+    setRetryKey((key) => key + 1);
+  }
+
+  function handleJumpToLatest() {
+    if (!isViewingSearchContext) {
+      scrollToLatest("smooth");
+      return;
+    }
+    latestLoadRef.current += 1;
+    setIsViewingSearchContext(false);
+    setIsLoading(true);
+    setSearchContextError("");
     hasLoadedMessagesRef.current = false;
     setRetryKey((key) => key + 1);
   }
@@ -1342,7 +1479,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   function handleScroll() {
     cancelMobileLongPress();
-    if (isNearBottom()) setShowJumpToLatest(false);
+    if (!isViewingSearchContext && isNearBottom()) setShowJumpToLatest(false);
   }
 
   function showReactionError(message: string) {
@@ -1698,6 +1835,9 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
           ) : (
             <div className="mx-auto max-w-2xl space-y-4">
               {historyError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>Earlier messages couldn’t be refreshed.</p><button type="button" onClick={handleHistoryRetry} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry history</button></div>}
+              {isLoadingSearchContext && <div role="status" aria-live="polite" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft">Loading message context…</div>}
+              {searchContextError && <div role="alert" className="rounded-2xl border border-primary/25 bg-accent px-4 py-3 text-sm text-body shadow-soft"><p>{searchContextError}</p><button type="button" onClick={() => { processedSearchTargetTokenRef.current = null; setSearchContextRetryKey((key) => key + 1); }} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-surface focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry</button></div>}
+              {isViewingSearchContext && <div role="status" className="rounded-2xl border border-border bg-surface px-4 py-3 text-center text-xs font-semibold uppercase tracking-[0.14em] text-muted shadow-soft">Viewing search context</div>}
               {shouldShowIntroductoryFallback && <article className="flex justify-start"><div className="max-w-[85%] rounded-3xl rounded-bl-md border border-border bg-surface px-4 py-3 text-body shadow-soft sm:max-w-[75%]"><p className="whitespace-pre-wrap break-words text-sm leading-6">{conversation.introductoryMessage}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">{conversation.introductoryMessageCreatedAt && <time dateTime={conversation.introductoryMessageCreatedAt}>{formatMessageTimestamp(conversation.introductoryMessageCreatedAt)}</time>}<span>Introduction</span></div></div></article>}
               {messages.map((message) => {
                 const isCurrentUser = message.senderId === currentUserId;
@@ -1741,7 +1881,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
           )}
         </div>
 
-        {showJumpToLatest && <button type="button" onClick={() => scrollToLatest("smooth")} className="absolute bottom-4 left-1/2 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-heading shadow-soft transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m7 10 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>Jump to latest</button>}
+        {showJumpToLatest && <button type="button" onClick={handleJumpToLatest} className="absolute bottom-4 left-1/2 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-heading shadow-soft transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m7 10 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>Jump to latest</button>}
       </div>
 
       {reactionError && <p role="status" aria-live="polite" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{reactionError}</p>}
@@ -1774,7 +1914,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   );
 }
 
-function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onStartConversation, onMobileBack }: ChatPanelProps) {
+function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onStartConversation, onMobileBack }: ChatPanelProps) {
   const visibilityClasses = isMobileVisible ? "flex" : "hidden lg:flex";
 
   if (chatState?.kind === "pending") {
@@ -1789,7 +1929,7 @@ function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, 
   }
 
   if (chatState?.kind === "accepted") {
-    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onMobileBack={onMobileBack} /></main>;
+    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onMobileBack={onMobileBack} /></main>;
   }
 
   return (

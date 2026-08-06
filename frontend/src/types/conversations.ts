@@ -58,6 +58,25 @@ export type MessageReplyPreview = {
   isDeleted: boolean;
 };
 
+export type MessageSearchResult = {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  senderProfile: ProfileSearchResult;
+  otherProfile: ProfileSearchResult;
+  messageType: MessageType;
+  snippet: string;
+  createdAt: string;
+  editedAt: string | null;
+  attachmentCount: number;
+};
+
+export type MessageSearchTarget = {
+  conversationId: string;
+  messageId: string;
+  token: string;
+};
+
 export type MessageType = "text" | "image";
 
 export type MessageAttachment = {
