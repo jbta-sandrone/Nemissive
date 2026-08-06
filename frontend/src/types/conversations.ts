@@ -59,6 +59,7 @@ export type MessageSidebarItem =
       currentUserLastReadAt: string | null;
       latestUnreadMessageAt: string | null;
       mutedUntil: string | null;
+      isPinned: boolean;
     };
 
 export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;

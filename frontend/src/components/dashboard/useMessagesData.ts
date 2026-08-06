@@ -22,6 +22,7 @@ type MembershipRow = {
   conversation_id: string;
   last_read_at: string | null;
   muted_until: string | null;
+  is_pinned: boolean;
 };
 
 type DirectConversationRow = {
@@ -31,6 +32,14 @@ type DirectConversationRow = {
   conversation_participants: Array<{ user_id: string }>;
   messages: Array<{ id: string; body: string; message_type: "text" | "image" | "voice"; created_at: string; edited_at: string | null; is_deleted: boolean; deleted_at: string | null; sender_id: string }>;
 };
+
+function compareConversations(first: AcceptedConversationItem, second: AcceptedConversationItem) {
+  if (first.isPinned !== second.isPinned) return first.isPinned ? -1 : 1;
+  const firstTimestamp = Date.parse(first.latestMessageAt ?? first.updatedAt);
+  const secondTimestamp = Date.parse(second.latestMessageAt ?? second.updatedAt);
+  const timestampDifference = secondTimestamp - firstTimestamp;
+  return timestampDifference !== 0 ? timestampDifference : first.conversationId.localeCompare(second.conversationId);
+}
 
 function useMessagesData({ currentUserId, isAccountResolved, currentUserReceiptsByConversationId, onIncomingMessageSynchronized }: UseMessagesDataOptions) {
   const latestLoadRef = useRef(0);
@@ -52,7 +61,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     async function loadMessagesData() {
       const [pendingResult, membershipResult] = await Promise.all([
         supabase.from("conversation_requests").select("id, recipient_id, introduction, created_at, status, conversation_id").eq("sender_id", userId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
-        supabase.from("conversation_participants").select("conversation_id, last_read_at, muted_until").eq("user_id", userId).abortSignal(abortController.signal),
+        supabase.from("conversation_participants").select("conversation_id, last_read_at, muted_until, is_pinned").eq("user_id", userId).abortSignal(abortController.signal),
       ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
@@ -171,12 +180,9 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           currentUserLastReadAt: membershipByConversationId.get(conversation.id)?.last_read_at ?? null,
           latestUnreadMessageAt: latestUnreadMessageAtByConversationId.get(conversation.id) ?? null,
           mutedUntil: membershipByConversationId.get(conversation.id)?.muted_until ?? null,
+          isPinned: membershipByConversationId.get(conversation.id)?.is_pinned ?? false,
         }];
-      }).sort((first, second) => {
-        const firstTimestamp = Date.parse(first.latestMessageAt ?? first.updatedAt);
-        const secondTimestamp = Date.parse(second.latestMessageAt ?? second.updatedAt);
-        return secondTimestamp - firstTimestamp;
-      });
+      }).sort(compareConversations);
 
       setPendingRequests(nextPendingRequests);
       setConversations(nextConversations);
@@ -242,6 +248,18 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === conversationId ? { ...conversation, mutedUntil } : conversation));
   }, []);
 
+  const setConversationPinned = useCallback(async (conversationId: string, pinned: boolean) => {
+    const { data, error } = await supabase.rpc("set_conversation_pinned", { target_conversation_id: conversationId, pinned });
+    if (error) {
+      if (import.meta.env.DEV) console.warn("Saving conversation pin failed", { conversationId, code: error.code });
+      return "We couldn’t update this pinned conversation. Please try again.";
+    }
+
+    const savedPinned = typeof data === "boolean" ? data : pinned;
+    setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === conversationId ? { ...conversation, isPinned: savedPinned } : conversation).sort(compareConversations));
+    return null;
+  }, []);
+
   const conversationsWithReceiptState = useMemo(() => conversations.map((conversation) => {
     const receipt = currentUserReceiptsByConversationId.get(conversation.conversationId);
     const nextReadAt = receipt?.lastReadAt ?? null;
@@ -266,6 +284,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     mergeProfileLastSeen,
     patchMessagePreview,
     patchConversationMute,
+    setConversationPinned,
   };
 }
 
