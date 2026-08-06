@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, MessageReaction, MessageReactionDeleteIdentity, MessageReactionRealtimeChange, ParticipantReceiptCursor, RealtimeProfileLastSeenEvent } from "../../types/conversations";
+import type { ChatMessage, MessageReaction, MessageReactionDeleteIdentity, MessageReactionRealtimeChange, ParticipantMuteState, ParticipantReceiptCursor, RealtimeNotificationPreferencesEvent, RealtimeProfileLastSeenEvent } from "../../types/conversations";
 
 type UseConversationRealtimeOptions = {
   currentUserId: string | null;
@@ -10,7 +10,9 @@ type UseConversationRealtimeOptions = {
   onMessageUpdated: (message: ChatMessage) => void;
   onMessageReactionChanged: (change: MessageReactionRealtimeChange) => void;
   onParticipantReceiptUpdated: (receipt: ParticipantReceiptCursor) => void;
+  onParticipantMuteUpdated: (muteState: ParticipantMuteState) => void;
   onProfileLastSeenUpdated: (profile: RealtimeProfileLastSeenEvent) => void;
+  onNotificationPreferencesUpdated: (preferences: RealtimeNotificationPreferencesEvent) => void;
   onOpenConversationMessagesChanged: () => void;
 };
 
@@ -40,7 +42,7 @@ function parseRealtimeMessage(value: unknown): ChatMessage | null {
     isDeleted: row.is_deleted,
     deletedAt: typeof row.deleted_at === "string" ? row.deleted_at : null,
     isIntroduction: typeof row.source_request_id === "string",
-    messageType: row.message_type === "image" ? "image" : "text",
+    messageType: row.message_type === "image" || row.message_type === "voice" ? row.message_type : "text",
     attachments: [],
     replyToMessageId: typeof row.reply_to_message_id === "string" ? row.reply_to_message_id : null,
     replyPreview: null,
@@ -62,11 +64,26 @@ function parseParticipantReceipt(value: unknown): ParticipantReceiptCursor | nul
   };
 }
 
+function parseParticipantMute(value: unknown): ParticipantMuteState | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.conversation_id !== "string" || typeof row.user_id !== "string") return null;
+  if (row.muted_until !== null && typeof row.muted_until !== "string") return null;
+  return { conversationId: row.conversation_id, userId: row.user_id, mutedUntil: row.muted_until };
+}
+
 function parseProfileLastSeen(value: unknown): RealtimeProfileLastSeenEvent | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
   if (typeof row.id !== "string" || typeof row.last_seen_at !== "string" || Number.isNaN(Date.parse(row.last_seen_at))) return null;
   return { profileId: row.id, lastSeenAt: row.last_seen_at };
+}
+
+function parseNotificationPreferences(value: unknown): RealtimeNotificationPreferencesEvent | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || typeof row.browser_notifications_enabled !== "boolean" || typeof row.notification_sound_enabled !== "boolean") return null;
+  return { profileId: row.id, browserNotificationsEnabled: row.browser_notifications_enabled, notificationSoundEnabled: row.notification_sound_enabled };
 }
 
 function parseInsertedMessageReaction(value: unknown): MessageReaction | null {
@@ -87,12 +104,12 @@ function parseDeletedMessageReaction(value: unknown): MessageReactionDeleteIdent
   return id || hasCompleteTuple ? { id, messageId, userId, emoji } : null;
 }
 
-function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
-  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged });
+function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onParticipantMuteUpdated, onProfileLastSeenUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
+  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onParticipantMuteUpdated, onProfileLastSeenUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged });
 
   useEffect(() => {
-    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onOpenConversationMessagesChanged };
-  }, [onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onMessageUpdated, onOpenConversationMessagesChanged, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onRequestsChanged]);
+    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onParticipantMuteUpdated, onProfileLastSeenUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged };
+  }, [onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onMessageUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged, onParticipantMuteUpdated, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onRequestsChanged]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -142,6 +159,8 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "conversation_participants" }, (payload) => {
         const receipt = parseParticipantReceipt(payload.new);
         if (receipt) callbacksRef.current.onParticipantReceiptUpdated(receipt);
+        const muteState = parseParticipantMute(payload.new);
+        if (muteState) callbacksRef.current.onParticipantMuteUpdated(muteState);
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "conversation_participants" }, () => {
         scheduleInvalidation({ conversationData: true });
@@ -180,6 +199,8 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
         const profile = parseProfileLastSeen(payload.new);
         if (profile) callbacksRef.current.onProfileLastSeenUpdated(profile);
+        const preferences = parseNotificationPreferences(payload.new);
+        if (preferences) callbacksRef.current.onNotificationPreferencesUpdated(preferences);
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {

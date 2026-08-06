@@ -5,11 +5,25 @@ export type ProfileSearchResult = {
   avatar_url: string | null;
   last_seen_at?: string | null;
   quick_reactions?: string[] | null;
+  browser_notifications_enabled?: boolean;
+  notification_sound_enabled?: boolean;
 };
 
 export type RealtimeProfileLastSeenEvent = {
   profileId: string;
   lastSeenAt: string;
+};
+
+export type RealtimeNotificationPreferencesEvent = {
+  profileId: string;
+  browserNotificationsEnabled: boolean;
+  notificationSoundEnabled: boolean;
+};
+
+export type ParticipantMuteState = {
+  conversationId: string;
+  userId: string;
+  mutedUntil: string | null;
 };
 
 export type SelectedConversation = {
@@ -44,6 +58,7 @@ export type MessageSidebarItem =
       unreadCount: number;
       currentUserLastReadAt: string | null;
       latestUnreadMessageAt: string | null;
+      mutedUntil: string | null;
     };
 
 export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;
@@ -77,7 +92,9 @@ export type MessageSearchTarget = {
   token: string;
 };
 
-export type MessageType = "text" | "image";
+export type MessageType = "text" | "image" | "voice";
+
+export type MessageAttachmentKind = "image" | "voice";
 
 export type MessageAttachment = {
   id: string;
@@ -86,9 +103,11 @@ export type MessageAttachment = {
   originalName: string;
   mimeType: string;
   size: number;
-  width: number;
-  height: number;
+  width: number | null;
+  height: number | null;
   position: number;
+  attachmentKind: MessageAttachmentKind;
+  durationMs: number | null;
 };
 
 export type OptimisticMessageAttachment = MessageAttachment & {
@@ -106,6 +125,16 @@ export type ComposerImageSelection = {
   width: number;
   height: number;
   duplicateKey: string;
+};
+
+export type ComposerVoiceRecording = {
+  localId: string;
+  file: File;
+  objectUrl: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  durationMs: number;
 };
 
 export type ChatMessage = {

@@ -1,7 +1,9 @@
 import { useState } from "react";
 import type { MessageAttachment } from "../../types/conversations";
 
-type GalleryMediaItem = MessageAttachment & {
+type GalleryMediaItem = Omit<MessageAttachment, "width" | "height"> & {
+  width: number;
+  height: number;
   url: string | null;
 };
 

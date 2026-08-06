@@ -21,6 +21,7 @@ type PendingRequestRow = {
 type MembershipRow = {
   conversation_id: string;
   last_read_at: string | null;
+  muted_until: string | null;
 };
 
 type DirectConversationRow = {
@@ -28,7 +29,7 @@ type DirectConversationRow = {
   created_at: string;
   updated_at: string;
   conversation_participants: Array<{ user_id: string }>;
-  messages: Array<{ id: string; body: string; message_type: "text" | "image"; created_at: string; edited_at: string | null; is_deleted: boolean; deleted_at: string | null; sender_id: string }>;
+  messages: Array<{ id: string; body: string; message_type: "text" | "image" | "voice"; created_at: string; edited_at: string | null; is_deleted: boolean; deleted_at: string | null; sender_id: string }>;
 };
 
 function useMessagesData({ currentUserId, isAccountResolved, currentUserReceiptsByConversationId, onIncomingMessageSynchronized }: UseMessagesDataOptions) {
@@ -51,7 +52,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     async function loadMessagesData() {
       const [pendingResult, membershipResult] = await Promise.all([
         supabase.from("conversation_requests").select("id, recipient_id, introduction, created_at, status, conversation_id").eq("sender_id", userId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
-        supabase.from("conversation_participants").select("conversation_id, last_read_at").eq("user_id", userId).abortSignal(abortController.signal),
+        supabase.from("conversation_participants").select("conversation_id, last_read_at, muted_until").eq("user_id", userId).abortSignal(abortController.signal),
       ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
@@ -159,7 +160,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           conversationId: conversation.id,
           otherProfile: profileById.get(otherUserId) ?? fallbackProfile(otherUserId),
           latestMessageId: latestMessage?.id ?? null,
-          latestMessage: latestMessage ? latestMessage.is_deleted ? "Message deleted" : latestMessage.message_type === "image" ? latestMessage.body || "Photo" : latestMessage.body : null,
+          latestMessage: latestMessage ? latestMessage.is_deleted ? "Message deleted" : latestMessage.message_type === "voice" ? "Voice message" : latestMessage.message_type === "image" ? latestMessage.body || "Photo" : latestMessage.body : null,
           latestMessageAt: latestMessage?.created_at ?? null,
           latestMessageEditedAt: latestMessage?.edited_at ?? null,
           latestMessageIsDeleted: latestMessage?.is_deleted ?? false,
@@ -169,6 +170,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           unreadCount: unreadCountByConversationId.get(conversation.id) ?? 0,
           currentUserLastReadAt: membershipByConversationId.get(conversation.id)?.last_read_at ?? null,
           latestUnreadMessageAt: latestUnreadMessageAtByConversationId.get(conversation.id) ?? null,
+          mutedUntil: membershipByConversationId.get(conversation.id)?.muted_until ?? null,
         }];
       }).sort((first, second) => {
         const firstTimestamp = Date.parse(first.latestMessageAt ?? first.updatedAt);
@@ -232,8 +234,12 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       const incomingEditedTime = Date.parse(message.editedAt ?? "");
       if (!Number.isNaN(currentEditedTime) && (Number.isNaN(incomingEditedTime) || incomingEditedTime < currentEditedTime)) return conversation;
       if (!Number.isNaN(currentEditedTime) && incomingEditedTime === currentEditedTime && conversation.latestMessage !== message.body) return conversation;
-      return { ...conversation, latestMessage: message.messageType === "image" ? message.body || "Photo" : message.body, latestMessageEditedAt: message.editedAt, latestMessageIsDeleted: false, latestMessageDeletedAt: null };
+      return { ...conversation, latestMessage: message.messageType === "voice" ? "Voice message" : message.messageType === "image" ? message.body || "Photo" : message.body, latestMessageEditedAt: message.editedAt, latestMessageIsDeleted: false, latestMessageDeletedAt: null };
     }));
+  }, []);
+
+  const patchConversationMute = useCallback((conversationId: string, mutedUntil: string | null) => {
+    setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === conversationId ? { ...conversation, mutedUntil } : conversation));
   }, []);
 
   const conversationsWithReceiptState = useMemo(() => conversations.map((conversation) => {
@@ -259,6 +265,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     refreshSilently,
     mergeProfileLastSeen,
     patchMessagePreview,
+    patchConversationMute,
   };
 }
 
