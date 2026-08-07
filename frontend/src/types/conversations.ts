@@ -26,11 +26,22 @@ export type ParticipantMuteState = {
   mutedUntil: string | null;
 };
 
+export type ParticipantConversationPreferencesState = {
+  conversationId: string;
+  userId: string;
+  isPinned: boolean;
+  archivedAt: string | null;
+  historyClearedAt: string | null;
+  conversationDeletedAt: string | null;
+};
+
 export type SelectedConversation = {
   id: string;
   otherProfile: ProfileSearchResult;
   introductoryMessage?: string;
   introductoryMessageCreatedAt?: string;
+  historyClearedAt?: string | null;
+  conversationDeletedAt?: string | null;
 };
 
 export type MessageSidebarItem =
@@ -60,6 +71,9 @@ export type MessageSidebarItem =
       latestUnreadMessageAt: string | null;
       mutedUntil: string | null;
       isPinned: boolean;
+      archivedAt: string | null;
+      historyClearedAt: string | null;
+      conversationDeletedAt: string | null;
     };
 
 export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;
@@ -201,6 +215,71 @@ export type MessageReactionRealtimeChange =
   | { action: "delete"; reaction: MessageReactionDeleteIdentity };
 
 export type RealtimeMessageReactionEvent = MessageReactionRealtimeChange & {
+  sequence: number;
+};
+
+export type PinnedMessagePreview = {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  senderName: string;
+  body: string;
+  createdAt: string;
+  messageType: MessageType;
+  pinnedBy: string;
+  pinnedAt: string;
+  attachmentCount: number;
+  voiceDurationMs: number | null;
+};
+
+export type PinnedMessageRealtimeChange =
+  | {
+      action: "insert";
+      pin: {
+        messageId: string;
+        conversationId: string;
+        pinnedBy: string;
+        pinnedAt: string;
+      };
+    }
+  | {
+      action: "delete";
+      pin: {
+        messageId: string;
+        conversationId: string | null;
+      };
+    };
+
+export type RealtimePinnedMessageEvent = PinnedMessageRealtimeChange & {
+  sequence: number;
+};
+
+export type ConversationActivityEvent = {
+  id: string;
+  conversationId: string;
+  actorId: string;
+  actorName: string;
+  eventType: "message_pinned";
+  targetMessageId: string;
+  createdAt: string;
+  isOptimistic: boolean;
+};
+
+export type ConversationActivityRealtimeChange =
+  | {
+      action: "insert";
+      event: Omit<ConversationActivityEvent, "actorName" | "isOptimistic">;
+    }
+  | {
+      action: "delete";
+      event: {
+        id: string;
+        conversationId: string | null;
+        targetMessageId: string | null;
+      };
+    };
+
+export type RealtimeConversationActivityEvent = ConversationActivityRealtimeChange & {
   sequence: number;
 };
 

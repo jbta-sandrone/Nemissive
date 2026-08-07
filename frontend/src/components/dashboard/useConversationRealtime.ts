@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, MessageReaction, MessageReactionDeleteIdentity, MessageReactionRealtimeChange, ParticipantMuteState, ParticipantReceiptCursor, RealtimeNotificationPreferencesEvent, RealtimeProfileLastSeenEvent } from "../../types/conversations";
+import type { ChatMessage, ConversationActivityRealtimeChange, MessageReaction, MessageReactionDeleteIdentity, MessageReactionRealtimeChange, ParticipantConversationPreferencesState, ParticipantMuteState, ParticipantReceiptCursor, PinnedMessageRealtimeChange, RealtimeNotificationPreferencesEvent, RealtimeProfileLastSeenEvent } from "../../types/conversations";
 
 type UseConversationRealtimeOptions = {
   currentUserId: string | null;
@@ -9,8 +9,11 @@ type UseConversationRealtimeOptions = {
   onMessageInserted: (message: ChatMessage) => void;
   onMessageUpdated: (message: ChatMessage) => void;
   onMessageReactionChanged: (change: MessageReactionRealtimeChange) => void;
+  onPinnedMessageChanged: (change: PinnedMessageRealtimeChange) => void;
+  onConversationActivityChanged: (change: ConversationActivityRealtimeChange) => void;
   onParticipantReceiptUpdated: (receipt: ParticipantReceiptCursor) => void;
   onParticipantMuteUpdated: (muteState: ParticipantMuteState) => void;
+  onParticipantPreferencesUpdated: (preferences: ParticipantConversationPreferencesState) => void;
   onProfileLastSeenUpdated: (profile: RealtimeProfileLastSeenEvent) => void;
   onNotificationPreferencesUpdated: (preferences: RealtimeNotificationPreferencesEvent) => void;
   onOpenConversationMessagesChanged: () => void;
@@ -72,6 +75,16 @@ function parseParticipantMute(value: unknown): ParticipantMuteState | null {
   return { conversationId: row.conversation_id, userId: row.user_id, mutedUntil: row.muted_until };
 }
 
+function parseParticipantPreferences(value: unknown): ParticipantConversationPreferencesState | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.conversation_id !== "string" || typeof row.user_id !== "string" || typeof row.is_pinned !== "boolean") return null;
+  if (row.archived_at !== null && typeof row.archived_at !== "string") return null;
+  if (row.history_cleared_at !== null && typeof row.history_cleared_at !== "string") return null;
+  if (row.deleted_at !== null && typeof row.deleted_at !== "string") return null;
+  return { conversationId: row.conversation_id, userId: row.user_id, isPinned: row.is_pinned, archivedAt: row.archived_at, historyClearedAt: row.history_cleared_at, conversationDeletedAt: row.deleted_at };
+}
+
 function parseProfileLastSeen(value: unknown): RealtimeProfileLastSeenEvent | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
@@ -104,12 +117,40 @@ function parseDeletedMessageReaction(value: unknown): MessageReactionDeleteIdent
   return id || hasCompleteTuple ? { id, messageId, userId, emoji } : null;
 }
 
-function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onParticipantMuteUpdated, onProfileLastSeenUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
-  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onParticipantMuteUpdated, onProfileLastSeenUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged });
+function parseInsertedPinnedMessage(value: unknown): Extract<PinnedMessageRealtimeChange, { action: "insert" }> | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.message_id !== "string" || typeof row.conversation_id !== "string" || typeof row.pinned_by !== "string" || typeof row.pinned_at !== "string") return null;
+  return { action: "insert", pin: { messageId: row.message_id, conversationId: row.conversation_id, pinnedBy: row.pinned_by, pinnedAt: row.pinned_at } };
+}
+
+function parseDeletedPinnedMessage(value: unknown): Extract<PinnedMessageRealtimeChange, { action: "delete" }> | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.message_id !== "string") return null;
+  return { action: "delete", pin: { messageId: row.message_id, conversationId: typeof row.conversation_id === "string" ? row.conversation_id : null } };
+}
+
+function parseInsertedConversationActivity(value: unknown): Extract<ConversationActivityRealtimeChange, { action: "insert" }> | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || typeof row.conversation_id !== "string" || typeof row.actor_id !== "string" || row.event_type !== "message_pinned" || typeof row.target_message_id !== "string" || typeof row.created_at !== "string") return null;
+  return { action: "insert", event: { id: row.id, conversationId: row.conversation_id, actorId: row.actor_id, eventType: "message_pinned", targetMessageId: row.target_message_id, createdAt: row.created_at } };
+}
+
+function parseDeletedConversationActivity(value: unknown): Extract<ConversationActivityRealtimeChange, { action: "delete" }> | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string") return null;
+  return { action: "delete", event: { id: row.id, conversationId: typeof row.conversation_id === "string" ? row.conversation_id : null, targetMessageId: typeof row.target_message_id === "string" ? row.target_message_id : null } };
+}
+
+function useConversationRealtime({ currentUserId, onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onPinnedMessageChanged, onConversationActivityChanged, onParticipantReceiptUpdated, onParticipantMuteUpdated, onParticipantPreferencesUpdated, onProfileLastSeenUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged }: UseConversationRealtimeOptions) {
+  const callbacksRef = useRef({ onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onPinnedMessageChanged, onConversationActivityChanged, onParticipantReceiptUpdated, onParticipantMuteUpdated, onParticipantPreferencesUpdated, onProfileLastSeenUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged });
 
   useEffect(() => {
-    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onParticipantReceiptUpdated, onParticipantMuteUpdated, onProfileLastSeenUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged };
-  }, [onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onMessageUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged, onParticipantMuteUpdated, onParticipantReceiptUpdated, onProfileLastSeenUpdated, onRequestsChanged]);
+    callbacksRef.current = { onRequestsChanged, onConversationDataChanged, onMessageInserted, onMessageUpdated, onMessageReactionChanged, onPinnedMessageChanged, onConversationActivityChanged, onParticipantReceiptUpdated, onParticipantMuteUpdated, onParticipantPreferencesUpdated, onProfileLastSeenUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged };
+  }, [onConversationActivityChanged, onConversationDataChanged, onMessageInserted, onMessageReactionChanged, onMessageUpdated, onNotificationPreferencesUpdated, onOpenConversationMessagesChanged, onParticipantMuteUpdated, onParticipantPreferencesUpdated, onParticipantReceiptUpdated, onPinnedMessageChanged, onProfileLastSeenUpdated, onRequestsChanged]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -161,6 +202,8 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
         if (receipt) callbacksRef.current.onParticipantReceiptUpdated(receipt);
         const muteState = parseParticipantMute(payload.new);
         if (muteState) callbacksRef.current.onParticipantMuteUpdated(muteState);
+        const preferences = parseParticipantPreferences(payload.new);
+        if (preferences) callbacksRef.current.onParticipantPreferencesUpdated(preferences);
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "conversation_participants" }, () => {
         scheduleInvalidation({ conversationData: true });
@@ -195,6 +238,22 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
           hasWarnedAboutReactionDeleteIdentity = true;
           console.warn("Nemissive received a reaction DELETE event without enough identity to reconcile it.");
         }
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "pinned_messages" }, (payload) => {
+        const change = parseInsertedPinnedMessage(payload.new);
+        if (change) callbacksRef.current.onPinnedMessageChanged(change);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "pinned_messages" }, (payload) => {
+        const change = parseDeletedPinnedMessage(payload.old);
+        if (change) callbacksRef.current.onPinnedMessageChanged(change);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "conversation_events" }, (payload) => {
+        const change = parseInsertedConversationActivity(payload.new);
+        if (change) callbacksRef.current.onConversationActivityChanged(change);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "conversation_events" }, (payload) => {
+        const change = parseDeletedConversationActivity(payload.old);
+        if (change) callbacksRef.current.onConversationActivityChanged(change);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
         const profile = parseProfileLastSeen(payload.new);

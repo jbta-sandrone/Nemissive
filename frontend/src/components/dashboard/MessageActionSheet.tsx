@@ -6,6 +6,9 @@ import { getEmojiLabel } from "./emojiData";
 type MessageActionSheetProps = {
   canDelete: boolean;
   canEdit: boolean;
+  canPin: boolean;
+  isPinned: boolean;
+  isPinPending: boolean;
   messageLabel: string;
   quickReactions: string[];
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -13,6 +16,7 @@ type MessageActionSheetProps = {
   onDelete: () => void;
   onEdit: () => void;
   onOpenEmojiPicker: () => void;
+  onPin: () => void;
   onReact: (emoji: string) => void;
   onReply: () => void;
 };
@@ -29,7 +33,11 @@ function DeleteIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v5m4-5v5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function MessageActionSheet({ canDelete, canEdit, messageLabel, quickReactions, returnFocusRef, onClose, onDelete, onEdit, onOpenEmojiPicker, onReact, onReply }: MessageActionSheetProps) {
+function PinIcon({ filled }: { filled: boolean }) {
+  return <svg viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="m8 4 8 0-1 5 3 3v2H6v-2l3-3-1-5Z" strokeLinejoin="round" /><path d="M12 14v6" strokeLinecap="round" /></svg>;
+}
+
+function MessageActionSheet({ canDelete, canEdit, canPin, isPinned, isPinPending, messageLabel, quickReactions, returnFocusRef, onClose, onDelete, onEdit, onOpenEmojiPicker, onPin, onReact, onReply }: MessageActionSheetProps) {
   const shouldReduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const shouldRestoreFocusRef = useRef(true);
@@ -91,6 +99,7 @@ function MessageActionSheet({ canDelete, canEdit, messageLabel, quickReactions, 
         </section>
         <section aria-label="Message actions" className="border-b border-border py-2">
           <button type="button" onClick={() => runAction(onReply)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ReplyIcon /></span><span>Reply</span></button>
+          {canPin && <button type="button" onClick={() => { onClose(); onPin(); }} disabled={isPinPending} aria-pressed={isPinned} aria-label={isPinned ? "Unpin this message" : "Pin this message"} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-60"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><PinIcon filled={isPinned} /></span><span>{isPinned ? "Unpin message" : "Pin message"}</span></button>}
           {canEdit && <button type="button" onClick={() => runAction(onEdit)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><EditIcon /></span><span>Edit</span></button>}
           {canDelete && <button type="button" onClick={() => runAction(onDelete)} aria-label="Delete your message" className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><DeleteIcon /></span><span>Delete</span></button>}
         </section>

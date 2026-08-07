@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, ComposerImageSelection, ComposerVoiceRecording, ConfirmedMessageStatus, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, MessageSearchTarget, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, SelectedConversation } from "../../types/conversations";
+import type { ChatMessage, ComposerImageSelection, ComposerVoiceRecording, ConfirmedMessageStatus, ConversationActivityEvent, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, MessageSearchTarget, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, PinnedMessagePreview, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeConversationActivityEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, RealtimePinnedMessageEvent, SelectedConversation } from "../../types/conversations";
 import AnchoredPopover from "./AnchoredPopover";
 import ComposerMediaPreview from "./ComposerMediaPreview";
+import ConversationActivityRow from "./ConversationActivityRow";
 import ConversationMuteMenu from "./ConversationMuteMenu";
 import EmojiPicker from "./EmojiPicker";
 import ImageViewer from "./ImageViewer";
@@ -11,6 +12,7 @@ import MessageActionSheet from "./MessageActionSheet";
 import MessageActionsToolbar from "./MessageActionsToolbar";
 import MessageDeleteDialog from "./MessageDeleteDialog";
 import MessageMediaGallery, { type GalleryMediaItem } from "./MessageMediaGallery";
+import PinnedMessagesMenu from "./PinnedMessagesMenu";
 import PresenceAvatar from "./PresenceAvatar";
 import ProfileAvatar from "./ProfileAvatar";
 import ReactionDetails from "./ReactionDetails";
@@ -73,6 +75,32 @@ type ReactionRow = {
   created_at: string;
 };
 
+type PinnedMessageRow = {
+  message_id: string;
+  conversation_id: string;
+  sender_id: string;
+  body: string;
+  created_at: string;
+  message_type: "text" | "image" | "voice";
+  pinned_by: string;
+  pinned_at: string;
+  attachment_count: number;
+  voice_duration_ms: number | null;
+};
+
+type ConversationEventRow = {
+  event_id: string;
+  conversation_id: string;
+  actor_id: string;
+  event_type: "message_pinned";
+  target_message_id: string;
+  created_at: string;
+};
+
+type ConversationTimelineItem =
+  | { kind: "message"; id: string; createdAt: string; message: DisplayChatMessage }
+  | { kind: "event"; id: string; createdAt: string; event: ConversationActivityEvent };
+
 type MessageEditState = {
   messageId: string;
   draft: string;
@@ -98,6 +126,8 @@ type PendingMessageDelete = {
   messageId: string;
   previousMessage: ChatMessage;
   previousReactions: MessageReaction[];
+  previousPin: PinnedMessagePreview | null;
+  previousEvents: ConversationActivityEvent[];
   confirmedMessage: ChatMessage | null;
   deferredMessage: ChatMessage | null;
 };
@@ -120,6 +150,8 @@ type ChatPanelProps = {
   realtimeMessageEvents: RealtimeChatMessageEvent[];
   realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[];
   realtimeReactionEvents: RealtimeMessageReactionEvent[];
+  realtimePinnedMessageEvents: RealtimePinnedMessageEvent[];
+  realtimeConversationActivityEvents: RealtimeConversationActivityEvent[];
   realtimeReceiptEvents: RealtimeParticipantReceiptEvent[];
   onlineUserIds: ReadonlySet<string>;
   quickReactions: string[];
@@ -142,6 +174,9 @@ const comingSoonMessageDurationMs = 3000;
 const readAcknowledgementDebounceMs = 280;
 const replyPreviewMaxLength = 120;
 const replyHighlightDurationMs = 1700;
+const pinToastDurationMs = 3200;
+const conversationEventLimit = 50;
+const conversationEventDedupeLimit = 250;
 const mobileLongPressDurationMs = 450;
 const mobileLongPressMovementThreshold = 12;
 const imageMaxFileSize = 10 * 1024 * 1024;
@@ -213,6 +248,60 @@ function mapMessageRow(row: MessageRow, replyPreview: MessageReplyPreview | null
     replyToMessageId: row.reply_to_message_id,
     replyPreview,
   };
+}
+
+function mapPinnedMessageRow(row: PinnedMessageRow, currentUserId: string | null, otherName: string): PinnedMessagePreview {
+  return {
+    messageId: row.message_id,
+    conversationId: row.conversation_id,
+    senderId: row.sender_id,
+    senderName: row.sender_id === currentUserId ? "You" : otherName,
+    body: row.body,
+    createdAt: row.created_at,
+    messageType: row.message_type,
+    pinnedBy: row.pinned_by,
+    pinnedAt: row.pinned_at,
+    attachmentCount: row.attachment_count,
+    voiceDurationMs: row.voice_duration_ms,
+  };
+}
+
+function createPinnedMessagePreview(message: ChatMessage, currentUserId: string | null, otherName: string): PinnedMessagePreview {
+  return {
+    messageId: message.id,
+    conversationId: message.conversationId,
+    senderId: message.senderId,
+    senderName: message.senderId === currentUserId ? "You" : otherName,
+    body: message.body,
+    createdAt: message.createdAt,
+    messageType: message.messageType,
+    pinnedBy: currentUserId ?? "",
+    pinnedAt: new Date().toISOString(),
+    attachmentCount: message.attachments.length,
+    voiceDurationMs: message.attachments.find((attachment) => attachment.attachmentKind === "voice")?.durationMs ?? null,
+  };
+}
+
+function mapConversationEventRow(row: ConversationEventRow, currentUserId: string | null, otherName: string): ConversationActivityEvent {
+  return {
+    id: row.event_id,
+    conversationId: row.conversation_id,
+    actorId: row.actor_id,
+    actorName: row.actor_id === currentUserId ? "You" : otherName,
+    eventType: row.event_type,
+    targetMessageId: row.target_message_id,
+    createdAt: row.created_at,
+    isOptimistic: false,
+  };
+}
+
+function mergeConversationEvent(events: ConversationActivityEvent[], incoming: ConversationActivityEvent) {
+  return [...events.filter((event) => event.id !== incoming.id && !(event.isOptimistic && event.actorId === incoming.actorId && event.targetMessageId === incoming.targetMessageId)), incoming]
+    .sort((first, second) => {
+      const timestampDifference = Date.parse(first.createdAt) - Date.parse(second.createdAt);
+      return timestampDifference || first.id.localeCompare(second.id);
+    })
+    .slice(-conversationEventLimit);
 }
 
 function normalizeReplyPreviewBody(body: string) {
@@ -416,7 +505,7 @@ function TypingIndicator({ isVisible, name, shouldReduceMotion }: { isVisible: b
 }
 
 function ReplyQuote({ preview, isStrongOutgoing, canJump, onJump }: { preview: MessageReplyPreview; isStrongOutgoing: boolean; canJump: boolean; onJump: () => void }) {
-  const previewText = preview.isDeleted ? "Original message was deleted." : preview.unavailable ? "Original message unavailable" : preview.body;
+  const previewText = preview.isDeleted ? "Original message was deleted." : preview.unavailable ? "Earlier message unavailable" : preview.body;
   const content = <><span className={`block truncate text-xs font-semibold ${isStrongOutgoing ? "text-white" : "text-heading"}`}>{preview.senderName}</span><span className={`mt-0.5 block break-words text-xs leading-5 ${isStrongOutgoing ? "text-white/80" : "text-body"}`}>{previewText}</span></>;
   const className = `mb-2 block w-full min-w-0 rounded-xl border-l-2 px-3 py-2 text-left ${isStrongOutgoing ? "border-white/60 bg-background/10" : "border-primary/40 bg-background"}`;
 
@@ -424,7 +513,7 @@ function ReplyQuote({ preview, isStrongOutgoing, canJump, onJump }: { preview: M
   return <div aria-label={`Reply to ${preview.senderName}: ${previewText ?? ""}`} className={className}>{content}</div>;
 }
 
-function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, conversationMutedUntil, onConversationMuteChange, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onMobileBack }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; messageSearchTarget: MessageSearchTarget | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; conversationMutedUntil: string | null; onConversationMuteChange: (conversationId: string, mutedUntil: string | null) => Promise<string | null>; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onMobileBack: () => void }) {
+function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, conversationMutedUntil, onConversationMuteChange, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onMobileBack }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; messageSearchTarget: MessageSearchTarget | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimePinnedMessageEvents: RealtimePinnedMessageEvent[]; realtimeConversationActivityEvents: RealtimeConversationActivityEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; conversationMutedUntil: string | null; onConversationMuteChange: (conversationId: string, mutedUntil: string | null) => Promise<string | null>; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onMobileBack: () => void }) {
   const shouldReduceMotion = useReducedMotion();
   const latestLoadRef = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -450,6 +539,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const processedRealtimeSequenceRef = useRef(realtimeMessageEvents.at(-1)?.sequence ?? 0);
   const processedMessageUpdateSequenceRef = useRef(realtimeMessageUpdateEvents.at(-1)?.sequence ?? 0);
   const processedReactionSequenceRef = useRef(realtimeReactionEvents.at(-1)?.sequence ?? 0);
+  const processedPinnedMessageSequenceRef = useRef(realtimePinnedMessageEvents.at(-1)?.sequence ?? 0);
+  const processedConversationActivitySequenceRef = useRef(realtimeConversationActivityEvents.at(-1)?.sequence ?? 0);
   const processedReceiptSequenceRef = useRef(realtimeReceiptEvents.at(-1)?.sequence ?? 0);
   const realtimeSequenceByMessageIdRef = useRef(new Map<string, number>());
   const messageUpdateSequenceByIdRef = useRef(new Map<string, number>());
@@ -458,6 +549,14 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const reactionDeleteSequenceByTupleRef = useRef(new Map<string, number>());
   const locallyConfirmedMessageIdsRef = useRef(new Set<string>());
   const pendingReactionKeysRef = useRef(new Set<string>());
+  const pendingPinnedMessageIdsRef = useRef(new Set<string>());
+  const pinnedMessagesLoadIdRef = useRef(0);
+  const conversationEventsLoadIdRef = useRef(0);
+  const seenConversationEventIdsRef = useRef(new Set<string>());
+  const seenConversationEventOrderRef = useRef<string[]>([]);
+  const deletedConversationEventIdsRef = useRef(new Set<string>());
+  const deletedConversationEventOrderRef = useRef<string[]>([]);
+  const pinToastTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const replyTargetCacheRef = useRef(new Map<string, ChatMessage>());
   const replyTargetFetchesRef = useRef(new Map<string, Promise<void>>());
   const attachmentCacheRef = useRef(new Map<string, MessageAttachment[]>());
@@ -476,6 +575,15 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const composerSelectionRef = useRef({ start: 0, end: 0 });
   const [messages, setMessages] = useState<DisplayChatMessage[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
+  const [pinnedMessages, setPinnedMessages] = useState<PinnedMessagePreview[]>([]);
+  const [isLoadingPinnedMessages, setIsLoadingPinnedMessages] = useState(true);
+  const [pinnedMessagesError, setPinnedMessagesError] = useState("");
+  const [pinMutationError, setPinMutationError] = useState("");
+  const [pendingPinnedMessageIds, setPendingPinnedMessageIds] = useState<Set<string>>(() => new Set());
+  const [pinnedJumpTarget, setPinnedJumpTarget] = useState<MessageSearchTarget | null>(null);
+  const [conversationEvents, setConversationEvents] = useState<ConversationActivityEvent[]>([]);
+  const [conversationEventsError, setConversationEventsError] = useState("");
+  const [pinToast, setPinToast] = useState<{ id: number; message: string } | null>(null);
   const [draft, setDraft] = useState("");
   const [selectedImages, setSelectedImages] = useState<ComposerImageSelection[]>([]);
   const [mediaError, setMediaError] = useState("");
@@ -534,6 +642,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (reactionErrorTimerRef.current !== null) window.clearTimeout(reactionErrorTimerRef.current);
       if (replyHighlightTimerRef.current !== null) window.clearTimeout(replyHighlightTimerRef.current);
       if (mobileLongPressTimerRef.current !== null) window.clearTimeout(mobileLongPressTimerRef.current);
+      if (pinToastTimerRef.current !== null) window.clearTimeout(pinToastTimerRef.current);
       selectedImagesRef.current.forEach((image) => URL.revokeObjectURL(image.objectUrl));
       optimisticPreviewUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
       optimisticPreviewUrls.clear();
@@ -641,6 +750,35 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     });
   }, [shouldReduceMotion]);
 
+  const showPinToast = useCallback((message: string) => {
+    if (pinToastTimerRef.current !== null) window.clearTimeout(pinToastTimerRef.current);
+    setPinToast({ id: Date.now(), message });
+    pinToastTimerRef.current = window.setTimeout(() => {
+      setPinToast(null);
+      pinToastTimerRef.current = null;
+    }, pinToastDurationMs);
+  }, []);
+
+  const rememberConversationEvent = useCallback((eventId: string) => {
+    if (seenConversationEventIdsRef.current.has(eventId)) return false;
+    seenConversationEventIdsRef.current.add(eventId);
+    seenConversationEventOrderRef.current.push(eventId);
+    while (seenConversationEventOrderRef.current.length > conversationEventDedupeLimit) {
+      const expiredId = seenConversationEventOrderRef.current.shift();
+      if (expiredId) seenConversationEventIdsRef.current.delete(expiredId);
+    }
+    return true;
+  }, []);
+
+  const rememberDeletedConversationEvent = useCallback((eventId: string) => {
+    deletedConversationEventIdsRef.current.add(eventId);
+    deletedConversationEventOrderRef.current.push(eventId);
+    while (deletedConversationEventOrderRef.current.length > conversationEventDedupeLimit) {
+      const expiredId = deletedConversationEventOrderRef.current.shift();
+      if (expiredId) deletedConversationEventIdsRef.current.delete(expiredId);
+    }
+  }, []);
+
   const loadReplyTarget = useCallback((replyToMessageId: string) => {
     if (replyTargetCacheRef.current.has(replyToMessageId) || replyTargetFetchesRef.current.has(replyToMessageId)) return;
 
@@ -696,6 +834,49 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
     attachmentFetchesRef.current.set(messageId, request);
   }, [conversation.id, currentUserId, otherName]);
+
+  const loadPinnedMessages = useCallback(async () => {
+    const loadId = ++pinnedMessagesLoadIdRef.current;
+    setIsLoadingPinnedMessages(true);
+    setPinnedMessagesError("");
+    const { data, error } = await supabase.rpc("list_pinned_messages", { target_conversation_id: conversation.id, page_size: 50 });
+    if (!isMountedRef.current || loadId !== pinnedMessagesLoadIdRef.current) return;
+    setIsLoadingPinnedMessages(false);
+    if (error) {
+      setPinnedMessagesError("Pinned messages couldn’t be loaded. Please try again.");
+      if (import.meta.env.DEV) console.warn("Loading pinned messages failed", { conversationId: conversation.id, code: error.code });
+      return;
+    }
+    const nextPins = ((data ?? []) as PinnedMessageRow[]).map((row) => mapPinnedMessageRow(row, currentUserId, otherName));
+    setPinnedMessages(nextPins);
+  }, [conversation.id, currentUserId, otherName]);
+
+  const loadConversationEvents = useCallback(async () => {
+    const loadId = ++conversationEventsLoadIdRef.current;
+    setConversationEventsError("");
+    const { data, error } = await supabase.rpc("list_conversation_events", { target_conversation_id: conversation.id, page_size: conversationEventLimit });
+    if (!isMountedRef.current || loadId !== conversationEventsLoadIdRef.current) return;
+    if (error) {
+      setConversationEventsError("Conversation activity couldn’t be loaded. Please try again.");
+      if (import.meta.env.DEV) console.warn("Loading conversation activity failed", { conversationId: conversation.id, code: error.code });
+      return;
+    }
+
+    const loadedEvents = ((data ?? []) as ConversationEventRow[]).map((row) => mapConversationEventRow(row, currentUserId, otherName)).filter((event) => !deletedConversationEventIdsRef.current.has(event.id));
+    loadedEvents.forEach((event) => rememberConversationEvent(event.id));
+    setConversationEvents((currentEvents) => {
+      const currentVisibleEvents = currentEvents.filter((event) => !deletedConversationEventIdsRef.current.has(event.id));
+      return loadedEvents.reduce((nextEvents, event) => mergeConversationEvent(nextEvents, event), currentVisibleEvents).slice(-conversationEventLimit);
+    });
+  }, [conversation.id, currentUserId, otherName, rememberConversationEvent]);
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => {
+      void loadPinnedMessages();
+      void loadConversationEvents();
+    }, 0);
+    return () => window.clearTimeout(loadTimer);
+  }, [loadConversationEvents, loadPinnedMessages, realtimeRefreshKey]);
 
   useEffect(() => {
     const loadId = ++latestLoadRef.current;
@@ -833,9 +1014,16 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     };
   }, [conversation.id, currentUserId, isNearBottom, onIncomingMessagesSynchronized, otherName, realtimeRefreshKey, retryKey, scrollToLatest]);
 
+  const activeMessageTarget = pinnedJumpTarget ?? messageSearchTarget;
+
   useEffect(() => {
-    if (isLoading || !messageSearchTarget || messageSearchTarget.conversationId !== conversation.id || processedSearchTargetTokenRef.current === messageSearchTarget.token) return;
-    const searchTarget = messageSearchTarget;
+    const clearTimer = window.setTimeout(() => setPinnedJumpTarget(null), 0);
+    return () => window.clearTimeout(clearTimer);
+  }, [messageSearchTarget?.token]);
+
+  useEffect(() => {
+    if (isLoading || !activeMessageTarget || activeMessageTarget.conversationId !== conversation.id || processedSearchTargetTokenRef.current === activeMessageTarget.token) return;
+    const searchTarget = activeMessageTarget;
     processedSearchTargetTokenRef.current = searchTarget.token;
     const abortController = new AbortController();
     let isCancelled = false;
@@ -869,6 +1057,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (error || !data) {
         setIsLoadingSearchContext(false);
         setSearchContextError(navigator.onLine ? "That message context couldn’t be loaded. Please try again." : "You appear to be offline. Reconnect and try again.");
+        if (searchTarget.token.startsWith("pin:")) void loadPinnedMessages();
+        if (searchTarget.token.startsWith("event:")) void loadConversationEvents();
         if (error && import.meta.env.DEV) console.warn("Loading searched message context failed", { code: error.code, conversationId: conversation.id });
         return;
       }
@@ -878,6 +1068,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (!contextIds.includes(searchTarget.messageId)) {
         setIsLoadingSearchContext(false);
         setSearchContextError("That message is no longer available.");
+        if (searchTarget.token.startsWith("pin:")) void loadPinnedMessages();
+        if (searchTarget.token.startsWith("event:")) void loadConversationEvents();
         return;
       }
 
@@ -954,7 +1146,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       isCancelled = true;
       abortController.abort();
     };
-  }, [conversation.id, currentUserId, isLoading, messageSearchTarget, onMessageUpdated, otherName, searchContextRetryKey, shouldReduceMotion]);
+  }, [activeMessageTarget, conversation.id, currentUserId, isLoading, loadConversationEvents, loadPinnedMessages, onMessageUpdated, otherName, searchContextRetryKey, shouldReduceMotion]);
 
   useEffect(() => {
     const newEvents = realtimeMessageEvents.filter((event) => event.sequence > processedRealtimeSequenceRef.current);
@@ -1010,6 +1202,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     deletedMessageIds.forEach((messageId) => deletedMessageIdsRef.current.add(messageId));
     if (deletedMessageIds.size > 0) {
       setReactions((currentReactions) => currentReactions.filter((reaction) => !deletedMessageIds.has(reaction.messageId)));
+      setPinnedMessages((currentPins) => currentPins.filter((pin) => !deletedMessageIds.has(pin.messageId)));
+      setConversationEvents((currentEvents) => currentEvents.filter((event) => !deletedMessageIds.has(event.targetMessageId)));
       setMessageEditState((currentState) => currentState && deletedMessageIds.has(currentState.messageId) ? null : currentState);
       setReplyingTo((currentTarget) => currentTarget && deletedMessageIds.has(currentTarget.id) ? null : currentTarget);
       setQuickReactionMessageId((messageId) => messageId && deletedMessageIds.has(messageId) ? null : messageId);
@@ -1020,6 +1214,13 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       setMessageDeleteState((currentState) => currentState && deletedMessageIds.has(currentState.messageId) && pendingDeleteRef.current?.messageId !== currentState.messageId ? null : currentState);
       if (pendingEditRef.current && deletedMessageIds.has(pendingEditRef.current.messageId)) pendingEditRef.current = null;
     }
+
+    setPinnedMessages((currentPins) => currentPins.flatMap((pin) => {
+      const update = relevantEvents.find((event) => event.message.id === pin.messageId)?.message;
+      if (!update) return [pin];
+      if (update.isDeleted) return [];
+      return [{ ...pin, body: update.body, createdAt: update.createdAt, messageType: update.messageType }];
+    }));
 
     setMessages((currentMessages) => {
       let nextMessages = currentMessages;
@@ -1072,6 +1273,45 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       return nextReactions.filter((reaction) => !matchesDeletedReaction(reaction, event.reaction));
     }, currentReactions));
   }, [realtimeReactionEvents]);
+
+  useEffect(() => {
+    const newEvents = realtimePinnedMessageEvents.filter((event) => event.sequence > processedPinnedMessageSequenceRef.current).sort((first, second) => first.sequence - second.sequence);
+    if (newEvents.length === 0) return;
+    processedPinnedMessageSequenceRef.current = newEvents[newEvents.length - 1]?.sequence ?? processedPinnedMessageSequenceRef.current;
+    const relevantEvents = newEvents.filter((event) => event.action === "insert" ? event.pin.conversationId === conversation.id : event.pin.conversationId === null || event.pin.conversationId === conversation.id);
+    if (relevantEvents.length === 0) return;
+
+    const deletedMessageIds = new Set(relevantEvents.filter((event) => event.action === "delete").map((event) => event.pin.messageId));
+    if (deletedMessageIds.size > 0) setPinnedMessages((currentPins) => currentPins.filter((pin) => !deletedMessageIds.has(pin.messageId)));
+    if (relevantEvents.some((event) => event.action === "insert")) void loadPinnedMessages();
+  }, [conversation.id, loadPinnedMessages, realtimePinnedMessageEvents]);
+
+  useEffect(() => {
+    const newEvents = realtimeConversationActivityEvents.filter((event) => event.sequence > processedConversationActivitySequenceRef.current).sort((first, second) => first.sequence - second.sequence);
+    if (newEvents.length === 0) return;
+    processedConversationActivitySequenceRef.current = newEvents[newEvents.length - 1]?.sequence ?? processedConversationActivitySequenceRef.current;
+
+    const relevantEvents = newEvents.filter((change) => change.action === "insert" ? change.event.conversationId === conversation.id : change.event.conversationId === null || change.event.conversationId === conversation.id);
+    if (relevantEvents.length === 0) return;
+
+    relevantEvents.forEach((change) => {
+      if (change.action === "delete") {
+        rememberDeletedConversationEvent(change.event.id);
+        setConversationEvents((currentEvents) => currentEvents.filter((event) => event.id !== change.event.id && (!change.event.targetMessageId || event.targetMessageId !== change.event.targetMessageId)));
+        return;
+      }
+
+      if (deletedConversationEventIdsRef.current.has(change.event.id)) return;
+      if (!rememberConversationEvent(change.event.id)) return;
+      const event: ConversationActivityEvent = {
+        ...change.event,
+        actorName: change.event.actorId === currentUserId ? "You" : otherName,
+        isOptimistic: false,
+      };
+      setConversationEvents((currentEvents) => mergeConversationEvent(currentEvents, event));
+      if (change.event.actorId !== currentUserId) showPinToast(`${otherName} pinned a message`);
+    });
+  }, [conversation.id, currentUserId, otherName, realtimeConversationActivityEvents, rememberConversationEvent, rememberDeletedConversationEvent, showPinToast]);
 
   useEffect(() => {
     const newEvents = realtimeReceiptEvents.filter((event) => event.sequence > processedReceiptSequenceRef.current);
@@ -1875,7 +2115,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   function openDeleteConfirmation(message: ChatMessage, trigger: HTMLElement) {
-    if (message.senderId !== currentUserId || message.isIntroduction || message.isDeleted || pendingEditRef.current || pendingDeleteRef.current) return;
+    if (message.senderId !== currentUserId || message.isIntroduction || message.isDeleted || pendingEditRef.current || pendingDeleteRef.current || pendingPinnedMessageIdsRef.current.has(message.id)) return;
     deleteTriggerRef.current = trigger;
     setQuickReactionMessageId(null);
     setFullReactionPickerMessageId(null);
@@ -1898,12 +2138,16 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     }
 
     const previousReactions = reactions.filter((reaction) => reaction.messageId === message.id);
+    const previousPin = pinnedMessages.find((pin) => pin.messageId === message.id) ?? null;
     const optimisticMessage: ChatMessage = { ...message, body: "", isDeleted: true, deletedAt: null };
-    pendingDeleteRef.current = { messageId: message.id, previousMessage: message, previousReactions, confirmedMessage: null, deferredMessage: null };
+    const previousEvents = conversationEvents.filter((event) => event.targetMessageId === message.id);
+    pendingDeleteRef.current = { messageId: message.id, previousMessage: message, previousReactions, previousPin, previousEvents, confirmedMessage: null, deferredMessage: null };
     deletedMessageIdsRef.current.add(message.id);
     replyTargetCacheRef.current.set(message.id, optimisticMessage);
     setMessages((currentMessages) => patchMessageAndReplies(currentMessages, optimisticMessage, currentUserId, otherName));
     setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.messageId !== message.id));
+    setPinnedMessages((currentPins) => currentPins.filter((pin) => pin.messageId !== message.id));
+    setConversationEvents((currentEvents) => currentEvents.filter((event) => event.targetMessageId !== message.id));
     setReplyingTo((currentTarget) => currentTarget?.id === message.id ? null : currentTarget);
     setMessageDeleteState((currentState) => currentState ? { ...currentState, isDeleting: true, error: "" } : currentState);
     onMessageUpdated(optimisticMessage);
@@ -1915,6 +2159,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     if (error || !data) {
       if (pendingDelete.confirmedMessage?.isDeleted) {
         const confirmedMessage = pendingDelete.confirmedMessage;
+        pendingDelete.previousEvents.forEach((event) => rememberDeletedConversationEvent(event.id));
         pendingDeleteRef.current = null;
         replyTargetCacheRef.current.set(message.id, confirmedMessage);
         setMessages((currentMessages) => patchMessageAndReplies(currentMessages, confirmedMessage, currentUserId, otherName));
@@ -1931,6 +2176,9 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       replyTargetCacheRef.current.set(message.id, rollbackMessage);
       setMessages((currentMessages) => patchMessageAndReplies(currentMessages, rollbackMessage, currentUserId, otherName));
       setReactions((currentReactions) => pendingDelete.previousReactions.reduce((nextReactions, reaction) => mergeReaction(nextReactions, reaction), currentReactions));
+      if (pendingDelete.previousPin) setPinnedMessages((currentPins) => currentPins.some((pin) => pin.messageId === pendingDelete.previousPin?.messageId) ? currentPins : [...currentPins, pendingDelete.previousPin as PinnedMessagePreview].sort((first, second) => Date.parse(second.pinnedAt) - Date.parse(first.pinnedAt)));
+      if (pendingDelete.previousEvents.length > 0 && !rollbackMessage.isDeleted) setConversationEvents((currentEvents) => pendingDelete.previousEvents.reduce((nextEvents, event) => mergeConversationEvent(nextEvents, event), currentEvents));
+      void loadPinnedMessages();
       onMessageDeletionRolledBack(rollbackMessage);
       setMessageDeleteState((currentState) => currentState?.messageId === message.id ? { ...currentState, isDeleting: false, error: "We couldn’t delete that message. Please try again." } : currentState);
       if (import.meta.env.DEV) console.warn("Deleting message failed", { messageId: message.id, code: error?.code });
@@ -1939,6 +2187,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
     const rpcMessage = mapMessageRow(data as MessageRow, message.replyPreview, message.attachments);
     const authoritativeMessage = pendingDelete.confirmedMessage && shouldApplyAuthoritativeMessage(rpcMessage, pendingDelete.confirmedMessage) ? pendingDelete.confirmedMessage : rpcMessage;
+    pendingDelete.previousEvents.forEach((event) => rememberDeletedConversationEvent(event.id));
     pendingDeleteRef.current = null;
     deletedMessageIdsRef.current.add(message.id);
     replyTargetCacheRef.current.set(message.id, authoritativeMessage);
@@ -1947,6 +2196,69 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     onMessageUpdated(authoritativeMessage);
     setMessageDeleteState(null);
     window.requestAnimationFrame(() => messageElementsRef.current.get(message.id)?.focus());
+  }
+
+  async function togglePinnedMessage(message: ChatMessage) {
+    if (!currentUserId || message.isDeleted || message.isIntroduction || pendingPinnedMessageIdsRef.current.has(message.id) || pendingDeleteRef.current?.messageId === message.id) return;
+    const wasPinned = pinnedMessages.some((pin) => pin.messageId === message.id);
+    const previousPins = pinnedMessages;
+    const shouldPin = !wasPinned;
+    const optimisticEventId = `optimistic:${createUuid()}`;
+    pendingPinnedMessageIdsRef.current.add(message.id);
+    setPendingPinnedMessageIds((currentIds) => new Set(currentIds).add(message.id));
+    setPinMutationError("");
+    setPinnedMessages((currentPins) => shouldPin ? [createPinnedMessagePreview(message, currentUserId, otherName), ...currentPins.filter((pin) => pin.messageId !== message.id)] : currentPins.filter((pin) => pin.messageId !== message.id));
+    if (shouldPin) {
+      setConversationEvents((currentEvents) => mergeConversationEvent(currentEvents, { id: optimisticEventId, conversationId: conversation.id, actorId: currentUserId, actorName: "You", eventType: "message_pinned", targetMessageId: message.id, createdAt: new Date().toISOString(), isOptimistic: true }));
+      showPinToast("Message pinned");
+    }
+
+    const { error } = await supabase.rpc("set_message_pinned", { target_message_id: message.id, pinned: shouldPin });
+    pendingPinnedMessageIdsRef.current.delete(message.id);
+    if (!isMountedRef.current) return;
+    setPendingPinnedMessageIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.delete(message.id);
+      return nextIds;
+    });
+
+    if (error) {
+      if (shouldPin) {
+        setConversationEvents((currentEvents) => currentEvents.filter((event) => event.id !== optimisticEventId));
+        if (pinToastTimerRef.current !== null) window.clearTimeout(pinToastTimerRef.current);
+        pinToastTimerRef.current = null;
+        setPinToast(null);
+      }
+      if (deletedMessageIdsRef.current.has(message.id)) setPinnedMessages((currentPins) => currentPins.filter((pin) => pin.messageId !== message.id));
+      else setPinnedMessages(previousPins);
+      setPinMutationError(error.code === "54000" || error.message.includes("50 pinned") ? "This conversation already has 50 pinned messages. Unpin one before adding another." : `We couldn’t ${shouldPin ? "pin" : "unpin"} that message. Please try again.`);
+      if (import.meta.env.DEV) console.warn("Updating pinned message failed", { messageId: message.id, shouldPin, code: error.code });
+      return;
+    }
+
+    if (!shouldPin) showPinToast("Message unpinned");
+    await Promise.all([loadPinnedMessages(), loadConversationEvents()]);
+  }
+
+  function handlePinnedMessageSelected(pin: PinnedMessagePreview) {
+    setPinMutationError("");
+    openMessageTarget(pin.messageId, "pin");
+  }
+
+  function openMessageTarget(messageId: string, source: "pin" | "event") {
+    setPinMutationError("");
+    const loadedMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && message.id === messageId);
+    if (loadedMessage?.isDeleted) {
+      setConversationEvents((currentEvents) => currentEvents.filter((event) => event.targetMessageId !== messageId));
+      setPinnedMessages((currentPins) => currentPins.filter((pin) => pin.messageId !== messageId));
+      setSearchContextError("That message is no longer available.");
+      return;
+    }
+    if (loadedMessage && messageElementsRef.current.has(messageId)) {
+      jumpToOriginalMessage(messageId);
+      return;
+    }
+    setPinnedJumpTarget({ conversationId: conversation.id, messageId, token: `${source}:${messageId}:${Date.now()}` });
   }
 
   function handleReplyToMessage(message: ChatMessage) {
@@ -1972,7 +2284,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const remainingCharacters = messageMaxLength - draft.length;
   const showCharacterCount = remainingCharacters <= characterCountThreshold;
   const isSendDisabled = !currentUserId || (!draft.trim() && selectedImages.length === 0) || isSubmitting || Boolean(messageEditState) || draft.length > messageMaxLength;
-  const shouldShowIntroductoryFallback = Boolean(conversation.introductoryMessage) && !messages.some((message) => message.kind === "confirmed" && message.isIntroduction);
+  const shouldShowIntroductoryFallback = !conversation.historyClearedAt && Boolean(conversation.introductoryMessage) && !messages.some((message) => message.kind === "confirmed" && message.isIntroduction);
+  const shouldShowRestartEmptyState = Boolean(conversation.historyClearedAt) && messages.length === 0;
   const newestDisplayedMessage = messages.at(-1);
   const statusMessageKey = newestDisplayedMessage?.senderId === currentUserId ? getMessageKey(newestDisplayedMessage) : null;
   const composerHelpId = `message-composer-help-${conversation.id}`;
@@ -1989,12 +2302,22 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   if (currentProfile) availableReactionProfilesById.set(currentProfile.id, currentProfile);
   const imageViewerMessage = imageViewerState ? messages.find((message) => (message.kind === "confirmed" ? message.id : message.optimisticId) === imageViewerState.messageId && message.messageType === "image") ?? null : null;
   const imageViewerImages: GalleryMediaItem[] = imageViewerMessage?.kind === "optimistic" ? imageViewerMessage.attachments.filter((attachment) => attachment.attachmentKind === "image").map((attachment) => ({ ...attachment, width: attachment.width ?? 1, height: attachment.height ?? 1, url: attachment.previewUrl })) : imageViewerMessage?.kind === "confirmed" ? imageViewerMessage.attachments.filter((attachment) => attachment.attachmentKind === "image").map((attachment) => ({ ...attachment, width: attachment.width ?? 1, height: attachment.height ?? 1, url: signedMedia.urls.get(attachment.storagePath) ?? null })) : [];
+  const timelineItems: ConversationTimelineItem[] = [
+    ...messages.map((message): ConversationTimelineItem => ({ kind: "message", id: getMessageKey(message), createdAt: message.createdAt, message })),
+    ...conversationEvents.map((event): ConversationTimelineItem => ({ kind: "event", id: `event:${event.id}`, createdAt: event.createdAt, event })),
+  ].sort((first, second) => {
+    const timestampDifference = Date.parse(first.createdAt) - Date.parse(second.createdAt);
+    if (timestampDifference !== 0) return timestampDifference;
+    if (first.kind !== second.kind) return first.kind === "message" ? -1 : 1;
+    return first.id.localeCompare(second.id);
+  });
 
   return (
-    <div ref={panelRef} className="flex min-h-0 flex-1 flex-col">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border bg-surface px-4 py-4 sm:px-6"><MobileBackButton onClick={onMobileBack} /><PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={isOtherUserOnline} /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1><p className={`truncate text-xs font-medium ${isOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{conversation.otherProfile.username && <span className="font-normal text-body"> · @{conversation.otherProfile.username}</span>}</p></div><ConversationMuteMenu conversationName={otherName} mutedUntil={conversationMutedUntil} onChange={(mutedUntil) => onConversationMuteChange(conversation.id, mutedUntil)} /><span className="hidden shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-semibold text-primary sm:inline-flex">Accepted</span></header>
+    <div ref={panelRef} className="relative flex min-h-0 flex-1 flex-col">
+      <header className="flex shrink-0 items-center gap-2 border-b border-border bg-surface px-4 py-4 sm:gap-3 sm:px-6"><MobileBackButton onClick={onMobileBack} /><PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={isOtherUserOnline} /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1><p className={`truncate text-xs font-medium ${isOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{conversation.otherProfile.username && <span className="font-normal text-body"> · @{conversation.otherProfile.username}</span>}</p></div><PinnedMessagesMenu error={pinnedMessagesError} isLoading={isLoadingPinnedMessages} pins={pinnedMessages} onRetry={() => void loadPinnedMessages()} onSelect={handlePinnedMessageSelected} /><ConversationMuteMenu conversationName={otherName} mutedUntil={conversationMutedUntil} onChange={(mutedUntil) => onConversationMuteChange(conversation.id, mutedUntil)} /><span className="hidden shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-semibold text-primary lg:inline-flex">Accepted</span></header>
 
       <p aria-live="polite" className="sr-only">{newMessageAnnouncement}</p>
+      <div className="pointer-events-none absolute left-1/2 top-20 z-40 w-[min(calc(100%-2rem),22rem)] -translate-x-1/2"><AnimatePresence initial={false}>{pinToast && <motion.div key={pinToast.id} role="status" aria-live="polite" aria-atomic="true" initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }} transition={{ duration: shouldReduceMotion ? 0 : 0.16 }} className="rounded-2xl border border-border bg-surface px-4 py-3 text-center text-sm font-semibold text-heading shadow-soft">{pinToast.message}</motion.div>}</AnimatePresence></div>
       <div className="relative min-h-0 flex-1">
         <div ref={scrollViewportRef} role="region" aria-label={`Messages with ${otherName}`} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 lg:px-10">
           {isLoading ? (
@@ -2002,7 +2325,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
           ) : historyError && messages.length === 0 ? (
             <div role="alert" className="mx-auto max-w-md rounded-3xl border border-border bg-surface p-6 text-center shadow-soft"><h2 className="font-semibold text-heading">Unable to load messages</h2><p className="mt-2 text-sm leading-6 text-body">{historyError}</p><button type="button" onClick={handleHistoryRetry} className="mt-5 inline-flex min-h-11 items-center justify-center rounded-2xl bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry</button></div>
           ) : messages.length === 0 && !shouldShowIntroductoryFallback ? (
-            <div className="mx-auto max-w-md py-12 text-center"><h2 className="font-semibold text-heading">No messages yet. Start the conversation.</h2></div>
+            shouldShowRestartEmptyState ? <div className="flex min-h-full items-center justify-center py-12"><div className="max-w-md text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-primary" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-7 w-7"><path d="M5 6.5h14v9H9l-4 3v-12Z" strokeLinejoin="round" /><path d="M9 10h6m-6 3h4" strokeLinecap="round" /></svg></div><h2 className="mt-4 font-semibold text-heading">Start the conversation again</h2><p className="mt-2 text-sm leading-6 text-body">Your previous chat history was cleared. Send {otherName} a message to start fresh.</p></div></div> : <div className="mx-auto max-w-md py-12 text-center"><h2 className="font-semibold text-heading">No messages yet. Start the conversation.</h2></div>
           ) : (
             <div className="mx-auto max-w-2xl space-y-4">
               {historyError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>Earlier messages couldn’t be refreshed.</p><button type="button" onClick={handleHistoryRetry} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry history</button></div>}
@@ -2010,7 +2333,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
               {searchContextError && <div role="alert" className="rounded-2xl border border-primary/25 bg-accent px-4 py-3 text-sm text-body shadow-soft"><p>{searchContextError}</p><button type="button" onClick={() => { processedSearchTargetTokenRef.current = null; setSearchContextRetryKey((key) => key + 1); }} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-surface focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry</button></div>}
               {isViewingSearchContext && <div role="status" className="rounded-2xl border border-border bg-surface px-4 py-3 text-center text-xs font-semibold uppercase tracking-[0.14em] text-muted shadow-soft">Viewing search context</div>}
               {shouldShowIntroductoryFallback && <article className="flex justify-start"><div className="max-w-[85%] rounded-3xl rounded-bl-md border border-border bg-surface px-4 py-3 text-body shadow-soft sm:max-w-[75%]"><p className="whitespace-pre-wrap break-words text-sm leading-6">{conversation.introductoryMessage}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">{conversation.introductoryMessageCreatedAt && <time dateTime={conversation.introductoryMessageCreatedAt}>{formatMessageTimestamp(conversation.introductoryMessageCreatedAt)}</time>}<span>Introduction</span></div></div></article>}
-              {messages.map((message) => {
+              {conversationEventsError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>{conversationEventsError}</p><button type="button" onClick={() => void loadConversationEvents()} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry activity</button></div>}
+              {timelineItems.map((item) => {
+                if (item.kind === "event") return <ConversationActivityRow key={item.id} event={item.event} onActivate={(event) => openMessageTarget(event.targetMessageId, "event")} />;
+                const message = item.message;
                 const isCurrentUser = message.senderId === currentUserId;
                 const isFailed = message.kind === "optimistic" && message.deliveryState === "failed";
                 const isSending = message.kind === "optimistic" && message.deliveryState === "sending";
@@ -2025,6 +2351,9 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                 const isSavingThisEdit = Boolean(isEditingThisMessage && messageEditState?.isSaving);
                 const canEditMessage = message.kind === "confirmed" && isCurrentUser && !message.isIntroduction && !message.isDeleted && message.messageType !== "voice";
                 const canDeleteMessage = message.kind === "confirmed" && isCurrentUser && !message.isIntroduction && !message.isDeleted;
+                const canPinMessage = message.kind === "confirmed" && !message.isIntroduction && !message.isDeleted;
+                const isMessagePinned = message.kind === "confirmed" && pinnedMessages.some((pin) => pin.messageId === message.id);
+                const isPinPending = message.kind === "confirmed" && (isLoadingPinnedMessages || pendingPinnedMessageIds.has(message.id));
                 const galleryAttachments: GalleryMediaItem[] = (message.kind === "optimistic" ? message.attachments.filter((attachment) => attachment.attachmentKind === "image").map((attachment) => ({ ...attachment, width: attachment.width ?? 1, height: attachment.height ?? 1, url: attachment.previewUrl })) : message.attachments.filter((attachment) => attachment.attachmentKind === "image").map((attachment) => ({ ...attachment, width: attachment.width ?? 1, height: attachment.height ?? 1, url: signedMedia.urls.get(attachment.storagePath) ?? null })));
                 const isImageMessage = message.messageType === "image" && !("isDeleted" in message && message.isDeleted);
                 const isVoiceMessage = message.messageType === "voice" && !("isDeleted" in message && message.isDeleted);
@@ -2043,7 +2372,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                           <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed && !(message.kind === "confirmed" && message.isDeleted) ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}{message.kind === "confirmed" && !message.isDeleted && (message.editedAt || isSavingThisEdit) && <span>Edited</span>}</div>
                           {isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}
                         </motion.div>
-                        {message.kind === "confirmed" && !message.isDeleted && <MessageActionsToolbar canDelete={canDeleteMessage} canEdit={canEditMessage} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} isOutgoing={isCurrentUser} replyLabel={`Reply to message from ${replyActionSenderName}`} onDelete={(button) => openDeleteConfirmation(message, button)} onEdit={(button) => startEditingMessage(message, button)} onReact={(button) => openQuickReactions(message.id, button)} onReply={() => handleReplyToMessage(message)} />}
+                        {message.kind === "confirmed" && !message.isDeleted && <MessageActionsToolbar canDelete={canDeleteMessage} canEdit={canEditMessage} canPin={canPinMessage} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} isOutgoing={isCurrentUser} isPinned={isMessagePinned} isPinPending={isPinPending} replyLabel={`Reply to message from ${replyActionSenderName}`} onDelete={(button) => openDeleteConfirmation(message, button)} onEdit={(button) => startEditingMessage(message, button)} onPin={() => void togglePinnedMessage(message)} onReact={(button) => openQuickReactions(message.id, button)} onReply={() => handleReplyToMessage(message)} />}
                       </div>
                       {reactionGroups.length > 0 && <div className={`relative z-10 -mt-1 flex max-w-full flex-wrap gap-1 px-1 ${isCurrentUser ? "justify-end" : "justify-start"}`}>{reactionGroups.map((group) => { const reactionName = getEmojiLabel(group.emoji).toLowerCase(); return <button key={group.emoji} type="button" onClick={(event) => message.kind === "confirmed" && openReactionDetails(message.id, event.currentTarget)} aria-haspopup="dialog" aria-expanded={message.kind === "confirmed" && reactionDetailsMessageId === message.id} aria-label={`View ${group.count} ${reactionName} ${group.count === 1 ? "reaction" : "reactions"}${group.reactedByCurrentUser ? ", including you" : ""}`} className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 ${group.reactedByCurrentUser ? "border-primary/30 bg-accent text-heading" : "border-border bg-surface text-body hover:bg-accent"}`}><span aria-hidden="true" className="text-sm">{group.emoji}</span><span aria-hidden="true" className="font-semibold">{group.count}</span></button>; })}</div>}
                       {shouldShowStatus && <p role={isFailed ? "alert" : isSending ? "status" : undefined} className={`mt-1.5 px-1 text-right text-xs font-medium ${isFailed ? "text-primary" : "text-muted"}`}>{statusLabel}</p>}
@@ -2060,9 +2389,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       </div>
 
       {reactionError && <p role="status" aria-live="polite" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{reactionError}</p>}
+      {pinMutationError && <p role="alert" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{pinMutationError}</p>}
       <form onSubmit={handleSend} className="shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
         <TypingIndicator isVisible={isOtherUserTyping} name={otherName} shouldReduceMotion={shouldReduceMotion} />
-        {replyingTo && <div aria-label={`Replying to ${replyingTo.senderName}`} className="mb-2 flex min-w-0 items-start gap-3 rounded-2xl bg-surface px-4 py-3 shadow-soft"><div className="min-w-0 flex-1 border-l-2 border-primary/40 pl-3"><p className="truncate text-xs font-semibold text-heading">Replying to {replyingTo.senderName}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-body">{replyingTo.body ?? "Original message unavailable"}</p></div><button type="button" onClick={() => { setReplyingTo(null); window.requestAnimationFrame(() => textareaRef.current?.focus()); }} aria-label={`Cancel reply to ${replyingTo.senderName}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>}
+        {replyingTo && <div aria-label={`Replying to ${replyingTo.senderName}`} className="mb-2 flex min-w-0 items-start gap-3 rounded-2xl bg-surface px-4 py-3 shadow-soft"><div className="min-w-0 flex-1 border-l-2 border-primary/40 pl-3"><p className="truncate text-xs font-semibold text-heading">Replying to {replyingTo.senderName}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-body">{replyingTo.body ?? "Earlier message unavailable"}</p></div><button type="button" onClick={() => { setReplyingTo(null); window.requestAnimationFrame(() => textareaRef.current?.focus()); }} aria-label={`Cancel reply to ${replyingTo.senderName}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>}
         {voiceRecorder.mode === "idle" && <ComposerMediaPreview images={selectedImages} disabled={isSubmitting} onRemove={removeSelectedImage} onRemoveAll={removeAllSelectedImages} />}
         {mediaError && <p id={mediaErrorId} role="alert" className="mb-2 rounded-xl bg-accent px-3 py-2 text-xs leading-5 text-body">{mediaError}</p>}
         {voiceRecorder.mode === "idle" && voiceRecorder.error && <p role="alert" className="mb-2 rounded-xl bg-accent px-3 py-2 text-xs leading-5 text-body">{voiceRecorder.error}</p>}
@@ -2080,7 +2410,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
           </div>
         </div>}
       </form>
-      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction && mobileActionMessage.messageType !== "voice"} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} onClose={() => setMobileActionMessageId(null)} onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
+      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction && mobileActionMessage.messageType !== "voice"} canPin={!mobileActionMessage.isIntroduction} isPinned={pinnedMessages.some((pin) => pin.messageId === mobileActionMessage.id)} isPinPending={isLoadingPinnedMessages || pendingPinnedMessageIds.has(mobileActionMessage.id)} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} onClose={() => setMobileActionMessageId(null)} onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }} onPin={() => void togglePinnedMessage(mobileActionMessage)} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
       <AnimatePresence initial={false} onExitComplete={() => { const anchor = reactionDetailsAnchorRef.current; if (anchor?.isConnected) anchor.focus(); else if (lastReactionDetailsMessageIdRef.current) messageElementsRef.current.get(lastReactionDetailsMessageIdRef.current)?.focus(); }}>{reactionDetailsMessage && (reactionDetailsReactions.length > 0 || isReactionDetailsMutationPending) && <ReactionDetails key={reactionDetailsMessage.id} anchorRef={reactionDetailsAnchorRef} currentUserId={currentUserId} error={reactionProfilesError} isLoading={isReactionProfilesLoading} isMutationPending={isReactionDetailsMutationPending} messageLabel={`message from ${reactionDetailsMessage.senderId === currentUserId ? "yourself" : otherName}`} mutationError={reactionDetailsMutationError} pendingReactionKeys={pendingReactionKeys} profilesById={availableReactionProfilesById} reactions={reactionDetailsReactions} onClose={closeReactionDetails} onRemoveOwnReaction={(reaction) => void removeOwnReactionFromDetails(reaction)} onRetry={retryReactionProfiles} />}</AnimatePresence>
       <AnimatePresence initial={false}>{messageDeleteState && <MessageDeleteDialog key={messageDeleteState.messageId} error={messageDeleteState.error} isDeleting={messageDeleteState.isDeleting} returnFocusRef={deleteTriggerRef} onCancel={cancelMessageDeletion} onConfirm={() => void confirmMessageDeletion()} />}</AnimatePresence>
       <AnimatePresence initial={false}>{imageViewerState && imageViewerImages.length > 0 && <ImageViewer key={imageViewerState.messageId} images={imageViewerImages} initialIndex={imageViewerState.initialIndex} isLoading={signedMedia.isLoading} returnFocusRef={imageViewerReturnFocusRef} onClose={() => setImageViewerState(null)} onRetry={signedMedia.retry} />}</AnimatePresence>
@@ -2091,7 +2421,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   );
 }
 
-function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, conversationMutedUntil, onConversationMuteChange, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onStartConversation, onMobileBack }: ChatPanelProps) {
+function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, conversationMutedUntil, onConversationMuteChange, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onStartConversation, onMobileBack }: ChatPanelProps) {
   const visibilityClasses = isMobileVisible ? "flex" : "hidden lg:flex";
 
   if (chatState?.kind === "pending") {
@@ -2106,7 +2436,7 @@ function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, 
   }
 
   if (chatState?.kind === "accepted") {
-    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} conversationMutedUntil={conversationMutedUntil} onConversationMuteChange={onConversationMuteChange} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onMobileBack={onMobileBack} /></main>;
+    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} conversationMutedUntil={conversationMutedUntil} onConversationMuteChange={onConversationMuteChange} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onMobileBack={onMobileBack} /></main>;
   }
 
   return (

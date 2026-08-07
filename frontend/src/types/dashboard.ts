@@ -1,1 +1,1 @@
-export type DashboardSection = "messages" | "people" | "requests" | "menu";
+export type DashboardSection = "messages" | "archived" | "people" | "requests" | "menu";

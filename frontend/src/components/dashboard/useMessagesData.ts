@@ -23,6 +23,21 @@ type MembershipRow = {
   last_read_at: string | null;
   muted_until: string | null;
   is_pinned: boolean;
+  archived_at: string | null;
+  history_cleared_at: string | null;
+  deleted_at: string | null;
+};
+
+type ArchiveRpcRow = {
+  archived_at: string | null;
+  is_pinned: boolean;
+};
+
+type DeleteConversationRpcRow = {
+  history_cleared_at: string;
+  deleted_at: string;
+  archived_at: null;
+  is_pinned: false;
 };
 
 type DirectConversationRow = {
@@ -39,6 +54,17 @@ function compareConversations(first: AcceptedConversationItem, second: AcceptedC
   const secondTimestamp = Date.parse(second.latestMessageAt ?? second.updatedAt);
   const timestampDifference = secondTimestamp - firstTimestamp;
   return timestampDifference !== 0 ? timestampDifference : first.conversationId.localeCompare(second.conversationId);
+}
+
+function compareConversationActivity(first: AcceptedConversationItem, second: AcceptedConversationItem) {
+  const firstTimestamp = Date.parse(first.latestMessageAt ?? first.updatedAt);
+  const secondTimestamp = Date.parse(second.latestMessageAt ?? second.updatedAt);
+  const timestampDifference = secondTimestamp - firstTimestamp;
+  return timestampDifference !== 0 ? timestampDifference : first.conversationId.localeCompare(second.conversationId);
+}
+
+function redactDeletedConversation(conversation: AcceptedConversationItem, historyClearedAt: string | null, conversationDeletedAt: string) {
+  return { ...conversation, latestMessageId: null, latestMessage: null, latestMessageAt: null, latestMessageEditedAt: null, latestMessageIsDeleted: false, latestMessageDeletedAt: null, latestMessageSentByCurrentUser: null, unreadCount: 0, latestUnreadMessageAt: null, isPinned: false, archivedAt: null, historyClearedAt, conversationDeletedAt };
 }
 
 function useMessagesData({ currentUserId, isAccountResolved, currentUserReceiptsByConversationId, onIncomingMessageSynchronized }: UseMessagesDataOptions) {
@@ -61,7 +87,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     async function loadMessagesData() {
       const [pendingResult, membershipResult] = await Promise.all([
         supabase.from("conversation_requests").select("id, recipient_id, introduction, created_at, status, conversation_id").eq("sender_id", userId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
-        supabase.from("conversation_participants").select("conversation_id, last_read_at, muted_until, is_pinned").eq("user_id", userId).abortSignal(abortController.signal),
+        supabase.from("conversation_participants").select("conversation_id, last_read_at, muted_until, is_pinned, archived_at, history_cleared_at, deleted_at").eq("user_id", userId).abortSignal(abortController.signal),
       ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
@@ -181,6 +207,9 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           latestUnreadMessageAt: latestUnreadMessageAtByConversationId.get(conversation.id) ?? null,
           mutedUntil: membershipByConversationId.get(conversation.id)?.muted_until ?? null,
           isPinned: membershipByConversationId.get(conversation.id)?.is_pinned ?? false,
+          archivedAt: membershipByConversationId.get(conversation.id)?.archived_at ?? null,
+          historyClearedAt: membershipByConversationId.get(conversation.id)?.history_cleared_at ?? null,
+          conversationDeletedAt: membershipByConversationId.get(conversation.id)?.deleted_at ?? null,
         }];
       }).sort(compareConversations);
 
@@ -260,6 +289,41 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     return null;
   }, []);
 
+  const setConversationArchived = useCallback(async (conversationId: string, archived: boolean) => {
+    const { data, error } = await supabase.rpc("set_conversation_archived", { target_conversation_id: conversationId, archived });
+    if (error) {
+      if (import.meta.env.DEV) console.warn("Saving conversation archive failed", { conversationId, code: error.code });
+      return "We couldn’t update this archived conversation. Please try again.";
+    }
+
+    const result = (Array.isArray(data) ? data[0] : data) as ArchiveRpcRow | null;
+    const savedArchivedAt = archived ? result?.archived_at ?? new Date().toISOString() : null;
+    const savedPinned = result?.is_pinned ?? (archived ? false : undefined);
+    setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === conversationId ? { ...conversation, archivedAt: savedArchivedAt, isPinned: savedPinned ?? conversation.isPinned } : conversation).sort(compareConversations));
+    return null;
+  }, []);
+
+  const deleteConversationForMe = useCallback(async (conversationId: string) => {
+    const { data, error } = await supabase.rpc("delete_conversation_for_me", { target_conversation_id: conversationId });
+    if (error) {
+      if (import.meta.env.DEV) console.warn("Deleting conversation for participant failed", { conversationId, code: error.code });
+      return "We couldn’t delete this chat. Please try again.";
+    }
+
+    const result = (Array.isArray(data) ? data[0] : data) as DeleteConversationRpcRow | null;
+    if (!result?.deleted_at) return "We couldn’t confirm that this chat was deleted. Please try again.";
+    setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === conversationId ? redactDeletedConversation(conversation, result.history_cleared_at, result.deleted_at) : conversation).sort(compareConversations));
+    return null;
+  }, []);
+
+  const patchConversationPreferences = useCallback((conversationId: string, isPinned: boolean, archivedAt: string | null, historyClearedAt: string | null, conversationDeletedAt: string | null) => {
+    setConversations((currentConversations) => currentConversations.map((conversation) => {
+      if (conversation.conversationId !== conversationId) return conversation;
+      if (conversationDeletedAt) return redactDeletedConversation(conversation, historyClearedAt, conversationDeletedAt);
+      return { ...conversation, isPinned, archivedAt, historyClearedAt, conversationDeletedAt: null };
+    }).sort(compareConversations));
+  }, []);
+
   const conversationsWithReceiptState = useMemo(() => conversations.map((conversation) => {
     const receipt = currentUserReceiptsByConversationId.get(conversation.conversationId);
     const nextReadAt = receipt?.lastReadAt ?? null;
@@ -271,20 +335,30 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     const clearsUnread = Number.isNaN(latestUnreadTime) || nextReadTime >= latestUnreadTime;
     return { ...conversation, currentUserLastReadAt: nextReadAt, unreadCount: clearsUnread ? 0 : conversation.unreadCount, latestUnreadMessageAt: clearsUnread ? null : conversation.latestUnreadMessageAt };
   }), [conversations, currentUserReceiptsByConversationId]);
+  const visibleConversations = useMemo(() => conversationsWithReceiptState.filter((conversation) => !conversation.conversationDeletedAt), [conversationsWithReceiptState]);
+  const inboxConversations = useMemo(() => visibleConversations.filter((conversation) => !conversation.archivedAt).sort(compareConversations), [visibleConversations]);
+  const archivedConversations = useMemo(() => visibleConversations.filter((conversation) => Boolean(conversation.archivedAt)).sort(compareConversationActivity), [visibleConversations]);
 
   return {
     pendingRequests: currentUserId ? pendingRequests : [],
-    conversations: currentUserId ? conversationsWithReceiptState : [],
+    conversations: currentUserId ? visibleConversations : [],
+    relationshipConversations: currentUserId ? conversationsWithReceiptState : [],
+    notificationConversations: currentUserId ? conversationsWithReceiptState : [],
+    inboxConversations: currentUserId ? inboxConversations : [],
+    archivedConversations: currentUserId ? archivedConversations : [],
     isLoading: currentUserId ? isLoading : !isAccountResolved,
     hasLoaded: currentUserId ? hasLoaded : isAccountResolved,
     loadError: currentUserId ? loadError : isAccountResolved ? "Your session has expired. Please sign in again." : "",
-    aggregateUnreadCount: currentUserId ? conversationsWithReceiptState.reduce((total, conversation) => total + conversation.unreadCount, 0) : 0,
+    aggregateUnreadCount: currentUserId ? visibleConversations.reduce((total, conversation) => total + conversation.unreadCount, 0) : 0,
     refresh,
     refreshSilently,
     mergeProfileLastSeen,
     patchMessagePreview,
     patchConversationMute,
     setConversationPinned,
+    setConversationArchived,
+    deleteConversationForMe,
+    patchConversationPreferences,
   };
 }
 
