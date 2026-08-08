@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AcceptedConversationItem, ChatMessage, SelectedConversation } from "../../types/conversations";
-import { getProfileDisplayName } from "./profileUtils";
+import { getConversationDisplayName } from "./profileUtils";
 
 type BrowserNotificationPermission = NotificationPermission | "unsupported";
 
@@ -221,13 +221,13 @@ function useBrowserNotifications({ currentUserId, browserNotificationsEnabled, n
     if (document.visibilityState === "visible" && document.hasFocus()) return;
     if (!state.browserNotificationsEnabled || !isSupported || Notification.permission !== "granted" || isMuted(conversation.mutedUntil)) return;
 
-    const title = getProfileDisplayName(conversation.otherProfile);
+    const title = getConversationDisplayName(conversation.otherProfile, conversation.otherNickname);
     const body = message.messageType === "voice" ? "Sent a voice message" : message.messageType === "image" ? message.body.trim() ? normalizeNotificationPreview(message.body) : "Sent a photo" : normalizeNotificationPreview(message.body);
     try {
       const notification = new Notification(title, { body, tag: `nemissive-message-${message.id}`, silent: true });
       notification.onclick = () => {
         window.focus();
-        state.onConversationOpen({ id: conversation.conversationId, otherProfile: conversation.otherProfile });
+        state.onConversationOpen({ id: conversation.conversationId, otherProfile: conversation.otherProfile, otherNickname: conversation.otherNickname });
         notification.close();
       };
       if (state.notificationSoundEnabled) playNotificationSound();

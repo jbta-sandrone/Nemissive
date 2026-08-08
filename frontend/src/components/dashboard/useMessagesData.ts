@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import type { AcceptedConversationItem, ChatMessage, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileSearchResult } from "../../types/conversations";
+import type { AcceptedConversationItem, ChatMessage, ConversationNicknameRealtimeChange, ConversationThemeRealtimeChange, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileSearchResult } from "../../types/conversations";
 
 type UseMessagesDataOptions = {
   currentUserId: string | null;
@@ -44,8 +44,15 @@ type DirectConversationRow = {
   id: string;
   created_at: string;
   updated_at: string;
+  theme_key: string;
   conversation_participants: Array<{ user_id: string }>;
   messages: Array<{ id: string; body: string; message_type: "text" | "image" | "voice"; created_at: string; edited_at: string | null; is_deleted: boolean; deleted_at: string | null; sender_id: string }>;
+};
+
+type ConversationNicknameRow = {
+  conversation_id: string;
+  user_id: string;
+  nickname: string;
 };
 
 function compareConversations(first: AcceptedConversationItem, second: AcceptedConversationItem) {
@@ -105,11 +112,12 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       const conversationIds = [...new Set(membershipRows.map((row) => row.conversation_id))];
       const membershipByConversationId = new Map(membershipRows.map((row) => [row.conversation_id, row]));
       let directConversationRows: DirectConversationRow[] = [];
+      let nicknameRows: ConversationNicknameRow[] = [];
 
       if (conversationIds.length > 0) {
         const { data: conversationData, error: conversationError } = await supabase
           .from("conversations")
-          .select("id, created_at, updated_at, conversation_participants(user_id), messages(id, body, message_type, created_at, edited_at, is_deleted, deleted_at, sender_id)")
+          .select("id, created_at, updated_at, theme_key, conversation_participants(user_id), messages(id, body, message_type, created_at, edited_at, is_deleted, deleted_at, sender_id)")
           .in("id", conversationIds)
           .eq("conversation_type", "direct")
           .order("created_at", { referencedTable: "messages", ascending: false })
@@ -127,6 +135,17 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
         }
 
         directConversationRows = (conversationData ?? []) as DirectConversationRow[];
+
+        const { data: nicknameData, error: nicknameError } = await supabase.from("conversation_nicknames").select("conversation_id, user_id, nickname").in("conversation_id", conversationIds).abortSignal(abortController.signal);
+        if (isCancelled || loadId !== latestLoadRef.current) return;
+        if (nicknameError) {
+          setIsLoading(false);
+          setHasLoaded(true);
+          setLoadError("We couldn’t load conversation names. Please try again.");
+          if (import.meta.env.DEV) console.error("Loading conversation nicknames failed", nicknameError);
+          return;
+        }
+        nicknameRows = (nicknameData ?? []) as ConversationNicknameRow[];
       }
 
       const unreadCountResults = await Promise.all(directConversationRows.map((conversation) => {
@@ -175,6 +194,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       }
 
       const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+      const nicknameByConversationAndUser = new Map(nicknameRows.map((row) => [`${row.conversation_id}:${row.user_id}`, row.nickname]));
       const fallbackProfile = (id: string): ProfileSearchResult => ({ id, username: null, display_name: null, avatar_url: null });
       const nextPendingRequests = pendingRows.map((request): PendingOutgoingRequest => ({
         kind: "pending",
@@ -210,6 +230,8 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           archivedAt: membershipByConversationId.get(conversation.id)?.archived_at ?? null,
           historyClearedAt: membershipByConversationId.get(conversation.id)?.history_cleared_at ?? null,
           conversationDeletedAt: membershipByConversationId.get(conversation.id)?.deleted_at ?? null,
+          otherNickname: nicknameByConversationAndUser.get(`${conversation.id}:${otherUserId}`) ?? null,
+          themeKey: conversation.theme_key || "default",
         }];
       }).sort(compareConversations);
 
@@ -324,6 +346,17 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     }).sort(compareConversations));
   }, []);
 
+  const patchConversationNickname = useCallback((change: ConversationNicknameRealtimeChange) => {
+    setConversations((currentConversations) => currentConversations.map((conversation) => {
+      if (conversation.conversationId !== change.nickname.conversationId || conversation.otherProfile.id !== change.nickname.userId) return conversation;
+      return { ...conversation, otherNickname: change.action === "delete" ? null : change.nickname.nickname };
+    }));
+  }, []);
+
+  const patchConversationTheme = useCallback((change: ConversationThemeRealtimeChange) => {
+    setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === change.conversationId ? { ...conversation, themeKey: change.themeKey } : conversation));
+  }, []);
+
   const conversationsWithReceiptState = useMemo(() => conversations.map((conversation) => {
     const receipt = currentUserReceiptsByConversationId.get(conversation.conversationId);
     const nextReadAt = receipt?.lastReadAt ?? null;
@@ -359,6 +392,8 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     setConversationArchived,
     deleteConversationForMe,
     patchConversationPreferences,
+    patchConversationNickname,
+    patchConversationTheme,
   };
 }
 

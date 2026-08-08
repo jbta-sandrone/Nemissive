@@ -39,3 +39,230 @@ body {
   color: var(--color-heading);
   font-family: var(--font-sans);
 }
+
+/* Conversation themes are deliberately scoped to the active ChatPanel. */
+.chat-theme {
+  background: var(--chat-background);
+  color: var(--chat-body);
+}
+
+.chat-theme .chat-panel-root {
+  background: var(--chat-background);
+}
+
+.chat-theme .chat-header {
+  background: var(--chat-header-background);
+  border-color: var(--chat-border);
+}
+
+.chat-theme .chat-header .text-heading,
+.chat-theme .chat-empty-state .text-heading,
+.chat-theme .chat-composer-region .text-heading,
+.chat-theme .chat-surface .text-heading {
+  color: var(--chat-heading);
+}
+
+.chat-theme .chat-header .text-body,
+.chat-theme .chat-empty-state .text-body,
+.chat-theme .chat-composer-region .text-body,
+.chat-theme .chat-surface .text-body {
+  color: var(--chat-body);
+}
+
+.chat-theme .chat-header .text-muted,
+.chat-theme .chat-timeline .text-muted,
+.chat-theme .chat-composer-region .text-muted,
+.chat-theme .chat-surface .text-muted {
+  color: var(--chat-muted-text);
+}
+
+.chat-theme .chat-surface,
+.chat-theme .chat-message-actions,
+.chat-theme .chat-jump-latest,
+.chat-theme .chat-composer-surface {
+  background: var(--chat-surface);
+  border-color: var(--chat-border);
+  color: var(--chat-body);
+}
+
+.chat-theme.chat-action-sheet {
+  background: var(--chat-surface);
+  border-color: var(--chat-border);
+  color: var(--chat-body);
+}
+
+.chat-theme.chat-action-sheet .border-border {
+  border-color: var(--chat-border);
+}
+
+.chat-theme.chat-action-sheet .text-heading {
+  color: var(--chat-heading);
+}
+
+.chat-theme.chat-action-sheet .text-body,
+.chat-theme.chat-action-sheet .text-muted {
+  color: var(--chat-muted-text);
+}
+
+.chat-theme.chat-action-sheet .bg-accent {
+  background: var(--chat-accent-soft);
+}
+
+.chat-theme.chat-action-sheet .text-primary {
+  color: var(--chat-accent);
+}
+
+.chat-theme.chat-action-sheet button[aria-label="Delete your message"],
+.chat-theme.chat-action-sheet button[aria-label="Delete your message"] .text-primary {
+  color: var(--color-primary);
+}
+
+.chat-theme.chat-action-sheet button:not([aria-label="Delete your message"]):hover {
+  background: var(--chat-accent-soft);
+}
+
+.chat-theme .chat-message-outgoing {
+  background: var(--chat-outgoing-background);
+  color: var(--chat-outgoing-text);
+}
+
+.chat-theme .chat-message-incoming {
+  background: var(--chat-incoming-background);
+  border-color: var(--chat-border);
+  color: var(--chat-incoming-text);
+}
+
+.chat-theme .chat-message-incoming .text-heading {
+  color: var(--chat-heading);
+}
+
+.chat-theme .chat-message-incoming .text-body,
+.chat-theme .chat-message-incoming .text-muted {
+  color: var(--chat-muted-text);
+}
+
+.chat-theme .chat-message-highlight {
+  --tw-ring-color: color-mix(in srgb, var(--chat-accent) 48%, transparent);
+  --tw-ring-offset-color: var(--chat-background);
+}
+
+.chat-theme .chat-reply-quote {
+  border-left-color: color-mix(in srgb, var(--chat-accent) 72%, transparent);
+}
+
+.chat-theme .chat-message-incoming .chat-reply-quote {
+  background: var(--chat-surface-muted);
+}
+
+.chat-theme .chat-reaction-chip {
+  background: var(--chat-surface);
+  border-color: var(--chat-border);
+  color: var(--chat-body);
+}
+
+.chat-theme .chat-reaction-chip:hover,
+.chat-theme .chat-reaction-selected {
+  background: var(--chat-accent-soft);
+  border-color: color-mix(in srgb, var(--chat-accent) 42%, var(--chat-border));
+  color: var(--chat-accent);
+}
+
+.chat-theme .chat-header-control {
+  background: var(--chat-surface);
+  border-color: var(--chat-border);
+  color: var(--chat-muted-text);
+}
+
+.chat-theme .chat-header-control:hover,
+.chat-theme .chat-header-control-active,
+.chat-theme .chat-accent-control:hover,
+.chat-theme .chat-accent-control-active {
+  background: var(--chat-accent-soft);
+  border-color: color-mix(in srgb, var(--chat-accent) 38%, var(--chat-border));
+  color: var(--chat-accent);
+}
+
+.chat-theme .chat-header-control:focus-visible,
+.chat-theme .chat-accent-control:focus-visible,
+.chat-theme .chat-primary-action:focus-visible,
+.chat-theme .chat-jump-latest:focus-visible,
+.chat-theme .chat-reaction-chip:focus-visible {
+  --tw-ring-color: color-mix(in srgb, var(--chat-accent) 38%, transparent);
+}
+
+.chat-theme .chat-activity-row {
+  color: var(--chat-muted-text);
+}
+
+.chat-theme .chat-activity-row .text-muted {
+  color: var(--chat-muted-text);
+}
+
+.chat-theme .chat-activity-icon {
+  color: var(--chat-accent);
+}
+
+.chat-theme .chat-jump-latest {
+  color: var(--chat-heading);
+}
+
+.chat-theme .chat-jump-latest:hover {
+  background: var(--chat-accent-soft);
+}
+
+.chat-theme .chat-composer-region {
+  background: var(--chat-composer-background);
+  border-color: var(--chat-border);
+}
+
+.chat-theme .chat-composer-shell {
+  background: var(--chat-surface);
+  color: var(--chat-body);
+}
+
+.chat-theme .chat-composer-shell:focus-within {
+  --tw-ring-color: color-mix(in srgb, var(--chat-accent) 38%, transparent);
+}
+
+.chat-theme .chat-composer-input {
+  color: var(--chat-heading);
+  caret-color: var(--chat-accent);
+}
+
+.chat-theme .chat-composer-input::placeholder {
+  color: var(--chat-muted-text);
+}
+
+.chat-theme .chat-reply-indicator {
+  border-color: var(--chat-accent);
+}
+
+.chat-theme .chat-primary-action {
+  background: var(--chat-accent);
+  color: var(--chat-outgoing-text);
+}
+
+.chat-theme .chat-primary-action:hover {
+  background: var(--chat-accent-hover);
+}
+
+.chat-theme .chat-voice-progress {
+  accent-color: var(--chat-accent);
+}
+
+.chat-theme .chat-message-incoming .chat-voice-play {
+  background: var(--chat-accent-soft);
+  color: var(--chat-accent);
+}
+
+.chat-theme .chat-message-incoming .chat-voice-play:hover {
+  background: color-mix(in srgb, var(--chat-accent-soft) 72%, var(--chat-accent));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-theme *,
+  .chat-theme *::before,
+  .chat-theme *::after {
+    scroll-behavior: auto;
+  }
+}

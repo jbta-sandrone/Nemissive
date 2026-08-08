@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { AcceptedConversationItem, SelectedConversation } from "../../types/conversations";
 import PresenceAvatar from "./PresenceAvatar";
-import { getProfileDisplayName } from "./profileUtils";
+import { getConversationDisplayName } from "./profileUtils";
 
 type PeopleSidebarContentProps = {
   conversations: AcceptedConversationItem[];
@@ -21,12 +21,12 @@ function PeopleSidebarContent({ conversations, isLoading, errorMessage, selected
     conversations.forEach((conversation) => {
       if (!peopleByUserId.has(conversation.otherProfile.id)) peopleByUserId.set(conversation.otherProfile.id, conversation);
     });
-    return [...peopleByUserId.values()].sort((first, second) => getProfileDisplayName(first.otherProfile).localeCompare(getProfileDisplayName(second.otherProfile), undefined, { sensitivity: "base" }));
+    return [...peopleByUserId.values()].sort((first, second) => getConversationDisplayName(first.otherProfile, first.otherNickname).localeCompare(getConversationDisplayName(second.otherProfile, second.otherNickname), undefined, { sensitivity: "base" }));
   }, [conversations]);
   const filteredPeople = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
     if (!normalizedQuery) return people;
-    return people.filter(({ otherProfile }) => getProfileDisplayName(otherProfile).toLocaleLowerCase().includes(normalizedQuery) || otherProfile.username?.toLocaleLowerCase().includes(normalizedQuery));
+    return people.filter(({ otherProfile, otherNickname }) => getConversationDisplayName(otherProfile, otherNickname).toLocaleLowerCase().includes(normalizedQuery) || otherProfile.username?.toLocaleLowerCase().includes(normalizedQuery));
   }, [people, searchQuery]);
 
   return (
@@ -44,7 +44,7 @@ function PeopleSidebarContent({ conversations, isLoading, errorMessage, selected
         ) : filteredPeople.length === 0 ? (
           <div className="px-4 py-10 text-center"><h2 className="font-semibold text-heading">No matching people</h2><p className="mt-2 text-sm leading-6 text-body">Try another name or username.</p></div>
         ) : (
-          <div className="space-y-1">{filteredPeople.map((conversation) => { const profile = conversation.otherProfile; const isSelected = selectedConversationId === conversation.conversationId; const isOnline = onlineUserIds.has(profile.id); return <button key={profile.id} type="button" onClick={() => onConversationReady({ id: conversation.conversationId, otherProfile: profile, historyClearedAt: conversation.historyClearedAt, conversationDeletedAt: conversation.conversationDeletedAt })} aria-current={isSelected ? "true" : undefined} aria-label={`Open conversation with ${getProfileDisplayName(profile)}${isOnline ? ", online" : ""}`} className={`flex w-full min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isSelected ? "bg-accent shadow-soft" : "hover:bg-accent"}`}><PresenceAvatar profile={profile} isOnline={isOnline} /><div className="min-w-0 flex-1"><p className="truncate font-semibold text-heading">{getProfileDisplayName(profile)}</p><p className="mt-0.5 truncate text-sm text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0 text-muted" aria-hidden="true"><path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg></button>; })}</div>
+          <div className="space-y-1">{filteredPeople.map((conversation) => { const profile = conversation.otherProfile; const name = getConversationDisplayName(profile, conversation.otherNickname); const isSelected = selectedConversationId === conversation.conversationId; const isOnline = onlineUserIds.has(profile.id); return <button key={profile.id} type="button" onClick={() => onConversationReady({ id: conversation.conversationId, otherProfile: profile, historyClearedAt: conversation.historyClearedAt, conversationDeletedAt: conversation.conversationDeletedAt, otherNickname: conversation.otherNickname, themeKey: conversation.themeKey })} aria-current={isSelected ? "true" : undefined} aria-label={`Open conversation with ${name}${isOnline ? ", online" : ""}`} className={`flex w-full min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isSelected ? "bg-accent shadow-soft" : "hover:bg-accent"}`}><PresenceAvatar profile={profile} isOnline={isOnline} /><div className="min-w-0 flex-1"><p className="truncate font-semibold text-heading">{name}</p><p className="mt-0.5 truncate text-sm text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0 text-muted" aria-hidden="true"><path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg></button>; })}</div>
         )}
       </div>
     </div>

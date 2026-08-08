@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, ComposerImageSelection, ComposerVoiceRecording, ConfirmedMessageStatus, ConversationActivityEvent, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, MessageSearchTarget, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, PinnedMessagePreview, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeConversationActivityEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, RealtimePinnedMessageEvent, SelectedConversation } from "../../types/conversations";
+import type { ChatMessage, ComposerImageSelection, ComposerVoiceRecording, ConfirmedMessageStatus, ConversationActivityEvent, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, MessageSearchTarget, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, PinnedMessagePreview, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeConversationActivityEvent, RealtimeConversationNicknameEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, RealtimePinnedMessageEvent, SelectedConversation } from "../../types/conversations";
 import AnchoredPopover from "./AnchoredPopover";
 import ComposerMediaPreview from "./ComposerMediaPreview";
 import ConversationActivityRow from "./ConversationActivityRow";
 import ConversationMuteMenu from "./ConversationMuteMenu";
+import ConversationOptionsMenu from "./ConversationOptionsMenu";
 import EmojiPicker from "./EmojiPicker";
 import ImageViewer from "./ImageViewer";
 import MessageActionSheet from "./MessageActionSheet";
@@ -18,13 +19,14 @@ import ProfileAvatar from "./ProfileAvatar";
 import ReactionDetails from "./ReactionDetails";
 import { getEmojiLabel } from "./emojiData";
 import { formatLastSeen } from "./presenceUtils";
-import { getProfileDisplayName } from "./profileUtils";
+import { getConversationDisplayName, getProfileDisplayName } from "./profileUtils";
 import useConversationTyping from "./useConversationTyping";
 import useSignedMessageMedia from "./useSignedMessageMedia";
 import useVoiceRecorder, { voiceMaximumFileSize, voiceMinimumDurationMs } from "./useVoiceRecorder";
 import VoiceMessagePlayer from "./VoiceMessagePlayer";
 import VoiceRecordingComposer from "./VoiceRecordingComposer";
 import { formatVoiceDuration } from "./voiceUtils";
+import { getConversationTheme, getConversationThemeStyle, normalizeConversationThemeId, type ConversationThemeId } from "./conversationThemes";
 
 type MessageRow = {
   id: string;
@@ -92,8 +94,11 @@ type ConversationEventRow = {
   event_id: string;
   conversation_id: string;
   actor_id: string;
-  event_type: "message_pinned";
-  target_message_id: string;
+  event_type: "message_pinned" | "nickname_changed" | "nickname_removed" | "theme_changed";
+  target_message_id: string | null;
+  target_user_id: string | null;
+  nickname_value: string | null;
+  theme_key: string | null;
   created_at: string;
 };
 
@@ -152,11 +157,16 @@ type ChatPanelProps = {
   realtimeReactionEvents: RealtimeMessageReactionEvent[];
   realtimePinnedMessageEvents: RealtimePinnedMessageEvent[];
   realtimeConversationActivityEvents: RealtimeConversationActivityEvent[];
+  realtimeConversationNicknameEvents: RealtimeConversationNicknameEvent[];
   realtimeReceiptEvents: RealtimeParticipantReceiptEvent[];
   onlineUserIds: ReadonlySet<string>;
   quickReactions: string[];
   conversationMutedUntil: string | null;
+  conversationArchivedAt: string | null;
   onConversationMuteChange: (conversationId: string, mutedUntil: string | null) => Promise<string | null>;
+  onConversationThemeChange: (conversationId: string, themeKey: string) => Promise<string | null>;
+  onConversationArchiveChange: (conversationId: string, archived: boolean) => Promise<string | null>;
+  onConversationDelete: (conversationId: string) => Promise<string | null>;
   onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void;
   onConversationRead: (conversationId: string, messageCreatedAt: string) => void;
   onMessageConfirmed: () => void;
@@ -282,14 +292,18 @@ function createPinnedMessagePreview(message: ChatMessage, currentUserId: string 
   };
 }
 
-function mapConversationEventRow(row: ConversationEventRow, currentUserId: string | null, otherName: string): ConversationActivityEvent {
+function mapConversationEventRow(row: ConversationEventRow, currentUserId: string | null, currentName: string, otherName: string, otherAccountName: string): ConversationActivityEvent {
   return {
     id: row.event_id,
     conversationId: row.conversation_id,
     actorId: row.actor_id,
-    actorName: row.actor_id === currentUserId ? "You" : otherName,
+    actorName: row.actor_id === currentUserId ? "You" : row.event_type === "message_pinned" || row.event_type === "theme_changed" ? otherName : otherAccountName,
     eventType: row.event_type,
     targetMessageId: row.target_message_id,
+    targetUserId: row.target_user_id,
+    targetUserName: row.target_user_id === currentUserId ? currentName : row.target_user_id ? otherAccountName : null,
+    nicknameValue: row.nickname_value,
+    themeKey: row.theme_key,
     createdAt: row.created_at,
     isOptimistic: false,
   };
@@ -462,7 +476,7 @@ function formatMessageTimestamp(value: string) {
 }
 
 function MobileBackButton({ onClick }: { onClick: () => void }) {
-  return <button type="button" onClick={onClick} aria-label="Back to Messages" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover lg:hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg></button>;
+  return <button type="button" onClick={onClick} aria-label="Back to Messages" className="chat-accent-control flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover lg:hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg></button>;
 }
 
 function MediaIcon() {
@@ -507,13 +521,13 @@ function TypingIndicator({ isVisible, name, shouldReduceMotion }: { isVisible: b
 function ReplyQuote({ preview, isStrongOutgoing, canJump, onJump }: { preview: MessageReplyPreview; isStrongOutgoing: boolean; canJump: boolean; onJump: () => void }) {
   const previewText = preview.isDeleted ? "Original message was deleted." : preview.unavailable ? "Earlier message unavailable" : preview.body;
   const content = <><span className={`block truncate text-xs font-semibold ${isStrongOutgoing ? "text-white" : "text-heading"}`}>{preview.senderName}</span><span className={`mt-0.5 block break-words text-xs leading-5 ${isStrongOutgoing ? "text-white/80" : "text-body"}`}>{previewText}</span></>;
-  const className = `mb-2 block w-full min-w-0 rounded-xl border-l-2 px-3 py-2 text-left ${isStrongOutgoing ? "border-white/60 bg-background/10" : "border-primary/40 bg-background"}`;
+  const className = `chat-reply-quote mb-2 block w-full min-w-0 rounded-xl border-l-2 px-3 py-2 text-left ${isStrongOutgoing ? "border-white/60 bg-background/10" : "border-primary/40 bg-background"}`;
 
   if (canJump) return <button type="button" onClick={onJump} aria-label={`Jump to original message from ${preview.senderName}`} className={`${className} transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30`}>{content}</button>;
   return <div aria-label={`Reply to ${preview.senderName}: ${previewText ?? ""}`} className={className}>{content}</div>;
 }
 
-function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, conversationMutedUntil, onConversationMuteChange, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onMobileBack }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; messageSearchTarget: MessageSearchTarget | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimePinnedMessageEvents: RealtimePinnedMessageEvent[]; realtimeConversationActivityEvents: RealtimeConversationActivityEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; conversationMutedUntil: string | null; onConversationMuteChange: (conversationId: string, mutedUntil: string | null) => Promise<string | null>; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onMobileBack: () => void }) {
+function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onMobileBack }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; messageSearchTarget: MessageSearchTarget | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimePinnedMessageEvents: RealtimePinnedMessageEvent[]; realtimeConversationActivityEvents: RealtimeConversationActivityEvent[]; realtimeConversationNicknameEvents: RealtimeConversationNicknameEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; conversationMutedUntil: string | null; conversationArchivedAt: string | null; onConversationMuteChange: (conversationId: string, mutedUntil: string | null) => Promise<string | null>; onConversationThemeChange: (conversationId: string, themeKey: string) => Promise<string | null>; onConversationArchiveChange: (conversationId: string, archived: boolean) => Promise<string | null>; onConversationDelete: (conversationId: string) => Promise<string | null>; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onMobileBack: () => void }) {
   const shouldReduceMotion = useReducedMotion();
   const latestLoadRef = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -541,6 +555,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const processedReactionSequenceRef = useRef(realtimeReactionEvents.at(-1)?.sequence ?? 0);
   const processedPinnedMessageSequenceRef = useRef(realtimePinnedMessageEvents.at(-1)?.sequence ?? 0);
   const processedConversationActivitySequenceRef = useRef(realtimeConversationActivityEvents.at(-1)?.sequence ?? 0);
+  const processedConversationNicknameSequenceRef = useRef(realtimeConversationNicknameEvents.at(-1)?.sequence ?? 0);
   const processedReceiptSequenceRef = useRef(realtimeReceiptEvents.at(-1)?.sequence ?? 0);
   const realtimeSequenceByMessageIdRef = useRef(new Map<string, number>());
   const messageUpdateSequenceByIdRef = useRef(new Map<string, number>());
@@ -582,6 +597,11 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const [pendingPinnedMessageIds, setPendingPinnedMessageIds] = useState<Set<string>>(() => new Set());
   const [pinnedJumpTarget, setPinnedJumpTarget] = useState<MessageSearchTarget | null>(null);
   const [conversationEvents, setConversationEvents] = useState<ConversationActivityEvent[]>([]);
+  const [nicknamesByUserId, setNicknamesByUserId] = useState<Map<string, string>>(() => {
+    const initial = new Map<string, string>();
+    if (conversation.otherNickname) initial.set(conversation.otherProfile.id, conversation.otherNickname);
+    return initial;
+  });
   const [conversationEventsError, setConversationEventsError] = useState("");
   const [pinToast, setPinToast] = useState<{ id: number; message: string } | null>(null);
   const [draft, setDraft] = useState("");
@@ -618,7 +638,9 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const [imageViewerState, setImageViewerState] = useState<{ messageId: string; initialIndex: number } | null>(null);
   const [otherReceipt, setOtherReceipt] = useState<ParticipantReceiptCursor | null>(null);
   const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
-  const otherName = getProfileDisplayName(conversation.otherProfile);
+  const currentName = currentProfile ? getProfileDisplayName(currentProfile) : "You";
+  const otherAccountName = getProfileDisplayName(conversation.otherProfile);
+  const otherName = getConversationDisplayName(conversation.otherProfile, nicknamesByUserId.get(conversation.otherProfile.id) ?? conversation.otherNickname);
   const presenceText = isOtherUserOnline ? "Online" : formatLastSeen(conversation.otherProfile.last_seen_at, relativeTimeNow);
   const { isOtherUserTyping, notifyTyping, stopTyping } = useConversationTyping({ conversationId: conversation.id, currentUserId, otherUserId: conversation.otherProfile.id });
   const signedMediaPaths = messages.flatMap((message) => message.kind === "confirmed" && !message.isDeleted ? message.attachments.map((attachment) => attachment.storagePath) : []);
@@ -851,6 +873,16 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     setPinnedMessages(nextPins);
   }, [conversation.id, currentUserId, otherName]);
 
+  const loadConversationNicknames = useCallback(async () => {
+    const { data, error } = await supabase.from("conversation_nicknames").select("conversation_id, user_id, nickname").eq("conversation_id", conversation.id);
+    if (!isMountedRef.current) return;
+    if (error) {
+      if (import.meta.env.DEV) console.warn("Loading conversation nicknames failed", { conversationId: conversation.id, code: error.code });
+      return;
+    }
+    setNicknamesByUserId(new Map((data ?? []).map((row) => [String(row.user_id), String(row.nickname)])));
+  }, [conversation.id]);
+
   const loadConversationEvents = useCallback(async () => {
     const loadId = ++conversationEventsLoadIdRef.current;
     setConversationEventsError("");
@@ -862,21 +894,22 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       return;
     }
 
-    const loadedEvents = ((data ?? []) as ConversationEventRow[]).map((row) => mapConversationEventRow(row, currentUserId, otherName)).filter((event) => !deletedConversationEventIdsRef.current.has(event.id));
+    const loadedEvents = ((data ?? []) as ConversationEventRow[]).map((row) => mapConversationEventRow(row, currentUserId, currentName, otherName, otherAccountName)).filter((event) => !deletedConversationEventIdsRef.current.has(event.id));
     loadedEvents.forEach((event) => rememberConversationEvent(event.id));
     setConversationEvents((currentEvents) => {
       const currentVisibleEvents = currentEvents.filter((event) => !deletedConversationEventIdsRef.current.has(event.id));
       return loadedEvents.reduce((nextEvents, event) => mergeConversationEvent(nextEvents, event), currentVisibleEvents).slice(-conversationEventLimit);
     });
-  }, [conversation.id, currentUserId, otherName, rememberConversationEvent]);
+  }, [conversation.id, currentName, currentUserId, otherAccountName, otherName, rememberConversationEvent]);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
       void loadPinnedMessages();
       void loadConversationEvents();
+      void loadConversationNicknames();
     }, 0);
     return () => window.clearTimeout(loadTimer);
-  }, [loadConversationEvents, loadPinnedMessages, realtimeRefreshKey]);
+  }, [loadConversationEvents, loadConversationNicknames, loadPinnedMessages, realtimeRefreshKey]);
 
   useEffect(() => {
     const loadId = ++latestLoadRef.current;
@@ -1203,7 +1236,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     if (deletedMessageIds.size > 0) {
       setReactions((currentReactions) => currentReactions.filter((reaction) => !deletedMessageIds.has(reaction.messageId)));
       setPinnedMessages((currentPins) => currentPins.filter((pin) => !deletedMessageIds.has(pin.messageId)));
-      setConversationEvents((currentEvents) => currentEvents.filter((event) => !deletedMessageIds.has(event.targetMessageId)));
+      setConversationEvents((currentEvents) => currentEvents.filter((event) => !event.targetMessageId || !deletedMessageIds.has(event.targetMessageId)));
       setMessageEditState((currentState) => currentState && deletedMessageIds.has(currentState.messageId) ? null : currentState);
       setReplyingTo((currentTarget) => currentTarget && deletedMessageIds.has(currentTarget.id) ? null : currentTarget);
       setQuickReactionMessageId((messageId) => messageId && deletedMessageIds.has(messageId) ? null : messageId);
@@ -1287,6 +1320,28 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }, [conversation.id, loadPinnedMessages, realtimePinnedMessageEvents]);
 
   useEffect(() => {
+    const newEvents = realtimeConversationNicknameEvents.filter((event) => event.sequence > processedConversationNicknameSequenceRef.current).sort((first, second) => first.sequence - second.sequence);
+    if (newEvents.length === 0) return;
+    processedConversationNicknameSequenceRef.current = newEvents[newEvents.length - 1]?.sequence ?? processedConversationNicknameSequenceRef.current;
+    const relevantEvents = newEvents.filter((event) => event.nickname.conversationId === conversation.id);
+    if (relevantEvents.length === 0) return;
+    setNicknamesByUserId((currentNicknames) => {
+      const nextNicknames = new Map(currentNicknames);
+      relevantEvents.forEach((event) => {
+        if (event.action === "delete") nextNicknames.delete(event.nickname.userId);
+        else nextNicknames.set(event.nickname.userId, event.nickname.nickname);
+      });
+      return nextNicknames;
+    });
+    const otherParticipantChange = [...relevantEvents].reverse().find((event) => event.nickname.userId === conversation.otherProfile.id);
+    if (otherParticipantChange) {
+      const nextOtherName = otherParticipantChange.action === "delete" ? otherAccountName : otherParticipantChange.nickname.nickname;
+      setPinnedMessages((currentPins) => currentPins.map((pin) => pin.senderId === currentUserId ? pin : { ...pin, senderName: nextOtherName }));
+      setMessages((currentMessages) => currentMessages.map((message) => message.replyPreview && message.replyPreview.senderId !== currentUserId ? { ...message, replyPreview: { ...message.replyPreview, senderName: nextOtherName } } : message));
+    }
+  }, [conversation.id, conversation.otherProfile.id, currentUserId, otherAccountName, realtimeConversationNicknameEvents]);
+
+  useEffect(() => {
     const newEvents = realtimeConversationActivityEvents.filter((event) => event.sequence > processedConversationActivitySequenceRef.current).sort((first, second) => first.sequence - second.sequence);
     if (newEvents.length === 0) return;
     processedConversationActivitySequenceRef.current = newEvents[newEvents.length - 1]?.sequence ?? processedConversationActivitySequenceRef.current;
@@ -1305,13 +1360,15 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (!rememberConversationEvent(change.event.id)) return;
       const event: ConversationActivityEvent = {
         ...change.event,
-        actorName: change.event.actorId === currentUserId ? "You" : otherName,
+        actorName: change.event.actorId === currentUserId ? "You" : change.event.eventType === "message_pinned" || change.event.eventType === "theme_changed" ? otherName : otherAccountName,
+        targetUserName: change.event.targetUserId === currentUserId ? currentName : change.event.targetUserId ? otherAccountName : null,
         isOptimistic: false,
       };
       setConversationEvents((currentEvents) => mergeConversationEvent(currentEvents, event));
-      if (change.event.actorId !== currentUserId) showPinToast(`${otherName} pinned a message`);
+      if (change.event.eventType === "message_pinned" && change.event.actorId !== currentUserId) showPinToast(`${otherName} pinned a message`);
+      if (change.event.eventType === "theme_changed" && change.event.actorId !== currentUserId) showPinToast(`${otherName} changed the theme to ${getConversationTheme(change.event.themeKey).name}`);
     });
-  }, [conversation.id, currentUserId, otherName, realtimeConversationActivityEvents, rememberConversationEvent, rememberDeletedConversationEvent, showPinToast]);
+  }, [conversation.id, currentName, currentUserId, otherAccountName, otherName, realtimeConversationActivityEvents, rememberConversationEvent, rememberDeletedConversationEvent, showPinToast]);
 
   useEffect(() => {
     const newEvents = realtimeReceiptEvents.filter((event) => event.sequence > processedReceiptSequenceRef.current);
@@ -2209,7 +2266,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     setPinMutationError("");
     setPinnedMessages((currentPins) => shouldPin ? [createPinnedMessagePreview(message, currentUserId, otherName), ...currentPins.filter((pin) => pin.messageId !== message.id)] : currentPins.filter((pin) => pin.messageId !== message.id));
     if (shouldPin) {
-      setConversationEvents((currentEvents) => mergeConversationEvent(currentEvents, { id: optimisticEventId, conversationId: conversation.id, actorId: currentUserId, actorName: "You", eventType: "message_pinned", targetMessageId: message.id, createdAt: new Date().toISOString(), isOptimistic: true }));
+      setConversationEvents((currentEvents) => mergeConversationEvent(currentEvents, { id: optimisticEventId, conversationId: conversation.id, actorId: currentUserId, actorName: "You", eventType: "message_pinned", targetMessageId: message.id, targetUserId: null, targetUserName: null, nicknameValue: null, themeKey: null, createdAt: new Date().toISOString(), isOptimistic: true }));
       showPinToast("Message pinned");
     }
 
@@ -2238,6 +2295,42 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
     if (!shouldPin) showPinToast("Message unpinned");
     await Promise.all([loadPinnedMessages(), loadConversationEvents()]);
+  }
+
+  async function saveConversationNickname(userId: string, nickname: string | null) {
+    if (!currentUserId) return "Your session has expired. Please sign in again.";
+    const { error } = await supabase.rpc("set_conversation_nickname", {
+      target_conversation_id: conversation.id,
+      target_user_id: userId,
+      nickname_text: nickname,
+    });
+    if (error) {
+      if (import.meta.env.DEV) console.warn("Saving conversation nickname failed", { conversationId: conversation.id, targetUserId: userId, code: error.code });
+      return error.code === "22023" ? error.message : "We couldn’t update that nickname. Please try again.";
+    }
+    setNicknamesByUserId((currentNicknames) => {
+      const nextNicknames = new Map(currentNicknames);
+      if (nickname) nextNicknames.set(userId, nickname);
+      else nextNicknames.delete(userId);
+      return nextNicknames;
+    });
+    if (userId === conversation.otherProfile.id) {
+      const nextOtherName = nickname ?? otherAccountName;
+      setPinnedMessages((currentPins) => currentPins.map((pin) => pin.senderId === currentUserId ? pin : { ...pin, senderName: nextOtherName }));
+      setMessages((currentMessages) => currentMessages.map((message) => message.replyPreview && message.replyPreview.senderId !== currentUserId ? { ...message, replyPreview: { ...message.replyPreview, senderName: nextOtherName } } : message));
+    }
+    showPinToast(nickname ? "Nickname updated" : "Nickname removed");
+    void loadConversationEvents();
+    return null;
+  }
+
+  async function saveConversationTheme(themeId: ConversationThemeId) {
+    if (!currentUserId) return "Your session has expired. Please sign in again.";
+    const error = await onConversationThemeChange(conversation.id, themeId);
+    if (error) return error;
+    showPinToast(`Theme changed to ${getConversationTheme(themeId).name}`);
+    void loadConversationEvents();
+    return null;
   }
 
   function handlePinnedMessageSelected(pin: PinnedMessagePreview) {
@@ -2311,21 +2404,22 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     if (first.kind !== second.kind) return first.kind === "message" ? -1 : 1;
     return first.id.localeCompare(second.id);
   });
+  const currentTheme = normalizeConversationThemeId(conversation.themeKey);
 
   return (
-    <div ref={panelRef} className="relative flex min-h-0 flex-1 flex-col">
-      <header className="flex shrink-0 items-center gap-2 border-b border-border bg-surface px-4 py-4 sm:gap-3 sm:px-6"><MobileBackButton onClick={onMobileBack} /><PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={isOtherUserOnline} /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1><p className={`truncate text-xs font-medium ${isOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{conversation.otherProfile.username && <span className="font-normal text-body"> · @{conversation.otherProfile.username}</span>}</p></div><PinnedMessagesMenu error={pinnedMessagesError} isLoading={isLoadingPinnedMessages} pins={pinnedMessages} onRetry={() => void loadPinnedMessages()} onSelect={handlePinnedMessageSelected} /><ConversationMuteMenu conversationName={otherName} mutedUntil={conversationMutedUntil} onChange={(mutedUntil) => onConversationMuteChange(conversation.id, mutedUntil)} /><span className="hidden shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-semibold text-primary lg:inline-flex">Accepted</span></header>
+    <div ref={panelRef} className="chat-panel-root relative flex min-h-0 flex-1 flex-col">
+      <header className="chat-header flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-4 sm:gap-3 sm:px-6"><MobileBackButton onClick={onMobileBack} /><PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={isOtherUserOnline} /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1><p className={`truncate text-xs font-medium ${isOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{conversation.otherProfile.username && <span className="font-normal text-body"> · @{conversation.otherProfile.username}</span>}</p></div><PinnedMessagesMenu error={pinnedMessagesError} isLoading={isLoadingPinnedMessages} pins={pinnedMessages} onRetry={() => void loadPinnedMessages()} onSelect={handlePinnedMessageSelected} /><ConversationMuteMenu conversationName={otherName} mutedUntil={conversationMutedUntil} onChange={(mutedUntil) => onConversationMuteChange(conversation.id, mutedUntil)} /><ConversationOptionsMenu conversationName={otherName} currentTheme={currentTheme} isArchived={Boolean(conversationArchivedAt)} nicknamesByUserId={nicknamesByUserId} participants={currentProfile ? [currentProfile, conversation.otherProfile] : [conversation.otherProfile]} onArchivedChange={(archived) => onConversationArchiveChange(conversation.id, archived)} onDelete={() => onConversationDelete(conversation.id)} onNicknameSave={saveConversationNickname} onThemeApply={saveConversationTheme} /></header>
 
       <p aria-live="polite" className="sr-only">{newMessageAnnouncement}</p>
-      <div className="pointer-events-none absolute left-1/2 top-20 z-40 w-[min(calc(100%-2rem),22rem)] -translate-x-1/2"><AnimatePresence initial={false}>{pinToast && <motion.div key={pinToast.id} role="status" aria-live="polite" aria-atomic="true" initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }} transition={{ duration: shouldReduceMotion ? 0 : 0.16 }} className="rounded-2xl border border-border bg-surface px-4 py-3 text-center text-sm font-semibold text-heading shadow-soft">{pinToast.message}</motion.div>}</AnimatePresence></div>
+      <div className="pointer-events-none absolute left-1/2 top-20 z-40 w-[min(calc(100%-2rem),22rem)] -translate-x-1/2"><AnimatePresence initial={false}>{pinToast && <motion.div key={pinToast.id} role="status" aria-live="polite" aria-atomic="true" initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }} transition={{ duration: shouldReduceMotion ? 0 : 0.16 }} className="chat-surface rounded-2xl border border-border bg-surface px-4 py-3 text-center text-sm font-semibold text-heading shadow-soft">{pinToast.message}</motion.div>}</AnimatePresence></div>
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollViewportRef} role="region" aria-label={`Messages with ${otherName}`} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 lg:px-10">
+        <div ref={scrollViewportRef} role="region" aria-label={`Messages with ${otherName}`} onScroll={handleScroll} className="chat-timeline absolute inset-0 overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 lg:px-10">
           {isLoading ? (
             <div role="status" aria-live="polite" className="mx-auto max-w-2xl space-y-4"><div className="h-20 w-3/4 animate-pulse rounded-3xl bg-accent" /><div className="ml-auto h-16 w-2/3 animate-pulse rounded-3xl bg-accent" /></div>
           ) : historyError && messages.length === 0 ? (
             <div role="alert" className="mx-auto max-w-md rounded-3xl border border-border bg-surface p-6 text-center shadow-soft"><h2 className="font-semibold text-heading">Unable to load messages</h2><p className="mt-2 text-sm leading-6 text-body">{historyError}</p><button type="button" onClick={handleHistoryRetry} className="mt-5 inline-flex min-h-11 items-center justify-center rounded-2xl bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry</button></div>
           ) : messages.length === 0 && !shouldShowIntroductoryFallback ? (
-            shouldShowRestartEmptyState ? <div className="flex min-h-full items-center justify-center py-12"><div className="max-w-md text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-primary" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-7 w-7"><path d="M5 6.5h14v9H9l-4 3v-12Z" strokeLinejoin="round" /><path d="M9 10h6m-6 3h4" strokeLinecap="round" /></svg></div><h2 className="mt-4 font-semibold text-heading">Start the conversation again</h2><p className="mt-2 text-sm leading-6 text-body">Your previous chat history was cleared. Send {otherName} a message to start fresh.</p></div></div> : <div className="mx-auto max-w-md py-12 text-center"><h2 className="font-semibold text-heading">No messages yet. Start the conversation.</h2></div>
+            shouldShowRestartEmptyState ? <div className="chat-empty-state flex min-h-full items-center justify-center py-12"><div className="max-w-md text-center"><div className="chat-accent-control mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-primary" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-7 w-7"><path d="M5 6.5h14v9H9l-4 3v-12Z" strokeLinejoin="round" /><path d="M9 10h6m-6 3h4" strokeLinecap="round" /></svg></div><h2 className="mt-4 font-semibold text-heading">Start the conversation again</h2><p className="mt-2 text-sm leading-6 text-body">Your previous chat history was cleared. Send {otherName} a message to start fresh.</p></div></div> : <div className="chat-empty-state mx-auto max-w-md py-12 text-center"><h2 className="font-semibold text-heading">No messages yet. Start the conversation.</h2></div>
           ) : (
             <div className="mx-auto max-w-2xl space-y-4">
               {historyError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>Earlier messages couldn’t be refreshed.</p><button type="button" onClick={handleHistoryRetry} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry history</button></div>}
@@ -2335,7 +2429,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
               {shouldShowIntroductoryFallback && <article className="flex justify-start"><div className="max-w-[85%] rounded-3xl rounded-bl-md border border-border bg-surface px-4 py-3 text-body shadow-soft sm:max-w-[75%]"><p className="whitespace-pre-wrap break-words text-sm leading-6">{conversation.introductoryMessage}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">{conversation.introductoryMessageCreatedAt && <time dateTime={conversation.introductoryMessageCreatedAt}>{formatMessageTimestamp(conversation.introductoryMessageCreatedAt)}</time>}<span>Introduction</span></div></div></article>}
               {conversationEventsError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>{conversationEventsError}</p><button type="button" onClick={() => void loadConversationEvents()} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry activity</button></div>}
               {timelineItems.map((item) => {
-                if (item.kind === "event") return <ConversationActivityRow key={item.id} event={item.event} onActivate={(event) => openMessageTarget(event.targetMessageId, "event")} />;
+                if (item.kind === "event") return <ConversationActivityRow key={item.id} event={item.event} currentUserId={currentUserId} onActivate={(event) => { if (event.targetMessageId) openMessageTarget(event.targetMessageId, "event"); }} />;
                 const message = item.message;
                 const isCurrentUser = message.senderId === currentUserId;
                 const isFailed = message.kind === "optimistic" && message.deliveryState === "failed";
@@ -2364,7 +2458,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                   <article ref={(element) => { if (message.kind !== "confirmed") return; if (element) messageElementsRef.current.set(message.id, element); else messageElementsRef.current.delete(message.id); }} key={getMessageKey(message)} tabIndex={message.kind === "confirmed" ? -1 : undefined} onPointerDown={message.kind === "confirmed" && !message.isDeleted ? (event) => handleMessagePointerDown(message, event) : undefined} onPointerMove={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerMove : undefined} onPointerUp={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerCancel={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerLeave={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} className={`group/message relative flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
                     <div className={`flex min-w-0 max-w-[92%] flex-col sm:max-w-[80%] md:max-w-[75%] ${isCurrentUser ? "items-end" : "items-start"}`}>
                       <div className="relative max-w-full">
-                        <motion.div animate={{ scale: message.kind === "confirmed" && mobileEmphasizedMessageId === message.id && !shouldReduceMotion ? 0.985 : 1 }} transition={{ duration: shouldReduceMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }} className={`max-w-full min-w-0 rounded-3xl px-4 py-3 shadow-soft transition-shadow ${message.kind === "confirmed" && message.isDeleted ? `${isCurrentUser ? "rounded-br-md" : "rounded-bl-md"} border border-border bg-card text-muted` : isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-border bg-surface text-body"} ${message.kind === "confirmed" && (highlightedMessageId === message.id || mobileEmphasizedMessageId === message.id) ? "ring-2 ring-primary/30 ring-offset-4 ring-offset-background" : ""}`}>
+                        <motion.div animate={{ scale: message.kind === "confirmed" && mobileEmphasizedMessageId === message.id && !shouldReduceMotion ? 0.985 : 1 }} transition={{ duration: shouldReduceMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }} className={`max-w-full min-w-0 rounded-3xl px-4 py-3 shadow-soft transition-shadow ${message.kind === "confirmed" && message.isDeleted ? `${isCurrentUser ? "rounded-br-md" : "rounded-bl-md"} border border-border bg-card text-muted` : isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "chat-message-outgoing rounded-br-md bg-primary text-white" : "chat-message-incoming rounded-bl-md border border-border bg-surface text-body"} ${message.kind === "confirmed" && (highlightedMessageId === message.id || mobileEmphasizedMessageId === message.id) ? "chat-message-highlight ring-2 ring-primary/30 ring-offset-4 ring-offset-background" : ""}`}>
                           {replyPreview && <ReplyQuote preview={replyPreview} isStrongOutgoing={isCurrentUser && !isFailed} canJump={canJumpToReplyTarget} onJump={() => message.replyToMessageId && jumpToOriginalMessage(message.replyToMessageId)} />}
                           {isImageMessage && <MessageMediaGallery attachments={galleryAttachments} isLoading={message.kind === "confirmed" && signedMedia.isLoading} onOpen={(index, trigger) => { imageViewerReturnFocusRef.current = trigger; setImageViewerState({ messageId: message.kind === "confirmed" ? message.id : message.optimisticId, initialIndex: index }); }} onRetry={galleryAttachments.length > 0 ? signedMedia.retry : handleHistoryRetry} />}
                           {isVoiceMessage && <VoiceMessagePlayer src={voiceSource} durationMs={voiceAttachment?.durationMs ?? 0} isLoading={message.kind === "confirmed" && (!voiceAttachment || signedMedia.isLoading)} isOutgoing={isCurrentUser && !isFailed} label={`voice message from ${replyActionSenderName}`} onRetry={message.kind === "confirmed" ? () => { if (voiceAttachment) signedMedia.retry(); else loadMessageAttachments(message.id); } : () => undefined} />}
@@ -2374,7 +2468,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                         </motion.div>
                         {message.kind === "confirmed" && !message.isDeleted && <MessageActionsToolbar canDelete={canDeleteMessage} canEdit={canEditMessage} canPin={canPinMessage} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} isOutgoing={isCurrentUser} isPinned={isMessagePinned} isPinPending={isPinPending} replyLabel={`Reply to message from ${replyActionSenderName}`} onDelete={(button) => openDeleteConfirmation(message, button)} onEdit={(button) => startEditingMessage(message, button)} onPin={() => void togglePinnedMessage(message)} onReact={(button) => openQuickReactions(message.id, button)} onReply={() => handleReplyToMessage(message)} />}
                       </div>
-                      {reactionGroups.length > 0 && <div className={`relative z-10 -mt-1 flex max-w-full flex-wrap gap-1 px-1 ${isCurrentUser ? "justify-end" : "justify-start"}`}>{reactionGroups.map((group) => { const reactionName = getEmojiLabel(group.emoji).toLowerCase(); return <button key={group.emoji} type="button" onClick={(event) => message.kind === "confirmed" && openReactionDetails(message.id, event.currentTarget)} aria-haspopup="dialog" aria-expanded={message.kind === "confirmed" && reactionDetailsMessageId === message.id} aria-label={`View ${group.count} ${reactionName} ${group.count === 1 ? "reaction" : "reactions"}${group.reactedByCurrentUser ? ", including you" : ""}`} className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 ${group.reactedByCurrentUser ? "border-primary/30 bg-accent text-heading" : "border-border bg-surface text-body hover:bg-accent"}`}><span aria-hidden="true" className="text-sm">{group.emoji}</span><span aria-hidden="true" className="font-semibold">{group.count}</span></button>; })}</div>}
+                      {reactionGroups.length > 0 && <div className={`relative z-10 -mt-1 flex max-w-full flex-wrap gap-1 px-1 ${isCurrentUser ? "justify-end" : "justify-start"}`}>{reactionGroups.map((group) => { const reactionName = getEmojiLabel(group.emoji).toLowerCase(); return <button key={group.emoji} type="button" onClick={(event) => message.kind === "confirmed" && openReactionDetails(message.id, event.currentTarget)} aria-haspopup="dialog" aria-expanded={message.kind === "confirmed" && reactionDetailsMessageId === message.id} aria-label={`View ${group.count} ${reactionName} ${group.count === 1 ? "reaction" : "reactions"}${group.reactedByCurrentUser ? ", including you" : ""}`} className={`chat-reaction-chip inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 ${group.reactedByCurrentUser ? "chat-reaction-selected border-primary/30 bg-accent text-heading" : "border-border bg-surface text-body hover:bg-accent"}`}><span aria-hidden="true" className="text-sm">{group.emoji}</span><span aria-hidden="true" className="font-semibold">{group.count}</span></button>; })}</div>}
                       {shouldShowStatus && <p role={isFailed ? "alert" : isSending ? "status" : undefined} className={`mt-1.5 px-1 text-right text-xs font-medium ${isFailed ? "text-primary" : "text-muted"}`}>{statusLabel}</p>}
                     </div>
                     {message.kind === "confirmed" && !message.isDeleted && <button type="button" onClick={(event) => openMobileActionSheet(message.id, event.currentTarget)} aria-label={`Open actions for message from ${replyActionSenderName}`} aria-haspopup="dialog" aria-expanded={mobileActionMessageId === message.id} className="pointer-events-none absolute right-0 top-0 z-10 flex h-9 w-9 items-center justify-center rounded-xl bg-surface text-muted opacity-0 shadow-soft transition focus:pointer-events-auto focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 md:hidden"><svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg></button>}
@@ -2385,32 +2479,32 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
           )}
         </div>
 
-        {showJumpToLatest && <button type="button" onClick={handleJumpToLatest} className="absolute bottom-4 left-1/2 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-heading shadow-soft transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m7 10 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>Jump to latest</button>}
+        {showJumpToLatest && <button type="button" onClick={handleJumpToLatest} className="chat-jump-latest absolute bottom-4 left-1/2 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-heading shadow-soft transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m7 10 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>Jump to latest</button>}
       </div>
 
       {reactionError && <p role="status" aria-live="polite" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{reactionError}</p>}
       {pinMutationError && <p role="alert" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{pinMutationError}</p>}
-      <form onSubmit={handleSend} className="shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
+      <form onSubmit={handleSend} className="chat-composer-region shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
         <TypingIndicator isVisible={isOtherUserTyping} name={otherName} shouldReduceMotion={shouldReduceMotion} />
-        {replyingTo && <div aria-label={`Replying to ${replyingTo.senderName}`} className="mb-2 flex min-w-0 items-start gap-3 rounded-2xl bg-surface px-4 py-3 shadow-soft"><div className="min-w-0 flex-1 border-l-2 border-primary/40 pl-3"><p className="truncate text-xs font-semibold text-heading">Replying to {replyingTo.senderName}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-body">{replyingTo.body ?? "Earlier message unavailable"}</p></div><button type="button" onClick={() => { setReplyingTo(null); window.requestAnimationFrame(() => textareaRef.current?.focus()); }} aria-label={`Cancel reply to ${replyingTo.senderName}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>}
+        {replyingTo && <div aria-label={`Replying to ${replyingTo.senderName}`} className="chat-composer-surface mb-2 flex min-w-0 items-start gap-3 rounded-2xl bg-surface px-4 py-3 shadow-soft"><div className="chat-reply-indicator min-w-0 flex-1 border-l-2 border-primary/40 pl-3"><p className="truncate text-xs font-semibold text-heading">Replying to {replyingTo.senderName}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-body">{replyingTo.body ?? "Earlier message unavailable"}</p></div><button type="button" onClick={() => { setReplyingTo(null); window.requestAnimationFrame(() => textareaRef.current?.focus()); }} aria-label={`Cancel reply to ${replyingTo.senderName}`} className="chat-accent-control flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>}
         {voiceRecorder.mode === "idle" && <ComposerMediaPreview images={selectedImages} disabled={isSubmitting} onRemove={removeSelectedImage} onRemoveAll={removeAllSelectedImages} />}
         {mediaError && <p id={mediaErrorId} role="alert" className="mb-2 rounded-xl bg-accent px-3 py-2 text-xs leading-5 text-body">{mediaError}</p>}
         {voiceRecorder.mode === "idle" && voiceRecorder.error && <p role="alert" className="mb-2 rounded-xl bg-accent px-3 py-2 text-xs leading-5 text-body">{voiceRecorder.error}</p>}
         <input ref={mediaInputRef} type="file" accept={acceptedImageInputTypes} multiple onChange={(event) => void handleImageSelection(event)} disabled={!currentUserId || isSubmitting} className="hidden" aria-hidden="true" tabIndex={-1} />
         <label htmlFor={`message-composer-${conversation.id}`} className="sr-only">Message {otherName}</label>
-        {voiceRecorder.mode !== "idle" ? <VoiceRecordingComposer controller={voiceRecorder} isSending={isSubmitting} shouldReduceMotion={Boolean(shouldReduceMotion)} onSend={sendVoiceRecordingForReview} /> : <div className="grid min-w-0 grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] items-end gap-x-1 rounded-2xl bg-surface px-2 py-3 shadow-soft focus-within:ring-2 focus-within:ring-primary/20 sm:gap-x-2 sm:px-4">
-          <button type="button" onClick={openImagePicker} disabled={!currentUserId || isSubmitting || selectedImages.length >= imageMaxCount} aria-label={selectedImages.length > 0 ? "Add more images" : "Choose images"} title={selectedImages.length >= imageMaxCount ? "Maximum 10 images selected" : selectedImages.length > 0 ? "Add more images" : "Choose images"} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"><MediaIcon /></button>
-          <button ref={composerEmojiButtonRef} type="button" onClick={openComposerEmojiPicker} disabled={isSubmitting} aria-label="Choose an emoji" title="Choose an emoji" aria-haspopup="dialog" aria-expanded={isComposerEmojiPickerOpen} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50 sm:h-11 sm:w-11"><EmojiIcon /></button>
-          <button type="button" onClick={() => void startVoiceRecording()} disabled={!currentUserId || isSubmitting || Boolean(messageEditState)} aria-label="Record a voice message" title="Record a voice message" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"><MicrophoneIcon /></button>
-          <textarea ref={textareaRef} id={`message-composer-${conversation.id}`} value={draft} onChange={(event) => { setDraft(event.target.value); resizeTextarea(event.target); notifyTyping(event.target.value.trim().length > 0); }} onBlur={stopTyping} onKeyDown={handleComposerKeyDown} maxLength={messageMaxLength} rows={1} disabled={!currentUserId || isSubmitting} aria-describedby={composerDescription} placeholder="Write a message…" className="max-h-32 min-h-12 min-w-0 resize-none overflow-y-auto border-0 bg-transparent px-1 py-3 text-sm leading-6 text-heading outline-none ring-0 placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60 sm:px-2" />
-          <button type="submit" disabled={isSendDisabled} aria-label={isSubmitting ? `Sending message to ${otherName}` : `Send message to ${otherName}`} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-primary text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-12 sm:w-12"><SendIcon /><span className="sr-only">{isSubmitting ? "Sending…" : "Send"}</span></button>
+        {voiceRecorder.mode !== "idle" ? <VoiceRecordingComposer controller={voiceRecorder} isSending={isSubmitting} shouldReduceMotion={Boolean(shouldReduceMotion)} onSend={sendVoiceRecordingForReview} /> : <div className="chat-composer-shell grid min-w-0 grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] items-end gap-x-1 rounded-2xl bg-surface px-2 py-3 shadow-soft focus-within:ring-2 focus-within:ring-primary/20 sm:gap-x-2 sm:px-4">
+          <button type="button" onClick={openImagePicker} disabled={!currentUserId || isSubmitting || selectedImages.length >= imageMaxCount} aria-label={selectedImages.length > 0 ? "Add more images" : "Choose images"} title={selectedImages.length >= imageMaxCount ? "Maximum 10 images selected" : selectedImages.length > 0 ? "Add more images" : "Choose images"} className="chat-accent-control inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"><MediaIcon /></button>
+          <button ref={composerEmojiButtonRef} type="button" onClick={openComposerEmojiPicker} disabled={isSubmitting} aria-label="Choose an emoji" title="Choose an emoji" aria-haspopup="dialog" aria-expanded={isComposerEmojiPickerOpen} className="chat-accent-control inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50 sm:h-11 sm:w-11"><EmojiIcon /></button>
+          <button type="button" onClick={() => void startVoiceRecording()} disabled={!currentUserId || isSubmitting || Boolean(messageEditState)} aria-label="Record a voice message" title="Record a voice message" className="chat-accent-control inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"><MicrophoneIcon /></button>
+          <textarea ref={textareaRef} id={`message-composer-${conversation.id}`} value={draft} onChange={(event) => { setDraft(event.target.value); resizeTextarea(event.target); notifyTyping(event.target.value.trim().length > 0); }} onBlur={stopTyping} onKeyDown={handleComposerKeyDown} maxLength={messageMaxLength} rows={1} disabled={!currentUserId || isSubmitting} aria-describedby={composerDescription} placeholder="Write a message…" className="chat-composer-input max-h-32 min-h-12 min-w-0 resize-none overflow-y-auto border-0 bg-transparent px-1 py-3 text-sm leading-6 text-heading outline-none ring-0 placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60 sm:px-2" />
+          <button type="submit" disabled={isSendDisabled} aria-label={isSubmitting ? `Sending message to ${otherName}` : `Send message to ${otherName}`} className="chat-primary-action inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-primary text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-12 sm:w-12"><SendIcon /><span className="sr-only">{isSubmitting ? "Sending…" : "Send"}</span></button>
           <div aria-live="polite" aria-atomic="true" className={`col-start-1 col-end-6 row-start-2 flex min-w-0 items-start justify-between gap-3 px-1 sm:col-start-4 sm:col-end-5 ${comingSoonMessage || showCharacterCount ? "mt-2 min-h-5" : "mt-0 min-h-0 sm:mt-2 sm:min-h-5"}`}>
             {comingSoonMessage ? <p id={composerHelpId} className="min-w-0 text-xs leading-5 text-muted">{comingSoonMessage}</p> : <p id={composerHelpId} className={showCharacterCount ? "sr-only" : "sr-only sm:not-sr-only sm:min-w-0 sm:text-xs sm:leading-5 sm:text-muted"}>Enter to send · Shift+Enter for a new line</p>}
             {showCharacterCount && <p id={characterCountId} className="shrink-0 text-xs font-medium leading-5 text-muted">{remainingCharacters} left</p>}
           </div>
         </div>}
       </form>
-      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction && mobileActionMessage.messageType !== "voice"} canPin={!mobileActionMessage.isIntroduction} isPinned={pinnedMessages.some((pin) => pin.messageId === mobileActionMessage.id)} isPinPending={isLoadingPinnedMessages || pendingPinnedMessageIds.has(mobileActionMessage.id)} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} onClose={() => setMobileActionMessageId(null)} onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }} onPin={() => void togglePinnedMessage(mobileActionMessage)} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
+      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction && mobileActionMessage.messageType !== "voice"} canPin={!mobileActionMessage.isIntroduction} isPinned={pinnedMessages.some((pin) => pin.messageId === mobileActionMessage.id)} isPinPending={isLoadingPinnedMessages || pendingPinnedMessageIds.has(mobileActionMessage.id)} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} themeStyle={getConversationThemeStyle(currentTheme)} onClose={() => setMobileActionMessageId(null)} onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }} onPin={() => void togglePinnedMessage(mobileActionMessage)} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
       <AnimatePresence initial={false} onExitComplete={() => { const anchor = reactionDetailsAnchorRef.current; if (anchor?.isConnected) anchor.focus(); else if (lastReactionDetailsMessageIdRef.current) messageElementsRef.current.get(lastReactionDetailsMessageIdRef.current)?.focus(); }}>{reactionDetailsMessage && (reactionDetailsReactions.length > 0 || isReactionDetailsMutationPending) && <ReactionDetails key={reactionDetailsMessage.id} anchorRef={reactionDetailsAnchorRef} currentUserId={currentUserId} error={reactionProfilesError} isLoading={isReactionProfilesLoading} isMutationPending={isReactionDetailsMutationPending} messageLabel={`message from ${reactionDetailsMessage.senderId === currentUserId ? "yourself" : otherName}`} mutationError={reactionDetailsMutationError} pendingReactionKeys={pendingReactionKeys} profilesById={availableReactionProfilesById} reactions={reactionDetailsReactions} onClose={closeReactionDetails} onRemoveOwnReaction={(reaction) => void removeOwnReactionFromDetails(reaction)} onRetry={retryReactionProfiles} />}</AnimatePresence>
       <AnimatePresence initial={false}>{messageDeleteState && <MessageDeleteDialog key={messageDeleteState.messageId} error={messageDeleteState.error} isDeleting={messageDeleteState.isDeleting} returnFocusRef={deleteTriggerRef} onCancel={cancelMessageDeletion} onConfirm={() => void confirmMessageDeletion()} />}</AnimatePresence>
       <AnimatePresence initial={false}>{imageViewerState && imageViewerImages.length > 0 && <ImageViewer key={imageViewerState.messageId} images={imageViewerImages} initialIndex={imageViewerState.initialIndex} isLoading={signedMedia.isLoading} returnFocusRef={imageViewerReturnFocusRef} onClose={() => setImageViewerState(null)} onRetry={signedMedia.retry} />}</AnimatePresence>
@@ -2421,7 +2515,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   );
 }
 
-function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, conversationMutedUntil, onConversationMuteChange, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onStartConversation, onMobileBack }: ChatPanelProps) {
+function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onStartConversation, onMobileBack }: ChatPanelProps) {
   const visibilityClasses = isMobileVisible ? "flex" : "hidden lg:flex";
 
   if (chatState?.kind === "pending") {
@@ -2436,7 +2530,7 @@ function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, 
   }
 
   if (chatState?.kind === "accepted") {
-    return <main className={`${visibilityClasses} min-w-0 flex-1 flex-col overflow-hidden bg-background`}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} conversationMutedUntil={conversationMutedUntil} onConversationMuteChange={onConversationMuteChange} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onMobileBack={onMobileBack} /></main>;
+    return <main className={`${visibilityClasses} chat-theme min-w-0 flex-1 flex-col overflow-hidden bg-background`} style={getConversationThemeStyle(chatState.conversation.themeKey)} data-chat-theme={normalizeConversationThemeId(chatState.conversation.themeKey)}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeConversationNicknameEvents={realtimeConversationNicknameEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} conversationMutedUntil={conversationMutedUntil} conversationArchivedAt={conversationArchivedAt} onConversationMuteChange={onConversationMuteChange} onConversationThemeChange={onConversationThemeChange} onConversationArchiveChange={onConversationArchiveChange} onConversationDelete={onConversationDelete} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onMobileBack={onMobileBack} /></main>;
   }
 
   return (

@@ -42,6 +42,8 @@ export type SelectedConversation = {
   introductoryMessageCreatedAt?: string;
   historyClearedAt?: string | null;
   conversationDeletedAt?: string | null;
+  otherNickname?: string | null;
+  themeKey?: string;
 };
 
 export type MessageSidebarItem =
@@ -74,6 +76,8 @@ export type MessageSidebarItem =
       archivedAt: string | null;
       historyClearedAt: string | null;
       conversationDeletedAt: string | null;
+      otherNickname: string | null;
+      themeKey: string;
     };
 
 export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;
@@ -259,8 +263,12 @@ export type ConversationActivityEvent = {
   conversationId: string;
   actorId: string;
   actorName: string;
-  eventType: "message_pinned";
-  targetMessageId: string;
+  eventType: "message_pinned" | "nickname_changed" | "nickname_removed" | "theme_changed";
+  targetMessageId: string | null;
+  targetUserId: string | null;
+  targetUserName: string | null;
+  nicknameValue: string | null;
+  themeKey: string | null;
   createdAt: string;
   isOptimistic: boolean;
 };
@@ -268,7 +276,7 @@ export type ConversationActivityEvent = {
 export type ConversationActivityRealtimeChange =
   | {
       action: "insert";
-      event: Omit<ConversationActivityEvent, "actorName" | "isOptimistic">;
+      event: Omit<ConversationActivityEvent, "actorName" | "targetUserName" | "isOptimistic">;
     }
   | {
       action: "delete";
@@ -280,6 +288,31 @@ export type ConversationActivityRealtimeChange =
     };
 
 export type RealtimeConversationActivityEvent = ConversationActivityRealtimeChange & {
+  sequence: number;
+};
+
+export type ConversationNickname = {
+  conversationId: string;
+  userId: string;
+  nickname: string;
+  updatedBy: string;
+  updatedAt: string;
+};
+
+export type ConversationNicknameRealtimeChange =
+  | { action: "upsert"; nickname: ConversationNickname }
+  | { action: "delete"; nickname: { conversationId: string; userId: string } };
+
+export type RealtimeConversationNicknameEvent = ConversationNicknameRealtimeChange & {
+  sequence: number;
+};
+
+export type ConversationThemeRealtimeChange = {
+  conversationId: string;
+  themeKey: string;
+};
+
+export type RealtimeConversationThemeEvent = ConversationThemeRealtimeChange & {
   sequence: number;
 };
 
