@@ -46,7 +46,7 @@ type DirectConversationRow = {
   updated_at: string;
   theme_key: string;
   conversation_participants: Array<{ user_id: string }>;
-  messages: Array<{ id: string; body: string; message_type: "text" | "image" | "voice"; created_at: string; edited_at: string | null; is_deleted: boolean; deleted_at: string | null; sender_id: string }>;
+  messages: Array<{ id: string; body: string; message_type: "text" | "image" | "voice" | "file"; created_at: string; edited_at: string | null; is_deleted: boolean; deleted_at: string | null; sender_id: string; message_attachments: Array<{ id: string }> }>;
 };
 
 type ConversationNicknameRow = {
@@ -117,7 +117,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       if (conversationIds.length > 0) {
         const { data: conversationData, error: conversationError } = await supabase
           .from("conversations")
-          .select("id, created_at, updated_at, theme_key, conversation_participants(user_id), messages(id, body, message_type, created_at, edited_at, is_deleted, deleted_at, sender_id)")
+          .select("id, created_at, updated_at, theme_key, conversation_participants(user_id), messages(id, body, message_type, created_at, edited_at, is_deleted, deleted_at, sender_id, message_attachments(id))")
           .in("id", conversationIds)
           .eq("conversation_type", "direct")
           .order("created_at", { referencedTable: "messages", ascending: false })
@@ -215,7 +215,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           conversationId: conversation.id,
           otherProfile: profileById.get(otherUserId) ?? fallbackProfile(otherUserId),
           latestMessageId: latestMessage?.id ?? null,
-          latestMessage: latestMessage ? latestMessage.is_deleted ? "Message deleted" : latestMessage.message_type === "voice" ? "Voice message" : latestMessage.message_type === "image" ? latestMessage.body || "Photo" : latestMessage.body : null,
+          latestMessage: latestMessage ? latestMessage.is_deleted ? "Message deleted" : latestMessage.message_type === "voice" ? "Voice message" : latestMessage.message_type === "image" ? latestMessage.body || "Photo" : latestMessage.message_type === "file" ? latestMessage.body || ((latestMessage.message_attachments?.length ?? 0) > 1 ? `${latestMessage.message_attachments.length} files` : "File") : latestMessage.body : null,
           latestMessageAt: latestMessage?.created_at ?? null,
           latestMessageEditedAt: latestMessage?.edited_at ?? null,
           latestMessageIsDeleted: latestMessage?.is_deleted ?? false,
@@ -291,7 +291,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       const incomingEditedTime = Date.parse(message.editedAt ?? "");
       if (!Number.isNaN(currentEditedTime) && (Number.isNaN(incomingEditedTime) || incomingEditedTime < currentEditedTime)) return conversation;
       if (!Number.isNaN(currentEditedTime) && incomingEditedTime === currentEditedTime && conversation.latestMessage !== message.body) return conversation;
-      return { ...conversation, latestMessage: message.messageType === "voice" ? "Voice message" : message.messageType === "image" ? message.body || "Photo" : message.body, latestMessageEditedAt: message.editedAt, latestMessageIsDeleted: false, latestMessageDeletedAt: null };
+      return { ...conversation, latestMessage: message.messageType === "voice" ? "Voice message" : message.messageType === "image" ? message.body || "Photo" : message.messageType === "file" ? message.body || (message.attachments.length > 1 ? `${message.attachments.length} files` : "File") : message.body, latestMessageEditedAt: message.editedAt, latestMessageIsDeleted: false, latestMessageDeletedAt: null };
     }));
   }, []);
 

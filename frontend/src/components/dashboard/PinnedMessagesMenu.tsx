@@ -33,6 +33,7 @@ function getPinnedPreview(pin: PinnedMessagePreview) {
     if (pin.body.trim()) return normalizePreview(pin.body);
     return pin.attachmentCount > 1 ? "Photos" : "Photo";
   }
+  if (pin.messageType === "file") return pin.body.trim() || (pin.attachmentCount === 1 ? `File · ${pin.firstAttachmentName ?? "Attachment"}` : `${pin.attachmentCount} files`);
   return normalizePreview(pin.body);
 }
 

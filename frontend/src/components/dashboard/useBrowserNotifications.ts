@@ -222,7 +222,7 @@ function useBrowserNotifications({ currentUserId, browserNotificationsEnabled, n
     if (!state.browserNotificationsEnabled || !isSupported || Notification.permission !== "granted" || isMuted(conversation.mutedUntil)) return;
 
     const title = getConversationDisplayName(conversation.otherProfile, conversation.otherNickname);
-    const body = message.messageType === "voice" ? "Sent a voice message" : message.messageType === "image" ? message.body.trim() ? normalizeNotificationPreview(message.body) : "Sent a photo" : normalizeNotificationPreview(message.body);
+    const body = message.messageType === "voice" ? "Sent a voice message" : message.messageType === "image" ? message.body.trim() ? normalizeNotificationPreview(message.body) : "Sent a photo" : message.messageType === "file" ? message.body.trim() ? normalizeNotificationPreview(message.body) : message.attachments.length > 1 ? `Sent ${message.attachments.length} files` : "Sent a file" : normalizeNotificationPreview(message.body);
     try {
       const notification = new Notification(title, { body, tag: `nemissive-message-${message.id}`, silent: true });
       notification.onclick = () => {

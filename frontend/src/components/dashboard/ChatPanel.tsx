@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
-import type { ChatMessage, ComposerImageSelection, ComposerVoiceRecording, ConfirmedMessageStatus, ConversationActivityEvent, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, MessageSearchTarget, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, PinnedMessagePreview, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeConversationActivityEvent, RealtimeConversationNicknameEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, RealtimePinnedMessageEvent, SelectedConversation } from "../../types/conversations";
+import type { ChatMessage, ComposerFileSelection, ComposerImageSelection, ComposerVoiceRecording, ConfirmedMessageStatus, ConversationActivityEvent, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, MessageSearchTarget, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, PinnedMessagePreview, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeConversationActivityEvent, RealtimeConversationNicknameEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, RealtimePinnedMessageEvent, SelectedConversation } from "../../types/conversations";
 import AnchoredPopover from "./AnchoredPopover";
+import AttachmentMenu from "./AttachmentMenu";
+import ComposerFilePreview from "./ComposerFilePreview";
 import ComposerMediaPreview from "./ComposerMediaPreview";
 import ConversationActivityRow from "./ConversationActivityRow";
 import ConversationMuteMenu from "./ConversationMuteMenu";
 import ConversationOptionsMenu from "./ConversationOptionsMenu";
 import EmojiPicker from "./EmojiPicker";
+import FileMessageCard from "./FileMessageCard";
 import ImageViewer from "./ImageViewer";
 import MessageActionSheet from "./MessageActionSheet";
 import MessageActionsToolbar from "./MessageActionsToolbar";
 import MessageDeleteDialog from "./MessageDeleteDialog";
 import MessageMediaGallery, { type GalleryMediaItem } from "./MessageMediaGallery";
+import MessageText from "./MessageText";
 import PinnedMessagesMenu from "./PinnedMessagesMenu";
 import PresenceAvatar from "./PresenceAvatar";
 import ProfileAvatar from "./ProfileAvatar";
@@ -27,6 +31,7 @@ import VoiceMessagePlayer from "./VoiceMessagePlayer";
 import VoiceRecordingComposer from "./VoiceRecordingComposer";
 import { formatVoiceDuration } from "./voiceUtils";
 import { getConversationTheme, getConversationThemeStyle, normalizeConversationThemeId, type ConversationThemeId } from "./conversationThemes";
+import { acceptedFileInputTypes, fileAttachmentMaxCount, fileAttachmentMaxSize, normalizeAllowedFile, sanitizeAttachmentFilename } from "./fileAttachments";
 
 type MessageRow = {
   id: string;
@@ -38,7 +43,7 @@ type MessageRow = {
   is_deleted: boolean;
   deleted_at: string | null;
   source_request_id: string | null;
-  message_type: "text" | "image" | "voice";
+  message_type: "text" | "image" | "voice" | "file";
   reply_to_message_id: string | null;
 };
 
@@ -52,7 +57,7 @@ type AttachmentRow = {
   width: number | null;
   height: number | null;
   position: number;
-  attachment_kind: "image" | "voice";
+  attachment_kind: "image" | "voice" | "file";
   duration_ms: number | null;
 };
 
@@ -62,6 +67,7 @@ type CreateImageMessageResult = {
 };
 
 type CreateVoiceMessageResult = CreateImageMessageResult;
+type CreateFileMessageResult = CreateImageMessageResult;
 
 type ParticipantRow = {
   user_id: string;
@@ -83,11 +89,12 @@ type PinnedMessageRow = {
   sender_id: string;
   body: string;
   created_at: string;
-  message_type: "text" | "image" | "voice";
+  message_type: "text" | "image" | "voice" | "file";
   pinned_by: string;
   pinned_at: string;
   attachment_count: number;
   voice_duration_ms: number | null;
+  first_attachment_name: string | null;
 };
 
 type ConversationEventRow = {
@@ -253,7 +260,7 @@ function mapMessageRow(row: MessageRow, replyPreview: MessageReplyPreview | null
     isDeleted: row.is_deleted,
     deletedAt: row.deleted_at,
     isIntroduction: Boolean(row.source_request_id),
-    messageType: row.message_type === "image" || row.message_type === "voice" ? row.message_type : "text",
+    messageType: row.message_type === "image" || row.message_type === "voice" || row.message_type === "file" ? row.message_type : "text",
     attachments,
     replyToMessageId: row.reply_to_message_id,
     replyPreview,
@@ -273,6 +280,7 @@ function mapPinnedMessageRow(row: PinnedMessageRow, currentUserId: string | null
     pinnedAt: row.pinned_at,
     attachmentCount: row.attachment_count,
     voiceDurationMs: row.voice_duration_ms,
+    firstAttachmentName: row.first_attachment_name,
   };
 }
 
@@ -289,6 +297,7 @@ function createPinnedMessagePreview(message: ChatMessage, currentUserId: string 
     pinnedAt: new Date().toISOString(),
     attachmentCount: message.attachments.length,
     voiceDurationMs: message.attachments.find((attachment) => attachment.attachmentKind === "voice")?.durationMs ?? null,
+    firstAttachmentName: message.attachments[0]?.originalName ?? null,
   };
 }
 
@@ -326,11 +335,13 @@ function normalizeReplyPreviewBody(body: string) {
 
 function createReplyPreview(message: Pick<ChatMessage, "id" | "senderId" | "body" | "isDeleted" | "messageType" | "attachments">, currentUserId: string | null, otherName: string): MessageReplyPreview {
   const voiceDuration = message.attachments.find((attachment) => attachment.attachmentKind === "voice")?.durationMs;
+  const fileAttachments = message.attachments.filter((attachment) => attachment.attachmentKind === "file");
+  const fileSummary = fileAttachments.length === 1 ? `File · ${fileAttachments[0]?.originalName ?? "Attachment"}` : `${fileAttachments.length} files`;
   return {
     id: message.id,
     senderId: message.senderId,
     senderName: message.senderId === currentUserId ? "You" : otherName,
-    body: message.isDeleted ? null : message.messageType === "voice" ? `Voice message${voiceDuration ? ` · ${formatVoiceDuration(voiceDuration)}` : ""}` : message.messageType === "image" && !message.body ? "Photo" : normalizeReplyPreviewBody(message.body),
+    body: message.isDeleted ? null : message.messageType === "voice" ? `Voice message${voiceDuration ? ` · ${formatVoiceDuration(voiceDuration)}` : ""}` : message.messageType === "image" && !message.body ? "Photo" : message.messageType === "file" && !message.body ? fileSummary : normalizeReplyPreviewBody(message.body),
     unavailable: false,
     isDeleted: message.isDeleted,
   };
@@ -479,10 +490,6 @@ function MobileBackButton({ onClick }: { onClick: () => void }) {
   return <button type="button" onClick={onClick} aria-label="Back to Messages" className="chat-accent-control flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover lg:hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg></button>;
 }
 
-function MediaIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><circle cx="9" cy="10" r="1.5" /><path d="m5.5 17 4.2-4.2 3.1 3 2.2-2.1 3.5 3.3" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-}
-
 function EmojiIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M9 10h.01M15 10h.01M8.5 14.5c1 1.2 2.1 1.8 3.5 1.8s2.5-.6 3.5-1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
@@ -534,6 +541,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const editTriggerRef = useRef<HTMLElement | null>(null);
   const deleteTriggerRef = useRef<HTMLElement | null>(null);
@@ -578,6 +586,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const attachmentFetchesRef = useRef(new Map<string, Promise<void>>());
   const messageElementsRef = useRef(new Map<string, HTMLElement>());
   const selectedImagesRef = useRef<ComposerImageSelection[]>([]);
+  const selectedFilesRef = useRef<ComposerFileSelection[]>([]);
   const optimisticPreviewUrlsRef = useRef(new Set<string>());
   const imageViewerReturnFocusRef = useRef<HTMLElement | null>(null);
   const deletedMessageIdsRef = useRef(new Set<string>());
@@ -606,7 +615,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const [pinToast, setPinToast] = useState<{ id: number; message: string } | null>(null);
   const [draft, setDraft] = useState("");
   const [selectedImages, setSelectedImages] = useState<ComposerImageSelection[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<ComposerFileSelection[]>([]);
+  const [isDragActive, setIsDragActive] = useState(false);
   const [mediaError, setMediaError] = useState("");
+  const [uploadStatus, setUploadStatus] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [historyError, setHistoryError] = useState("");
@@ -643,7 +655,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const otherName = getConversationDisplayName(conversation.otherProfile, nicknamesByUserId.get(conversation.otherProfile.id) ?? conversation.otherNickname);
   const presenceText = isOtherUserOnline ? "Online" : formatLastSeen(conversation.otherProfile.last_seen_at, relativeTimeNow);
   const { isOtherUserTyping, notifyTyping, stopTyping } = useConversationTyping({ conversationId: conversation.id, currentUserId, otherUserId: conversation.otherProfile.id });
-  const signedMediaPaths = messages.flatMap((message) => message.kind === "confirmed" && !message.isDeleted ? message.attachments.map((attachment) => attachment.storagePath) : []);
+  const signedMediaPaths = messages.flatMap((message) => message.kind === "confirmed" && !message.isDeleted ? message.attachments.filter((attachment) => attachment.attachmentKind !== "file").map((attachment) => attachment.storagePath) : []);
   const signedMedia = useSignedMessageMedia(signedMediaPaths);
   const voiceRecorder = useVoiceRecorder();
   const previousVoiceModeRef = useRef(voiceRecorder.mode);
@@ -674,6 +686,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   useEffect(() => {
     selectedImagesRef.current = selectedImages;
   }, [selectedImages]);
+
+  useEffect(() => {
+    selectedFilesRef.current = selectedFiles;
+  }, [selectedFiles]);
 
   useEffect(() => {
     function handleSelectionChange() {
@@ -812,7 +828,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
         return;
       }
 
-      const attachmentResult = data.message_type === "image" || data.message_type === "voice" ? await supabase.from("message_attachments").select("id, message_id, storage_path, original_name, mime_type, size_bytes, width, height, position, attachment_kind, duration_ms").eq("message_id", replyToMessageId).order("position", { ascending: true }) : { data: [], error: null };
+      const attachmentResult = data.message_type === "image" || data.message_type === "voice" || data.message_type === "file" ? await supabase.from("message_attachments").select("id, message_id, storage_path, original_name, mime_type, size_bytes, width, height, position, attachment_kind, duration_ms").eq("message_id", replyToMessageId).order("position", { ascending: true }) : { data: [], error: null };
       if (!isMountedRef.current) return;
       const targetAttachments = attachmentResult.error ? [] : ((attachmentResult.data ?? []) as AttachmentRow[]).map(mapAttachmentRow);
       const target = mapMessageRow(data as MessageRow, null, targetAttachments);
@@ -1214,7 +1230,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     relevantEvents.forEach((event) => {
       const replyToMessageId = event.message.replyToMessageId;
       if (replyToMessageId && !replyTargetCacheRef.current.has(replyToMessageId)) loadReplyTarget(replyToMessageId);
-      if ((event.message.messageType === "image" || event.message.messageType === "voice") && !attachmentCacheRef.current.has(event.message.id)) loadMessageAttachments(event.message.id);
+      if ((event.message.messageType === "image" || event.message.messageType === "voice" || event.message.messageType === "file") && !attachmentCacheRef.current.has(event.message.id)) loadMessageAttachments(event.message.id);
     });
 
     if (receivedIncomingMessage) {
@@ -1639,6 +1655,79 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     onMessageConfirmed();
   }
 
+  async function submitFileMessage(caption: string, sourceFiles: ComposerFileSelection[] | OptimisticMessageAttachment[], existingOptimisticId?: string, retryReplyTarget?: MessageReplyPreview | null, retryReplyToMessageId?: string | null) {
+    if (!currentUserId || isSubmittingRef.current || sourceFiles.length < 1 || sourceFiles.length > fileAttachmentMaxCount) return;
+    const trimmedCaption = caption.trim();
+    if (trimmedCaption.length > messageMaxLength) return;
+    const validated = sourceFiles.every((item) => item.size > 0 && item.size <= fileAttachmentMaxSize && normalizeAllowedFile(item.file));
+    if (!validated) { setMediaError("One or more files are no longer valid. Remove them and choose the files again."); return; }
+
+    const optimisticId = existingOptimisticId ?? createUuid();
+    const replyTarget = existingOptimisticId ? retryReplyTarget ?? null : replyingTo;
+    const replyToMessageId = existingOptimisticId ? retryReplyToMessageId ?? replyTarget?.id ?? null : replyTarget?.id ?? null;
+    const optimisticAttachments: OptimisticMessageAttachment[] = sourceFiles.map((item, position) => {
+      if ("previewUrl" in item) return { ...item, position };
+      const previewUrl = URL.createObjectURL(item.file);
+      optimisticPreviewUrlsRef.current.add(previewUrl);
+      return { id: item.localId, messageId: optimisticId, storagePath: `${conversation.id}/${currentUserId}/${optimisticId}/${createUuid()}.${item.extension}`, originalName: item.originalName, mimeType: item.mimeType, size: item.size, width: null, height: null, position, attachmentKind: "file", durationMs: null, file: item.file, previewUrl };
+    });
+    const optimisticMessage: OptimisticChatMessage = { kind: "optimistic", optimisticId, conversationId: conversation.id, senderId: currentUserId, body: trimmedCaption, createdAt: new Date().toISOString(), deliveryState: "sending", messageType: "file", attachments: optimisticAttachments, replyToMessageId, replyPreview: replyTarget };
+    isSubmittingRef.current = true; setIsSubmitting(true); setMediaError(""); setUploadStatus(sourceFiles.length > 1 ? `Uploading 1 of ${sourceFiles.length}…` : "Uploading…"); setIsComposerEmojiPickerOpen(false); stopTyping();
+    inFlightMessageRef.current = { optimisticId, conversationId: conversation.id, body: trimmedCaption, replyToMessageId };
+    setMessages((current) => sortMessages([...current.filter((message) => message.kind === "confirmed" || message.optimisticId !== optimisticId), optimisticMessage]));
+    setShowJumpToLatest(false); scrollToLatest("smooth");
+
+    async function cleanup(paths: string[]) { if (paths.length) await supabase.storage.from(messageMediaBucket).remove(paths); }
+    async function reconcileExisting() {
+      const { data: existingMessage } = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id").eq("id", optimisticId).eq("conversation_id", conversation.id).eq("sender_id", currentUserId).maybeSingle();
+      if (!existingMessage || existingMessage.message_type !== "file") return null;
+      const { data: existingAttachments, error } = await supabase.from("message_attachments").select("id, message_id, storage_path, original_name, mime_type, size_bytes, width, height, position, attachment_kind, duration_ms").eq("message_id", optimisticId).order("position", { ascending: true });
+      return error || !existingAttachments?.length ? null : { message: existingMessage as MessageRow, attachments: existingAttachments as AttachmentRow[] };
+    }
+
+    let result: CreateFileMessageResult | null = existingOptimisticId ? await reconcileExisting() : null;
+    const uploadedPaths: string[] = [];
+    if (!result) {
+      if (existingOptimisticId) await cleanup(optimisticAttachments.map((attachment) => attachment.storagePath));
+      for (let index = 0; index < optimisticAttachments.length; index += 1) {
+        const attachment = optimisticAttachments[index];
+        const upload = await supabase.storage.from(messageMediaBucket).upload(attachment.storagePath, attachment.file, { cacheControl: "3600", contentType: attachment.mimeType, upsert: false });
+        if (upload.error) {
+          await cleanup(uploadedPaths);
+          setMessages((current) => current.map((message) => message.kind === "optimistic" && message.optimisticId === optimisticId ? { ...message, deliveryState: "failed" } : message));
+          setMediaError(`File ${index + 1} of ${optimisticAttachments.length} couldn’t be uploaded. Your files are available to retry.`);
+          setUploadStatus(""); isSubmittingRef.current = false; setIsSubmitting(false); inFlightMessageRef.current = null; return;
+        }
+        uploadedPaths.push(attachment.storagePath);
+        setUploadStatus(optimisticAttachments.length > 1 ? `Uploading ${index + 1} of ${optimisticAttachments.length}…` : "Uploading…");
+      }
+      const attachmentRecords = optimisticAttachments.map((attachment) => ({ storage_path: attachment.storagePath, original_name: attachment.originalName, mime_type: attachment.mimeType, size_bytes: attachment.size, position: attachment.position, attachment_kind: "file" }));
+      const rpc = await supabase.rpc("create_file_message", { target_message_id: optimisticId, target_conversation_id: conversation.id, caption_text: trimmedCaption, target_reply_to_message_id: replyToMessageId, attachment_records: attachmentRecords });
+      if (!rpc.error && rpc.data && typeof rpc.data === "object" && "message" in rpc.data && "attachments" in rpc.data) result = rpc.data as unknown as CreateFileMessageResult;
+      if (!result) result = await reconcileExisting();
+      if (!result) {
+        await cleanup(uploadedPaths);
+        setMessages((current) => current.map((message) => message.kind === "optimistic" && message.optimisticId === optimisticId ? { ...message, deliveryState: "failed" } : message));
+        setMediaError("The file message couldn’t be created. Your caption and files are available to retry.");
+        setUploadStatus(""); isSubmittingRef.current = false; setIsSubmitting(false); inFlightMessageRef.current = null; return;
+      }
+    }
+
+    const attachments = result.attachments.map(mapAttachmentRow);
+    const confirmed = mapMessageRow(result.message, replyTarget ?? (replyToMessageId ? createUnavailableReplyPreview(replyToMessageId) : null), attachments);
+    attachmentCacheRef.current.set(confirmed.id, attachments); locallyConfirmedMessageIdsRef.current.add(confirmed.id);
+    setMessages((current) => reconcileConfirmedMessage(current, confirmed, optimisticId));
+    const sentFileObjects = new Set(sourceFiles.map((item) => item.file));
+    const remaining = selectedFilesRef.current.filter((item) => !sentFileObjects.has(item.file));
+    selectedFilesRef.current = remaining; setSelectedFiles(remaining);
+    if (draft.trim() === trimmedCaption && remaining.length === 0) { setDraft(""); resetTextareaHeight(); }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (replyTarget) setReplyingTo((current) => current?.id === replyTarget.id ? null : current);
+    setMediaError(""); setUploadStatus("");
+    requestAnimationFrame(() => { optimisticAttachments.forEach((attachment) => { optimisticPreviewUrlsRef.current.delete(attachment.previewUrl); URL.revokeObjectURL(attachment.previewUrl); }); textareaRef.current?.focus(); });
+    isSubmittingRef.current = false; setIsSubmitting(false); inFlightMessageRef.current = null; onMessageConfirmed();
+  }
+
   async function submitVoiceMessage(sourceRecording: ComposerVoiceRecording | OptimisticMessageAttachment, existingOptimisticId?: string, retryReplyTarget?: MessageReplyPreview | null, retryReplyToMessageId?: string | null) {
     if (!currentUserId || isSubmittingRef.current) return;
     const baseMimeType = getBaseMimeType(sourceRecording.mimeType);
@@ -1728,8 +1817,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   async function startVoiceRecording() {
     if (isSubmittingRef.current || messageEditState) return;
-    if (selectedImagesRef.current.length > 0) {
-      setMediaError("Remove the selected images before recording a voice message.");
+    if (selectedImagesRef.current.length > 0 || selectedFilesRef.current.length > 0) {
+      setMediaError("Remove the selected attachments before recording a voice message.");
       return;
     }
     setIsComposerEmojiPickerOpen(false);
@@ -1753,6 +1842,12 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   function handleSend(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     if (messageEditState) return;
+    if (selectedFiles.length > 0) {
+      const failedAttempt = [...messages].reverse().find((message): message is OptimisticChatMessage => message.kind === "optimistic" && message.messageType === "file" && message.deliveryState === "failed" && message.body === draft.trim() && message.attachments.length === selectedFiles.length && message.attachments.every((attachment, index) => attachment.file === selectedFiles[index]?.file));
+      if (failedAttempt) void submitFileMessage(failedAttempt.body, failedAttempt.attachments, failedAttempt.optimisticId, failedAttempt.replyPreview, failedAttempt.replyToMessageId);
+      else void submitFileMessage(draft, selectedFiles);
+      return;
+    }
     if (selectedImages.length > 0) {
       const failedAttempt = [...messages].reverse().find((message): message is OptimisticChatMessage => message.kind === "optimistic" && message.messageType === "image" && message.deliveryState === "failed" && message.body === draft.trim() && message.attachments.length === selectedImages.length && message.attachments.every((attachment, index) => attachment.file === selectedImages[index]?.file));
       if (failedAttempt) {
@@ -1766,6 +1861,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   function openImagePicker() {
+    if (selectedFilesRef.current.length > 0) { setMediaError("Remove the selected files before adding photos."); return; }
     const input = mediaInputRef.current;
     if (!input) return;
     setIsComposerEmojiPickerOpen(false);
@@ -1773,10 +1869,18 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     input.click();
   }
 
-  async function handleImageSelection(event: React.ChangeEvent<HTMLInputElement>) {
-    const files = [...(event.currentTarget.files ?? [])];
-    event.currentTarget.value = "";
+  function openFilePicker() {
+    if (selectedImagesRef.current.length > 0) { setMediaError("Remove the selected photos before adding files."); return; }
+    const input = fileInputRef.current;
+    if (!input) return;
+    setIsComposerEmojiPickerOpen(false);
+    input.value = "";
+    input.click();
+  }
+
+  async function addSelectedImages(files: File[]) {
     if (files.length === 0) return;
+    if (selectedFilesRef.current.length > 0) { setMediaError("Photos and files can’t be combined in one message. Remove the selected files first."); return; }
 
     const existingImages = selectedImagesRef.current;
     const duplicateKeys = new Set(existingImages.map((image) => image.duplicateKey));
@@ -1836,6 +1940,74 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     setMediaError(rejectedReasons.length > 0 ? rejectedReasons.join(" · ") : "");
   }
 
+  async function handleImageSelection(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = [...(event.currentTarget.files ?? [])];
+    event.currentTarget.value = "";
+    await addSelectedImages(files);
+  }
+
+  function addSelectedFiles(files: File[]) {
+    if (files.length === 0) return;
+    if (selectedImagesRef.current.length > 0) { setMediaError("Photos and files can’t be combined in one message. Remove the selected photos first."); return; }
+    const existing = selectedFilesRef.current;
+    const duplicateKeys = new Set(existing.map((file) => file.duplicateKey));
+    const accepted: ComposerFileSelection[] = [];
+    const rejected: string[] = [];
+    for (const file of files) {
+      const normalized = normalizeAllowedFile(file);
+      const safeName = sanitizeAttachmentFilename(file.name);
+      const duplicateKey = `${file.name.toLowerCase()}:${file.size}:${file.lastModified}`;
+      if (existing.length + accepted.length >= fileAttachmentMaxCount) { rejected.push(`${file.name}: the 10-file limit was reached`); continue; }
+      if (!normalized) { rejected.push(`${file.name}: unsupported or mismatched file type`); continue; }
+      if (!safeName) { rejected.push("A file has an invalid filename"); continue; }
+      if (file.size < 1 || file.size > fileAttachmentMaxSize) { rejected.push(`${file.name}: files must be 25 MB or smaller`); continue; }
+      if (duplicateKeys.has(duplicateKey)) { rejected.push(`${file.name}: duplicate file`); continue; }
+      accepted.push({ localId: createUuid(), file, originalName: safeName, mimeType: normalized.mimeType, size: file.size, extension: normalized.extension, duplicateKey });
+      duplicateKeys.add(duplicateKey);
+    }
+    if (accepted.length) { const next = [...existing, ...accepted]; selectedFilesRef.current = next; setSelectedFiles(next); }
+    setMediaError(rejected.length ? rejected.join(" · ") : "");
+  }
+
+  function handleFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = [...(event.currentTarget.files ?? [])];
+    event.currentTarget.value = "";
+    addSelectedFiles(files);
+  }
+
+  function removeSelectedFile(localId: string) {
+    const next = selectedFilesRef.current.filter((file) => file.localId !== localId);
+    selectedFilesRef.current = next; setSelectedFiles(next); setMediaError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  function removeAllSelectedFiles() {
+    selectedFilesRef.current = []; setSelectedFiles([]); setMediaError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  function handleComposerPaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    if (event.clipboardData.getData("text/plain")) return;
+    const imageFiles = [...event.clipboardData.items].filter((item) => item.kind === "file" && acceptedImageMimeTypes.has(item.type.toLowerCase())).map((item) => item.getAsFile()).filter((file): file is File => Boolean(file));
+    if (imageFiles.length === 0) return;
+    event.preventDefault();
+    if (selectedFilesRef.current.length > 0) { setMediaError("Remove the selected files before pasting a photo."); return; }
+    void addSelectedImages(imageFiles);
+  }
+
+  function handleAttachmentDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault(); setIsDragActive(false);
+    const files = [...event.dataTransfer.files];
+    if (!files.length) return;
+    const imageFiles = files.filter((file) => acceptedImageMimeTypes.has(file.type.toLowerCase()));
+    const generalFiles = files.filter((file) => normalizeAllowedFile(file));
+    if (imageFiles.length + generalFiles.length !== files.length) { setMediaError("One or more dropped files are unsupported."); return; }
+    if (imageFiles.length && generalFiles.length) { setMediaError("Photos and files can’t be combined in one message. Drop one type at a time."); return; }
+    if (imageFiles.length) void addSelectedImages(imageFiles); else addSelectedFiles(generalFiles);
+  }
+
   function removeSelectedImage(localId: string) {
     const image = selectedImagesRef.current.find((item) => item.localId === localId);
     const nextImages = selectedImagesRef.current.filter((item) => item.localId !== localId);
@@ -1882,13 +2054,17 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       void submitImageMessage(message.body, message.attachments, message.optimisticId, message.replyPreview, message.replyToMessageId);
       return;
     }
+    if (message.messageType === "file") {
+      void submitFileMessage(message.body, message.attachments, message.optimisticId, message.replyPreview, message.replyToMessageId);
+      return;
+    }
     void submitMessage(message.body, message.optimisticId, message.replyPreview, message.replyToMessageId);
   }
 
   function handleRemoveFailedMessage(optimisticId: string) {
     const removedMessage = messages.find((message): message is OptimisticChatMessage => message.kind === "optimistic" && message.optimisticId === optimisticId);
     setMessages((currentMessages) => currentMessages.filter((message) => message.kind === "confirmed" || message.optimisticId !== optimisticId));
-    if (removedMessage?.messageType === "image" || removedMessage?.messageType === "voice") {
+    if (removedMessage?.messageType === "image" || removedMessage?.messageType === "voice" || removedMessage?.messageType === "file") {
       window.requestAnimationFrame(() => removedMessage.attachments.forEach((attachment) => {
           optimisticPreviewUrlsRef.current.delete(attachment.previewUrl);
           URL.revokeObjectURL(attachment.previewUrl);
@@ -2376,7 +2552,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   const remainingCharacters = messageMaxLength - draft.length;
   const showCharacterCount = remainingCharacters <= characterCountThreshold;
-  const isSendDisabled = !currentUserId || (!draft.trim() && selectedImages.length === 0) || isSubmitting || Boolean(messageEditState) || draft.length > messageMaxLength;
+  const isSendDisabled = !currentUserId || (!draft.trim() && selectedImages.length === 0 && selectedFiles.length === 0) || isSubmitting || Boolean(messageEditState) || draft.length > messageMaxLength;
   const shouldShowIntroductoryFallback = !conversation.historyClearedAt && Boolean(conversation.introductoryMessage) && !messages.some((message) => message.kind === "confirmed" && message.isIntroduction);
   const shouldShowRestartEmptyState = Boolean(conversation.historyClearedAt) && messages.length === 0;
   const newestDisplayedMessage = messages.at(-1);
@@ -2407,8 +2583,9 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const currentTheme = normalizeConversationThemeId(conversation.themeKey);
 
   return (
-    <div ref={panelRef} className="chat-panel-root relative flex min-h-0 flex-1 flex-col">
-      <header className="chat-header flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-4 sm:gap-3 sm:px-6"><MobileBackButton onClick={onMobileBack} /><PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={isOtherUserOnline} /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1><p className={`truncate text-xs font-medium ${isOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{conversation.otherProfile.username && <span className="font-normal text-body"> · @{conversation.otherProfile.username}</span>}</p></div><PinnedMessagesMenu error={pinnedMessagesError} isLoading={isLoadingPinnedMessages} pins={pinnedMessages} onRetry={() => void loadPinnedMessages()} onSelect={handlePinnedMessageSelected} /><ConversationMuteMenu conversationName={otherName} mutedUntil={conversationMutedUntil} onChange={(mutedUntil) => onConversationMuteChange(conversation.id, mutedUntil)} /><ConversationOptionsMenu conversationName={otherName} currentTheme={currentTheme} isArchived={Boolean(conversationArchivedAt)} nicknamesByUserId={nicknamesByUserId} participants={currentProfile ? [currentProfile, conversation.otherProfile] : [conversation.otherProfile]} onArchivedChange={(archived) => onConversationArchiveChange(conversation.id, archived)} onDelete={() => onConversationDelete(conversation.id)} onNicknameSave={saveConversationNickname} onThemeApply={saveConversationTheme} /></header>
+    <div ref={panelRef} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setIsDragActive(true); } }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragActive(false); }} onDrop={handleAttachmentDrop} className="chat-panel-root relative flex min-h-0 flex-1 flex-col">
+      <header className="chat-header flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-4 sm:gap-3 sm:px-6"><MobileBackButton onClick={onMobileBack} /><PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={isOtherUserOnline} /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1><p className={`truncate text-xs font-medium ${isOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{conversation.otherProfile.username && <span className="font-normal text-body"> · @{conversation.otherProfile.username}</span>}</p></div><PinnedMessagesMenu error={pinnedMessagesError} isLoading={isLoadingPinnedMessages} pins={pinnedMessages} onRetry={() => void loadPinnedMessages()} onSelect={handlePinnedMessageSelected} /><ConversationMuteMenu conversationName={otherName} mutedUntil={conversationMutedUntil} onChange={(mutedUntil) => onConversationMuteChange(conversation.id, mutedUntil)} /><ConversationOptionsMenu conversationId={conversation.id} conversationName={otherName} profile={conversation.otherProfile} profilePresenceText={presenceText} isProfileOnline={isOtherUserOnline} currentTheme={currentTheme} isArchived={Boolean(conversationArchivedAt)} nicknamesByUserId={nicknamesByUserId} participants={currentProfile ? [currentProfile, conversation.otherProfile] : [conversation.otherProfile]} onArchivedChange={(archived) => onConversationArchiveChange(conversation.id, archived)} onDelete={() => onConversationDelete(conversation.id)} onNicknameSave={saveConversationNickname} onThemeApply={saveConversationTheme} onContentJump={(messageId) => openMessageTarget(messageId, "pin")} /></header>
+      {isDragActive && <div className="pointer-events-none absolute inset-3 z-50 flex items-center justify-center rounded-3xl border-2 border-dashed border-primary bg-accent/95"><div className="text-center"><p className="font-semibold text-heading">Drop to add attachments</p><p className="mt-1 text-sm text-body">Photos or supported files</p></div></div>}
 
       <p aria-live="polite" className="sr-only">{newMessageAnnouncement}</p>
       <div className="pointer-events-none absolute left-1/2 top-20 z-40 w-[min(calc(100%-2rem),22rem)] -translate-x-1/2"><AnimatePresence initial={false}>{pinToast && <motion.div key={pinToast.id} role="status" aria-live="polite" aria-atomic="true" initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }} transition={{ duration: shouldReduceMotion ? 0 : 0.16 }} className="chat-surface rounded-2xl border border-border bg-surface px-4 py-3 text-center text-sm font-semibold text-heading shadow-soft">{pinToast.message}</motion.div>}</AnimatePresence></div>
@@ -2451,6 +2628,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                 const galleryAttachments: GalleryMediaItem[] = (message.kind === "optimistic" ? message.attachments.filter((attachment) => attachment.attachmentKind === "image").map((attachment) => ({ ...attachment, width: attachment.width ?? 1, height: attachment.height ?? 1, url: attachment.previewUrl })) : message.attachments.filter((attachment) => attachment.attachmentKind === "image").map((attachment) => ({ ...attachment, width: attachment.width ?? 1, height: attachment.height ?? 1, url: signedMedia.urls.get(attachment.storagePath) ?? null })));
                 const isImageMessage = message.messageType === "image" && !("isDeleted" in message && message.isDeleted);
                 const isVoiceMessage = message.messageType === "voice" && !("isDeleted" in message && message.isDeleted);
+                const isFileMessage = message.messageType === "file" && !("isDeleted" in message && message.isDeleted);
+                const fileAttachments = isFileMessage ? message.attachments.filter((attachment) => attachment.attachmentKind === "file") : [];
                 const voiceAttachment = isVoiceMessage ? message.attachments.find((attachment) => attachment.attachmentKind === "voice") : undefined;
                 const voiceSource = message.kind === "optimistic" ? message.attachments.find((attachment) => attachment.attachmentKind === "voice")?.previewUrl ?? null : voiceAttachment ? signedMedia.urls.get(voiceAttachment.storagePath) ?? null : null;
 
@@ -2462,7 +2641,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                           {replyPreview && <ReplyQuote preview={replyPreview} isStrongOutgoing={isCurrentUser && !isFailed} canJump={canJumpToReplyTarget} onJump={() => message.replyToMessageId && jumpToOriginalMessage(message.replyToMessageId)} />}
                           {isImageMessage && <MessageMediaGallery attachments={galleryAttachments} isLoading={message.kind === "confirmed" && signedMedia.isLoading} onOpen={(index, trigger) => { imageViewerReturnFocusRef.current = trigger; setImageViewerState({ messageId: message.kind === "confirmed" ? message.id : message.optimisticId, initialIndex: index }); }} onRetry={galleryAttachments.length > 0 ? signedMedia.retry : handleHistoryRetry} />}
                           {isVoiceMessage && <VoiceMessagePlayer src={voiceSource} durationMs={voiceAttachment?.durationMs ?? 0} isLoading={message.kind === "confirmed" && (!voiceAttachment || signedMedia.isLoading)} isOutgoing={isCurrentUser && !isFailed} label={`voice message from ${replyActionSenderName}`} onRetry={message.kind === "confirmed" ? () => { if (voiceAttachment) signedMedia.retry(); else loadMessageAttachments(message.id); } : () => undefined} />}
-                          {message.kind === "confirmed" && message.isDeleted ? <p className="break-words text-sm italic leading-6">This message was deleted.</p> : isEditingThisMessage && messageEditState ? <div className={`min-w-0 ${isImageMessage ? "mt-3" : ""}`}><label htmlFor={`edit-message-${message.id}`} className="sr-only">{isImageMessage ? "Edit image caption" : "Edit your message"}</label><textarea ref={editTextareaRef} id={`edit-message-${message.id}`} value={messageEditState.draft} onChange={(event) => { const draft = event.target.value; setMessageEditState((currentState) => currentState?.messageId === message.id ? { ...currentState, draft, error: "" } : currentState); resizeTextarea(event.target); }} onKeyDown={handleEditKeyDown} rows={2} maxLength={messageMaxLength} disabled={messageEditState.isSaving} placeholder={isImageMessage ? "Add a caption…" : undefined} aria-describedby={messageEditState.error ? `edit-message-error-${message.id}` : undefined} className="max-h-32 min-h-20 w-full min-w-0 resize-none overflow-y-auto rounded-xl border border-border bg-surface px-3 py-2 text-sm leading-6 text-heading outline-none placeholder:text-muted focus:ring-2 focus:ring-primary/20 disabled:cursor-wait disabled:opacity-70" /><div className="mt-2 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => void saveMessageEdit()} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">{messageEditState.isSaving ? "Saving…" : "Save"}</button><button type="button" onClick={cancelMessageEditing} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-background/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-background/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">Cancel</button></div>{messageEditState.error && <p id={`edit-message-error-${message.id}`} role="alert" className="mt-2 text-xs leading-5 text-white">{messageEditState.error}</p>}</div> : message.body ? <p className={`whitespace-pre-wrap break-words text-sm leading-6 ${isImageMessage ? "mt-3" : ""}`}>{message.body}</p> : null}
+                          {isFileMessage && <FileMessageCard attachments={fileAttachments} isOutgoing={isCurrentUser && !isFailed} isOptimistic={message.kind === "optimistic"} />}
+                          {message.kind === "confirmed" && message.isDeleted ? <p className="break-words text-sm italic leading-6">This message was deleted.</p> : isEditingThisMessage && messageEditState ? <div className={`min-w-0 ${isImageMessage || isFileMessage ? "mt-3" : ""}`}><label htmlFor={`edit-message-${message.id}`} className="sr-only">{isImageMessage ? "Edit image caption" : isFileMessage ? "Edit file caption" : "Edit your message"}</label><textarea ref={editTextareaRef} id={`edit-message-${message.id}`} value={messageEditState.draft} onChange={(event) => { const draft = event.target.value; setMessageEditState((currentState) => currentState?.messageId === message.id ? { ...currentState, draft, error: "" } : currentState); resizeTextarea(event.target); }} onKeyDown={handleEditKeyDown} rows={2} maxLength={messageMaxLength} disabled={messageEditState.isSaving} placeholder={isImageMessage || isFileMessage ? "Add a caption…" : undefined} aria-describedby={messageEditState.error ? `edit-message-error-${message.id}` : undefined} className="max-h-32 min-h-20 w-full min-w-0 resize-none overflow-y-auto rounded-xl border border-border bg-surface px-3 py-2 text-sm leading-6 text-heading outline-none placeholder:text-muted focus:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-70" /><div className="mt-2 flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => void saveMessageEdit()} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">{messageEditState.isSaving ? "Saving…" : "Save"}</button><button type="button" onClick={cancelMessageEditing} disabled={messageEditState.isSaving} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-background/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-background/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-wait disabled:opacity-60">Cancel</button></div>{messageEditState.error && <p id={`edit-message-error-${message.id}`} role="alert" className="mt-2 text-xs leading-5 text-white">{messageEditState.error}</p>}</div> : message.body ? <MessageText text={message.body} className={`whitespace-pre-wrap break-words text-sm leading-6 ${isImageMessage || isFileMessage ? "mt-3" : ""}`} /> : null}
                           <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed && !(message.kind === "confirmed" && message.isDeleted) ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}{message.kind === "confirmed" && !message.isDeleted && (message.editedAt || isSavingThisEdit) && <span>Edited</span>}</div>
                           {isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}
                         </motion.div>
@@ -2488,15 +2668,18 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
         <TypingIndicator isVisible={isOtherUserTyping} name={otherName} shouldReduceMotion={shouldReduceMotion} />
         {replyingTo && <div aria-label={`Replying to ${replyingTo.senderName}`} className="chat-composer-surface mb-2 flex min-w-0 items-start gap-3 rounded-2xl bg-surface px-4 py-3 shadow-soft"><div className="chat-reply-indicator min-w-0 flex-1 border-l-2 border-primary/40 pl-3"><p className="truncate text-xs font-semibold text-heading">Replying to {replyingTo.senderName}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-body">{replyingTo.body ?? "Earlier message unavailable"}</p></div><button type="button" onClick={() => { setReplyingTo(null); window.requestAnimationFrame(() => textareaRef.current?.focus()); }} aria-label={`Cancel reply to ${replyingTo.senderName}`} className="chat-accent-control flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>}
         {voiceRecorder.mode === "idle" && <ComposerMediaPreview images={selectedImages} disabled={isSubmitting} onRemove={removeSelectedImage} onRemoveAll={removeAllSelectedImages} />}
+        {voiceRecorder.mode === "idle" && <ComposerFilePreview files={selectedFiles} disabled={isSubmitting} onRemove={removeSelectedFile} onRemoveAll={removeAllSelectedFiles} />}
         {mediaError && <p id={mediaErrorId} role="alert" className="mb-2 rounded-xl bg-accent px-3 py-2 text-xs leading-5 text-body">{mediaError}</p>}
+        {uploadStatus && <p role="status" aria-live="polite" className="mb-2 rounded-xl bg-accent px-3 py-2 text-xs leading-5 text-body">{uploadStatus}</p>}
         {voiceRecorder.mode === "idle" && voiceRecorder.error && <p role="alert" className="mb-2 rounded-xl bg-accent px-3 py-2 text-xs leading-5 text-body">{voiceRecorder.error}</p>}
         <input ref={mediaInputRef} type="file" accept={acceptedImageInputTypes} multiple onChange={(event) => void handleImageSelection(event)} disabled={!currentUserId || isSubmitting} className="hidden" aria-hidden="true" tabIndex={-1} />
+        <input ref={fileInputRef} type="file" accept={acceptedFileInputTypes} multiple onChange={handleFileSelection} disabled={!currentUserId || isSubmitting} className="hidden" aria-hidden="true" tabIndex={-1} />
         <label htmlFor={`message-composer-${conversation.id}`} className="sr-only">Message {otherName}</label>
         {voiceRecorder.mode !== "idle" ? <VoiceRecordingComposer controller={voiceRecorder} isSending={isSubmitting} shouldReduceMotion={Boolean(shouldReduceMotion)} onSend={sendVoiceRecordingForReview} /> : <div className="chat-composer-shell grid min-w-0 grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] items-end gap-x-1 rounded-2xl bg-surface px-2 py-3 shadow-soft focus-within:ring-2 focus-within:ring-primary/20 sm:gap-x-2 sm:px-4">
-          <button type="button" onClick={openImagePicker} disabled={!currentUserId || isSubmitting || selectedImages.length >= imageMaxCount} aria-label={selectedImages.length > 0 ? "Add more images" : "Choose images"} title={selectedImages.length >= imageMaxCount ? "Maximum 10 images selected" : selectedImages.length > 0 ? "Add more images" : "Choose images"} className="chat-accent-control inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"><MediaIcon /></button>
+          <AttachmentMenu disabled={!currentUserId || isSubmitting} onPhotos={openImagePicker} onFiles={openFilePicker} />
           <button ref={composerEmojiButtonRef} type="button" onClick={openComposerEmojiPicker} disabled={isSubmitting} aria-label="Choose an emoji" title="Choose an emoji" aria-haspopup="dialog" aria-expanded={isComposerEmojiPickerOpen} className="chat-accent-control inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-50 sm:h-11 sm:w-11"><EmojiIcon /></button>
           <button type="button" onClick={() => void startVoiceRecording()} disabled={!currentUserId || isSubmitting || Boolean(messageEditState)} aria-label="Record a voice message" title="Record a voice message" className="chat-accent-control inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"><MicrophoneIcon /></button>
-          <textarea ref={textareaRef} id={`message-composer-${conversation.id}`} value={draft} onChange={(event) => { setDraft(event.target.value); resizeTextarea(event.target); notifyTyping(event.target.value.trim().length > 0); }} onBlur={stopTyping} onKeyDown={handleComposerKeyDown} maxLength={messageMaxLength} rows={1} disabled={!currentUserId || isSubmitting} aria-describedby={composerDescription} placeholder="Write a message…" className="chat-composer-input max-h-32 min-h-12 min-w-0 resize-none overflow-y-auto border-0 bg-transparent px-1 py-3 text-sm leading-6 text-heading outline-none ring-0 placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60 sm:px-2" />
+          <textarea ref={textareaRef} id={`message-composer-${conversation.id}`} value={draft} onChange={(event) => { setDraft(event.target.value); resizeTextarea(event.target); notifyTyping(event.target.value.trim().length > 0); }} onBlur={stopTyping} onKeyDown={handleComposerKeyDown} onPaste={handleComposerPaste} maxLength={messageMaxLength} rows={1} disabled={!currentUserId || isSubmitting} aria-describedby={composerDescription} placeholder="Write a message…" className="chat-composer-input max-h-32 min-h-12 min-w-0 resize-none overflow-y-auto border-0 bg-transparent px-1 py-3 text-sm leading-6 text-heading outline-none ring-0 placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60 sm:px-2" />
           <button type="submit" disabled={isSendDisabled} aria-label={isSubmitting ? `Sending message to ${otherName}` : `Send message to ${otherName}`} className="chat-primary-action inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-primary text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-12 sm:w-12"><SendIcon /><span className="sr-only">{isSubmitting ? "Sending…" : "Send"}</span></button>
           <div aria-live="polite" aria-atomic="true" className={`col-start-1 col-end-6 row-start-2 flex min-w-0 items-start justify-between gap-3 px-1 sm:col-start-4 sm:col-end-5 ${comingSoonMessage || showCharacterCount ? "mt-2 min-h-5" : "mt-0 min-h-0 sm:mt-2 sm:min-h-5"}`}>
             {comingSoonMessage ? <p id={composerHelpId} className="min-w-0 text-xs leading-5 text-muted">{comingSoonMessage}</p> : <p id={composerHelpId} className={showCharacterCount ? "sr-only" : "sr-only sm:not-sr-only sm:min-w-0 sm:text-xs sm:leading-5 sm:text-muted"}>Enter to send · Shift+Enter for a new line</p>}

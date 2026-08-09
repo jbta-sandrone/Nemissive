@@ -21,7 +21,7 @@ type MessageSearchRow = {
   other_display_name: string | null;
   other_username: string | null;
   other_avatar_url: string | null;
-  message_type: "text" | "image" | "voice";
+  message_type: "text" | "image" | "voice" | "file";
   snippet: string;
   created_at: string;
   edited_at: string | null;

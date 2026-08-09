@@ -4,6 +4,12 @@ import { supabase } from "../../lib/supabase";
 const signedUrlLifetimeSeconds = 120;
 const signedUrlRefreshMs = 90 * 1000;
 
+export async function createSignedMessageAttachmentUrl(storagePath: string) {
+  const { data, error } = await supabase.storage.from("message-media").createSignedUrl(storagePath, signedUrlLifetimeSeconds);
+  if (error || !data?.signedUrl) throw error ?? new Error("Unable to create a signed attachment URL.");
+  return data.signedUrl;
+}
+
 type SignedMediaState = {
   urls: Map<string, string>;
   failedPaths: Set<string>;

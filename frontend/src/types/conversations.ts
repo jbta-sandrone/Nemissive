@@ -9,6 +9,26 @@ export type ProfileSearchResult = {
   notification_sound_enabled?: boolean;
 };
 
+export type BirthdayVisibility = "hidden" | "month_day" | "full";
+
+export type EditableProfileDetails = {
+  bio: string;
+  locationText: string;
+  birthDate: string;
+  birthdayVisibility: BirthdayVisibility;
+  showAge: boolean;
+  interests: string[];
+};
+
+export type ConversationProfileDetails = ProfileSearchResult & {
+  bio: string | null;
+  locationText: string | null;
+  interests: string[];
+  birthdayDisplay: string | null;
+  age: number | null;
+  joinedMonth: string;
+};
+
 export type RealtimeProfileLastSeenEvent = {
   profileId: string;
   lastSeenAt: string;
@@ -111,9 +131,9 @@ export type MessageSearchTarget = {
   token: string;
 };
 
-export type MessageType = "text" | "image" | "voice";
+export type MessageType = "text" | "image" | "voice" | "file";
 
-export type MessageAttachmentKind = "image" | "voice";
+export type MessageAttachmentKind = "image" | "voice" | "file";
 
 export type MessageAttachment = {
   id: string;
@@ -144,6 +164,35 @@ export type ComposerImageSelection = {
   width: number;
   height: number;
   duplicateKey: string;
+};
+
+export type ComposerFileSelection = {
+  localId: string;
+  file: File;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  extension: string;
+  duplicateKey: string;
+};
+
+export type ConversationContentKind = "media" | "files" | "links";
+
+export type ConversationContentItem = {
+  contentId: string;
+  messageId: string;
+  senderId: string;
+  messageBody: string;
+  messageCreatedAt: string;
+  messageType: MessageType;
+  attachmentKind: MessageAttachmentKind | null;
+  storagePath: string | null;
+  originalName: string | null;
+  mimeType: string | null;
+  size: number | null;
+  width: number | null;
+  height: number | null;
+  position: number | null;
 };
 
 export type ComposerVoiceRecording = {
@@ -234,6 +283,7 @@ export type PinnedMessagePreview = {
   pinnedAt: string;
   attachmentCount: number;
   voiceDurationMs: number | null;
+  firstAttachmentName: string | null;
 };
 
 export type PinnedMessageRealtimeChange =
