@@ -29,6 +29,7 @@ import useSignedMessageMedia from "./useSignedMessageMedia";
 import useVoiceRecorder, { voiceMaximumFileSize, voiceMinimumDurationMs } from "./useVoiceRecorder";
 import VoiceMessagePlayer from "./VoiceMessagePlayer";
 import VoiceRecordingComposer from "./VoiceRecordingComposer";
+import UserBlockDialog from "./UserBlockDialog";
 import { formatVoiceDuration } from "./voiceUtils";
 import { getConversationTheme, getConversationThemeStyle, normalizeConversationThemeId, type ConversationThemeId } from "./conversationThemes";
 import { acceptedFileInputTypes, fileAttachmentMaxCount, fileAttachmentMaxSize, normalizeAllowedFile, sanitizeAttachmentFilename } from "./fileAttachments";
@@ -596,6 +597,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const lastReactionDetailsMessageIdRef = useRef<string | null>(null);
   const resolvedReactionProfileIdsRef = useRef(new Set<string>());
   const composerEmojiButtonRef = useRef<HTMLButtonElement | null>(null);
+  const blockedComposerActionRef = useRef<HTMLButtonElement | null>(null);
   const composerSelectionRef = useRef({ start: 0, end: 0 });
   const [messages, setMessages] = useState<DisplayChatMessage[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
@@ -613,6 +615,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   });
   const [conversationEventsError, setConversationEventsError] = useState("");
   const [pinToast, setPinToast] = useState<{ id: number; message: string } | null>(null);
+  const [interactionOverride, setInteractionOverride] = useState<{ baseIBlocked: boolean; baseMessagingAvailable: boolean; iBlocked: boolean; messagingAvailable: boolean } | null>(null);
+  const [unblockDialogOpen, setUnblockDialogOpen] = useState(false);
+  const [unblockSaving, setUnblockSaving] = useState(false);
+  const [unblockError, setUnblockError] = useState("");
   const [draft, setDraft] = useState("");
   const [selectedImages, setSelectedImages] = useState<ComposerImageSelection[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<ComposerFileSelection[]>([]);
@@ -653,12 +659,21 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const currentName = currentProfile ? getProfileDisplayName(currentProfile) : "You";
   const otherAccountName = getProfileDisplayName(conversation.otherProfile);
   const otherName = getConversationDisplayName(conversation.otherProfile, nicknamesByUserId.get(conversation.otherProfile.id) ?? conversation.otherNickname);
-  const presenceText = isOtherUserOnline ? "Online" : formatLastSeen(conversation.otherProfile.last_seen_at, relativeTimeNow);
-  const { isOtherUserTyping, notifyTyping, stopTyping } = useConversationTyping({ conversationId: conversation.id, currentUserId, otherUserId: conversation.otherProfile.id });
+  const interactionFromConversation = { iBlocked: conversation.iBlocked ?? false, messagingAvailable: conversation.messagingAvailable ?? true };
+  const interactionStatus = interactionOverride && interactionOverride.baseIBlocked === interactionFromConversation.iBlocked && interactionOverride.baseMessagingAvailable === interactionFromConversation.messagingAvailable ? interactionOverride : interactionFromConversation;
+  const effectiveIsOtherUserOnline = interactionStatus.messagingAvailable && isOtherUserOnline;
+  const presenceText = interactionStatus.messagingAvailable ? (effectiveIsOtherUserOnline ? "Online" : formatLastSeen(conversation.otherProfile.last_seen_at, relativeTimeNow)) : "Offline";
+  const { isOtherUserTyping, notifyTyping, stopTyping } = useConversationTyping({ conversationId: conversation.id, currentUserId, otherUserId: conversation.otherProfile.id, enabled: interactionStatus.messagingAvailable });
   const signedMediaPaths = messages.flatMap((message) => message.kind === "confirmed" && !message.isDeleted ? message.attachments.filter((attachment) => attachment.attachmentKind !== "file").map((attachment) => attachment.storagePath) : []);
   const signedMedia = useSignedMessageMedia(signedMediaPaths);
   const voiceRecorder = useVoiceRecorder();
   const previousVoiceModeRef = useRef(voiceRecorder.mode);
+
+  useEffect(() => {
+    if (interactionStatus.messagingAvailable) return;
+    stopTyping();
+    if (voiceRecorder.mode !== "idle") voiceRecorder.cancelRecording();
+  }, [interactionStatus.messagingAvailable, stopTyping, voiceRecorder]);
 
   useEffect(() => {
     const previousMode = previousVoiceModeRef.current;
@@ -796,6 +811,33 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       pinToastTimerRef.current = null;
     }, pinToastDurationMs);
   }, []);
+
+  async function saveUserBlock(blocked: boolean) {
+    const { data, error } = await supabase.rpc("set_user_blocked", { target_user_id: conversation.otherProfile.id, blocked });
+    if (error) {
+      if (import.meta.env.DEV) console.warn("Saving user block failed", { code: error.code, conversationId: conversation.id });
+      return "We couldn’t update this block right now. Please try again.";
+    }
+    const result = data && typeof data === "object" ? data as Record<string, unknown> : null;
+    const nextStatus = {
+      iBlocked: typeof result?.i_blocked === "boolean" ? result.i_blocked : blocked,
+      messagingAvailable: typeof result?.messaging_available === "boolean" ? result.messaging_available : !blocked,
+    };
+    setInteractionOverride({ baseIBlocked: interactionFromConversation.iBlocked, baseMessagingAvailable: interactionFromConversation.messagingAvailable, ...nextStatus });
+    showPinToast(`${otherName} ${nextStatus.iBlocked ? "blocked" : "unblocked"}`);
+    onMessageConfirmed();
+    return null;
+  }
+
+  async function confirmComposerUnblock() {
+    if (unblockSaving) return;
+    setUnblockSaving(true);
+    setUnblockError("");
+    const error = await saveUserBlock(false);
+    setUnblockSaving(false);
+    if (error) setUnblockError(error);
+    else setUnblockDialogOpen(false);
+  }
 
   const rememberConversationEvent = useCallback((eventId: string) => {
     if (seenConversationEventIdsRef.current.has(eventId)) return false;
@@ -1547,6 +1589,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   async function submitImageMessage(caption: string, sourceImages: ComposerImageSelection[] | OptimisticMessageAttachment[], existingOptimisticId?: string, retryReplyTarget?: MessageReplyPreview | null, retryReplyToMessageId?: string | null) {
+    if (!interactionStatus.messagingAvailable) { setMediaError("Messaging is unavailable for this conversation."); return; }
     if (!currentUserId || isSubmittingRef.current || sourceImages.length === 0 || sourceImages.length > imageMaxCount) return;
 
     const trimmedCaption = caption.trim();
@@ -1656,6 +1699,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   async function submitFileMessage(caption: string, sourceFiles: ComposerFileSelection[] | OptimisticMessageAttachment[], existingOptimisticId?: string, retryReplyTarget?: MessageReplyPreview | null, retryReplyToMessageId?: string | null) {
+    if (!interactionStatus.messagingAvailable) { setMediaError("Messaging is unavailable for this conversation."); return; }
     if (!currentUserId || isSubmittingRef.current || sourceFiles.length < 1 || sourceFiles.length > fileAttachmentMaxCount) return;
     const trimmedCaption = caption.trim();
     if (trimmedCaption.length > messageMaxLength) return;
@@ -1729,6 +1773,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   async function submitVoiceMessage(sourceRecording: ComposerVoiceRecording | OptimisticMessageAttachment, existingOptimisticId?: string, retryReplyTarget?: MessageReplyPreview | null, retryReplyToMessageId?: string | null) {
+    if (!interactionStatus.messagingAvailable) { setMediaError("Messaging is unavailable for this conversation."); return; }
     if (!currentUserId || isSubmittingRef.current) return;
     const baseMimeType = getBaseMimeType(sourceRecording.mimeType);
     const durationMs = "durationMs" in sourceRecording ? sourceRecording.durationMs : null;
@@ -1816,6 +1861,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   async function startVoiceRecording() {
+    if (!interactionStatus.messagingAvailable) return;
     if (isSubmittingRef.current || messageEditState) return;
     if (selectedImagesRef.current.length > 0 || selectedFilesRef.current.length > 0) {
       setMediaError("Remove the selected attachments before recording a voice message.");
@@ -1841,6 +1887,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   function handleSend(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault();
+    if (!interactionStatus.messagingAvailable) return;
     if (messageEditState) return;
     if (selectedFiles.length > 0) {
       const failedAttempt = [...messages].reverse().find((message): message is OptimisticChatMessage => message.kind === "optimistic" && message.messageType === "file" && message.deliveryState === "failed" && message.body === draft.trim() && message.attachments.length === selectedFiles.length && message.attachments.every((attachment, index) => attachment.file === selectedFiles[index]?.file));
@@ -1861,6 +1908,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   function openImagePicker() {
+    if (!interactionStatus.messagingAvailable) return;
     if (selectedFilesRef.current.length > 0) { setMediaError("Remove the selected files before adding photos."); return; }
     const input = mediaInputRef.current;
     if (!input) return;
@@ -1870,6 +1918,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   function openFilePicker() {
+    if (!interactionStatus.messagingAvailable) return;
     if (selectedImagesRef.current.length > 0) { setMediaError("Remove the selected photos before adding files."); return; }
     const input = fileInputRef.current;
     if (!input) return;
@@ -1999,6 +2048,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   function handleAttachmentDrop(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault(); setIsDragActive(false);
+    if (!interactionStatus.messagingAvailable) return;
     const files = [...event.dataTransfer.files];
     if (!files.length) return;
     const imageFiles = files.filter((file) => acceptedImageMimeTypes.has(file.type.toLowerCase()));
@@ -2190,6 +2240,13 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
         return false;
       }
       return true;
+    }
+
+    if (!interactionStatus.messagingAvailable) {
+      pendingReactionKeysRef.current.delete(mutationKey);
+      setPendingReactionKeys((currentKeys) => { const nextKeys = new Set(currentKeys); nextKeys.delete(mutationKey); return nextKeys; });
+      if (!options.suppressGlobalError) showReactionError("Messaging is unavailable for this conversation.");
+      return false;
     }
 
     const optimisticReaction: MessageReaction = { id: `optimistic:${mutationKey}`, messageId, userId: currentUserId, emoji, createdAt: new Date().toISOString() };
@@ -2432,7 +2489,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   }
 
   async function togglePinnedMessage(message: ChatMessage) {
-    if (!currentUserId || message.isDeleted || message.isIntroduction || pendingPinnedMessageIdsRef.current.has(message.id) || pendingDeleteRef.current?.messageId === message.id) return;
+    if (!currentUserId || !interactionStatus.messagingAvailable || message.isDeleted || message.isIntroduction || pendingPinnedMessageIdsRef.current.has(message.id) || pendingDeleteRef.current?.messageId === message.id) return;
     const wasPinned = pinnedMessages.some((pin) => pin.messageId === message.id);
     const previousPins = pinnedMessages;
     const shouldPin = !wasPinned;
@@ -2475,6 +2532,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   async function saveConversationNickname(userId: string, nickname: string | null) {
     if (!currentUserId) return "Your session has expired. Please sign in again.";
+    if (!interactionStatus.messagingAvailable) return "Messaging is unavailable for this conversation.";
     const { error } = await supabase.rpc("set_conversation_nickname", {
       target_conversation_id: conversation.id,
       target_user_id: userId,
@@ -2502,6 +2560,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   async function saveConversationTheme(themeId: ConversationThemeId) {
     if (!currentUserId) return "Your session has expired. Please sign in again.";
+    if (!interactionStatus.messagingAvailable) return "Messaging is unavailable for this conversation.";
     const error = await onConversationThemeChange(conversation.id, themeId);
     if (error) return error;
     showPinToast(`Theme changed to ${getConversationTheme(themeId).name}`);
@@ -2584,7 +2643,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   return (
     <div ref={panelRef} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setIsDragActive(true); } }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragActive(false); }} onDrop={handleAttachmentDrop} className="chat-panel-root relative flex min-h-0 flex-1 flex-col">
-      <header className="chat-header flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-4 sm:gap-3 sm:px-6"><MobileBackButton onClick={onMobileBack} /><PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={isOtherUserOnline} /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1><p className={`truncate text-xs font-medium ${isOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{conversation.otherProfile.username && <span className="font-normal text-body"> · @{conversation.otherProfile.username}</span>}</p></div><PinnedMessagesMenu error={pinnedMessagesError} isLoading={isLoadingPinnedMessages} pins={pinnedMessages} onRetry={() => void loadPinnedMessages()} onSelect={handlePinnedMessageSelected} /><ConversationMuteMenu conversationName={otherName} mutedUntil={conversationMutedUntil} onChange={(mutedUntil) => onConversationMuteChange(conversation.id, mutedUntil)} /><ConversationOptionsMenu conversationId={conversation.id} conversationName={otherName} profile={conversation.otherProfile} profilePresenceText={presenceText} isProfileOnline={isOtherUserOnline} currentTheme={currentTheme} isArchived={Boolean(conversationArchivedAt)} nicknamesByUserId={nicknamesByUserId} participants={currentProfile ? [currentProfile, conversation.otherProfile] : [conversation.otherProfile]} onArchivedChange={(archived) => onConversationArchiveChange(conversation.id, archived)} onDelete={() => onConversationDelete(conversation.id)} onNicknameSave={saveConversationNickname} onThemeApply={saveConversationTheme} onContentJump={(messageId) => openMessageTarget(messageId, "pin")} /></header>
+      <header className="chat-header flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-4 sm:gap-3 sm:px-6"><MobileBackButton onClick={onMobileBack} /><PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={effectiveIsOtherUserOnline} /><div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1><p className={`truncate text-xs font-medium ${effectiveIsOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{conversation.otherProfile.username && <span className="font-normal text-body"> · @{conversation.otherProfile.username}</span>}</p></div><PinnedMessagesMenu error={pinnedMessagesError} isLoading={isLoadingPinnedMessages} pins={pinnedMessages} onRetry={() => void loadPinnedMessages()} onSelect={handlePinnedMessageSelected} /><ConversationMuteMenu conversationName={otherName} mutedUntil={conversationMutedUntil} onChange={(mutedUntil) => onConversationMuteChange(conversation.id, mutedUntil)} /><ConversationOptionsMenu conversationId={conversation.id} conversationName={otherName} profile={conversation.otherProfile} profilePresenceText={presenceText} isProfileOnline={effectiveIsOtherUserOnline} currentTheme={currentTheme} isArchived={Boolean(conversationArchivedAt)} isBlocked={interactionStatus.iBlocked} messagingAvailable={interactionStatus.messagingAvailable} nicknamesByUserId={nicknamesByUserId} participants={currentProfile ? [currentProfile, conversation.otherProfile] : [conversation.otherProfile]} onArchivedChange={(archived) => onConversationArchiveChange(conversation.id, archived)} onDelete={() => onConversationDelete(conversation.id)} onNicknameSave={saveConversationNickname} onThemeApply={saveConversationTheme} onContentJump={(messageId) => openMessageTarget(messageId, "pin")} onUserBlockChange={saveUserBlock} /></header>
       {isDragActive && <div className="pointer-events-none absolute inset-3 z-50 flex items-center justify-center rounded-3xl border-2 border-dashed border-primary bg-accent/95"><div className="text-center"><p className="font-semibold text-heading">Drop to add attachments</p><p className="mt-1 text-sm text-body">Photos or supported files</p></div></div>}
 
       <p aria-live="polite" className="sr-only">{newMessageAnnouncement}</p>
@@ -2646,7 +2705,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                           <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${isCurrentUser && !isFailed && !(message.kind === "confirmed" && message.isDeleted) ? "text-white/70" : "text-muted"}`}><time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>{message.kind === "confirmed" && message.isIntroduction && <span>Introduction</span>}{message.kind === "confirmed" && !message.isDeleted && (message.editedAt || isSavingThisEdit) && <span>Edited</span>}</div>
                           {isFailed && <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleRetryMessage(message)} disabled={isSubmitting} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60">Retry</button><button type="button" onClick={() => handleRemoveFailedMessage(message.optimisticId)} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Remove</button><p className="w-full text-xs leading-5 text-body">We couldn’t send this message. Check your connection and try again.</p></div>}
                         </motion.div>
-                        {message.kind === "confirmed" && !message.isDeleted && <MessageActionsToolbar canDelete={canDeleteMessage} canEdit={canEditMessage} canPin={canPinMessage} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} isOutgoing={isCurrentUser} isPinned={isMessagePinned} isPinPending={isPinPending} replyLabel={`Reply to message from ${replyActionSenderName}`} onDelete={(button) => openDeleteConfirmation(message, button)} onEdit={(button) => startEditingMessage(message, button)} onPin={() => void togglePinnedMessage(message)} onReact={(button) => openQuickReactions(message.id, button)} onReply={() => handleReplyToMessage(message)} />}
+                        {message.kind === "confirmed" && !message.isDeleted && <MessageActionsToolbar canDelete={canDeleteMessage} canEdit={canEditMessage} canPin={canPinMessage && interactionStatus.messagingAvailable} canInteract={interactionStatus.messagingAvailable} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} isOutgoing={isCurrentUser} isPinned={isMessagePinned} isPinPending={isPinPending} replyLabel={`Reply to message from ${replyActionSenderName}`} onDelete={(button) => openDeleteConfirmation(message, button)} onEdit={(button) => startEditingMessage(message, button)} onPin={() => void togglePinnedMessage(message)} onReact={(button) => openQuickReactions(message.id, button)} onReply={() => handleReplyToMessage(message)} />}
                       </div>
                       {reactionGroups.length > 0 && <div className={`relative z-10 -mt-1 flex max-w-full flex-wrap gap-1 px-1 ${isCurrentUser ? "justify-end" : "justify-start"}`}>{reactionGroups.map((group) => { const reactionName = getEmojiLabel(group.emoji).toLowerCase(); return <button key={group.emoji} type="button" onClick={(event) => message.kind === "confirmed" && openReactionDetails(message.id, event.currentTarget)} aria-haspopup="dialog" aria-expanded={message.kind === "confirmed" && reactionDetailsMessageId === message.id} aria-label={`View ${group.count} ${reactionName} ${group.count === 1 ? "reaction" : "reactions"}${group.reactedByCurrentUser ? ", including you" : ""}`} className={`chat-reaction-chip inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs shadow-soft transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 ${group.reactedByCurrentUser ? "chat-reaction-selected border-primary/30 bg-accent text-heading" : "border-border bg-surface text-body hover:bg-accent"}`}><span aria-hidden="true" className="text-sm">{group.emoji}</span><span aria-hidden="true" className="font-semibold">{group.count}</span></button>; })}</div>}
                       {shouldShowStatus && <p role={isFailed ? "alert" : isSending ? "status" : undefined} className={`mt-1.5 px-1 text-right text-xs font-medium ${isFailed ? "text-primary" : "text-muted"}`}>{statusLabel}</p>}
@@ -2664,7 +2723,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
       {reactionError && <p role="status" aria-live="polite" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{reactionError}</p>}
       {pinMutationError && <p role="alert" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{pinMutationError}</p>}
-      <form onSubmit={handleSend} className="chat-composer-region shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
+      {!interactionStatus.messagingAvailable ? <section aria-label="Messaging availability" className="chat-composer-region shrink-0 border-t border-border bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-5 lg:px-6"><div role="status" className="chat-composer-surface flex min-w-0 flex-col gap-3 rounded-2xl bg-surface px-4 py-4 shadow-soft sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-semibold text-heading">{interactionStatus.iBlocked ? `You blocked ${otherName}.` : "Messaging is unavailable for this conversation."}</p>{interactionStatus.iBlocked && <p className="mt-1 text-sm leading-6 text-body">Unblock this person to send messages again.</p>}</div>{interactionStatus.iBlocked && <button ref={blockedComposerActionRef} type="button" onClick={() => { setUnblockError(""); setUnblockDialogOpen(true); }} className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-2xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-heading hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Unblock</button>}</div></section> : <form onSubmit={handleSend} className="chat-composer-region shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
         <TypingIndicator isVisible={isOtherUserTyping} name={otherName} shouldReduceMotion={shouldReduceMotion} />
         {replyingTo && <div aria-label={`Replying to ${replyingTo.senderName}`} className="chat-composer-surface mb-2 flex min-w-0 items-start gap-3 rounded-2xl bg-surface px-4 py-3 shadow-soft"><div className="chat-reply-indicator min-w-0 flex-1 border-l-2 border-primary/40 pl-3"><p className="truncate text-xs font-semibold text-heading">Replying to {replyingTo.senderName}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-body">{replyingTo.body ?? "Earlier message unavailable"}</p></div><button type="button" onClick={() => { setReplyingTo(null); window.requestAnimationFrame(() => textareaRef.current?.focus()); }} aria-label={`Cancel reply to ${replyingTo.senderName}`} className="chat-accent-control flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>}
         {voiceRecorder.mode === "idle" && <ComposerMediaPreview images={selectedImages} disabled={isSubmitting} onRemove={removeSelectedImage} onRemoveAll={removeAllSelectedImages} />}
@@ -2686,10 +2745,11 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
             {showCharacterCount && <p id={characterCountId} className="shrink-0 text-xs font-medium leading-5 text-muted">{remainingCharacters} left</p>}
           </div>
         </div>}
-      </form>
-      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction && mobileActionMessage.messageType !== "voice"} canPin={!mobileActionMessage.isIntroduction} isPinned={pinnedMessages.some((pin) => pin.messageId === mobileActionMessage.id)} isPinPending={isLoadingPinnedMessages || pendingPinnedMessageIds.has(mobileActionMessage.id)} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} themeStyle={getConversationThemeStyle(currentTheme)} onClose={() => setMobileActionMessageId(null)} onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }} onPin={() => void togglePinnedMessage(mobileActionMessage)} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
+      </form>}
+      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction && mobileActionMessage.messageType !== "voice"} canPin={!mobileActionMessage.isIntroduction && interactionStatus.messagingAvailable} canInteract={interactionStatus.messagingAvailable} isPinned={pinnedMessages.some((pin) => pin.messageId === mobileActionMessage.id)} isPinPending={isLoadingPinnedMessages || pendingPinnedMessageIds.has(mobileActionMessage.id)} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} themeStyle={getConversationThemeStyle(currentTheme)} onClose={() => setMobileActionMessageId(null)} onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }} onPin={() => void togglePinnedMessage(mobileActionMessage)} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
       <AnimatePresence initial={false} onExitComplete={() => { const anchor = reactionDetailsAnchorRef.current; if (anchor?.isConnected) anchor.focus(); else if (lastReactionDetailsMessageIdRef.current) messageElementsRef.current.get(lastReactionDetailsMessageIdRef.current)?.focus(); }}>{reactionDetailsMessage && (reactionDetailsReactions.length > 0 || isReactionDetailsMutationPending) && <ReactionDetails key={reactionDetailsMessage.id} anchorRef={reactionDetailsAnchorRef} currentUserId={currentUserId} error={reactionProfilesError} isLoading={isReactionProfilesLoading} isMutationPending={isReactionDetailsMutationPending} messageLabel={`message from ${reactionDetailsMessage.senderId === currentUserId ? "yourself" : otherName}`} mutationError={reactionDetailsMutationError} pendingReactionKeys={pendingReactionKeys} profilesById={availableReactionProfilesById} reactions={reactionDetailsReactions} onClose={closeReactionDetails} onRemoveOwnReaction={(reaction) => void removeOwnReactionFromDetails(reaction)} onRetry={retryReactionProfiles} />}</AnimatePresence>
       <AnimatePresence initial={false}>{messageDeleteState && <MessageDeleteDialog key={messageDeleteState.messageId} error={messageDeleteState.error} isDeleting={messageDeleteState.isDeleting} returnFocusRef={deleteTriggerRef} onCancel={cancelMessageDeletion} onConfirm={() => void confirmMessageDeletion()} />}</AnimatePresence>
+      <AnimatePresence initial={false}>{unblockDialogOpen && <UserBlockDialog blocked={false} displayName={otherName} error={unblockError} isSaving={unblockSaving} returnFocusRef={blockedComposerActionRef} onCancel={() => setUnblockDialogOpen(false)} onConfirm={() => void confirmComposerUnblock()} />}</AnimatePresence>
       <AnimatePresence initial={false}>{imageViewerState && imageViewerImages.length > 0 && <ImageViewer key={imageViewerState.messageId} images={imageViewerImages} initialIndex={imageViewerState.initialIndex} isLoading={signedMedia.isLoading} returnFocusRef={imageViewerReturnFocusRef} onClose={() => setImageViewerState(null)} onRetry={signedMedia.retry} />}</AnimatePresence>
       {quickReactionMessageId && <QuickReactionMenu anchorRef={reactionAnchorRef} quickReactions={quickReactions} messageLabel="this message" onSelect={(emoji) => void toggleReaction(quickReactionMessageId, emoji)} onClose={() => setQuickReactionMessageId(null)} onOpenPicker={() => setFullReactionPickerMessageId(quickReactionMessageId)} />}
       {fullReactionPickerMessageId && <EmojiPicker anchorRef={reactionAnchorRef} ariaLabel="Choose a message reaction" onSelect={(emoji) => void toggleReaction(fullReactionPickerMessageId, emoji)} onClose={() => setFullReactionPickerMessageId(null)} placement="top" />}

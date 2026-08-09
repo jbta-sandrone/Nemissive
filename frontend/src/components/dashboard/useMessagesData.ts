@@ -55,6 +55,13 @@ type ConversationNicknameRow = {
   nickname: string;
 };
 
+type ConversationInteractionStatusRow = {
+  conversation_id: string;
+  target_user_id: string;
+  i_blocked: boolean;
+  messaging_available: boolean;
+};
+
 function compareConversations(first: AcceptedConversationItem, second: AcceptedConversationItem) {
   if (first.isPinned !== second.isPinned) return first.isPinned ? -1 : 1;
   const firstTimestamp = Date.parse(first.latestMessageAt ?? first.updatedAt);
@@ -92,25 +99,28 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     let isCancelled = false;
 
     async function loadMessagesData() {
-      const [pendingResult, membershipResult] = await Promise.all([
+      const [pendingResult, membershipResult, interactionStatusResult] = await Promise.all([
         supabase.from("conversation_requests").select("id, recipient_id, introduction, created_at, status, conversation_id").eq("sender_id", userId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
         supabase.from("conversation_participants").select("conversation_id, last_read_at, muted_until, is_pinned, archived_at, history_cleared_at, deleted_at").eq("user_id", userId).abortSignal(abortController.signal),
+        supabase.rpc("list_conversation_interaction_statuses").abortSignal(abortController.signal),
       ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
 
-      if (pendingResult.error || membershipResult.error) {
+      if (pendingResult.error || membershipResult.error || interactionStatusResult.error) {
         setIsLoading(false);
         setHasLoaded(true);
         setLoadError("We couldn’t load your messages right now. Check your connection and try again.");
-        if (import.meta.env.DEV) console.error("Loading message sidebar records failed", { pendingError: pendingResult.error, membershipError: membershipResult.error });
+        if (import.meta.env.DEV) console.error("Loading message sidebar records failed", { pendingError: pendingResult.error, membershipError: membershipResult.error, interactionStatusError: interactionStatusResult.error });
         return;
       }
 
       const pendingRows = (pendingResult.data ?? []) as PendingRequestRow[];
       const membershipRows = (membershipResult.data ?? []) as MembershipRow[];
+      const interactionStatusRows = (interactionStatusResult.data ?? []) as ConversationInteractionStatusRow[];
       const conversationIds = [...new Set(membershipRows.map((row) => row.conversation_id))];
       const membershipByConversationId = new Map(membershipRows.map((row) => [row.conversation_id, row]));
+      const interactionStatusByConversationId = new Map(interactionStatusRows.map((row) => [row.conversation_id, row]));
       let directConversationRows: DirectConversationRow[] = [];
       let nicknameRows: ConversationNicknameRow[] = [];
 
@@ -232,6 +242,8 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           conversationDeletedAt: membershipByConversationId.get(conversation.id)?.deleted_at ?? null,
           otherNickname: nicknameByConversationAndUser.get(`${conversation.id}:${otherUserId}`) ?? null,
           themeKey: conversation.theme_key || "default",
+          iBlocked: interactionStatusByConversationId.get(conversation.id)?.i_blocked ?? false,
+          messagingAvailable: interactionStatusByConversationId.get(conversation.id)?.messaging_available ?? true,
         }];
       }).sort(compareConversations);
 
@@ -357,6 +369,10 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === change.conversationId ? { ...conversation, themeKey: change.themeKey } : conversation));
   }, []);
 
+  const patchConversationInteractionStatus = useCallback((conversationId: string, iBlocked: boolean, messagingAvailable: boolean) => {
+    setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === conversationId ? { ...conversation, iBlocked, messagingAvailable } : conversation));
+  }, []);
+
   const conversationsWithReceiptState = useMemo(() => conversations.map((conversation) => {
     const receipt = currentUserReceiptsByConversationId.get(conversation.conversationId);
     const nextReadAt = receipt?.lastReadAt ?? null;
@@ -394,6 +410,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     patchConversationPreferences,
     patchConversationNickname,
     patchConversationTheme,
+    patchConversationInteractionStatus,
   };
 }
 

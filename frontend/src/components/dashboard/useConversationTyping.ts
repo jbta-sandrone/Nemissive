@@ -5,6 +5,7 @@ type UseConversationTypingOptions = {
   conversationId: string;
   currentUserId: string | null;
   otherUserId: string;
+  enabled?: boolean;
 };
 
 type TypingBroadcast = {
@@ -24,7 +25,7 @@ function parseTypingBroadcast(value: unknown): TypingBroadcast | null {
   return { userId: payload.userId, isTyping: payload.isTyping, conversationId: payload.conversationId };
 }
 
-function useConversationTyping({ conversationId, currentUserId, otherUserId }: UseConversationTypingOptions) {
+function useConversationTyping({ conversationId, currentUserId, otherUserId, enabled = true }: UseConversationTypingOptions) {
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const isSubscribedRef = useRef(false);
   const isLocallyTypingRef = useRef(false);
@@ -58,6 +59,7 @@ function useConversationTyping({ conversationId, currentUserId, otherUserId }: U
   }, [broadcastTyping, clearLocalInactivityTimer]);
 
   const notifyTyping = useCallback((hasContent: boolean) => {
+    if (!enabled) return;
     if (!hasContent) {
       stopTyping();
       return;
@@ -72,10 +74,13 @@ function useConversationTyping({ conversationId, currentUserId, otherUserId }: U
 
     clearLocalInactivityTimer();
     localInactivityTimerRef.current = window.setTimeout(stopTyping, localTypingInactivityMs);
-  }, [broadcastTyping, clearLocalInactivityTimer, stopTyping]);
+  }, [broadcastTyping, clearLocalInactivityTimer, enabled, stopTyping]);
 
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || !enabled) {
+      stopTyping();
+      return;
+    }
 
     let isCleaningUp = false;
 
@@ -157,9 +162,9 @@ function useConversationTyping({ conversationId, currentUserId, otherUserId }: U
       if (channelRef.current === channel) channelRef.current = null;
       void supabase.removeChannel(channel);
     };
-  }, [clearLocalInactivityTimer, conversationId, currentUserId, otherUserId, stopTyping]);
+  }, [clearLocalInactivityTimer, conversationId, currentUserId, enabled, otherUserId, stopTyping]);
 
-  return { isOtherUserTyping, notifyTyping, stopTyping };
+  return { isOtherUserTyping: enabled && isOtherUserTyping, notifyTyping, stopTyping };
 }
 
 export default useConversationTyping;

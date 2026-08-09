@@ -53,6 +53,14 @@ export type ParticipantConversationPreferencesState = {
   archivedAt: string | null;
   historyClearedAt: string | null;
   conversationDeletedAt: string | null;
+  interactionUpdatedAt: string | null;
+};
+
+export type ConversationInteractionStatus = {
+  conversationId: string;
+  targetUserId: string;
+  iBlocked: boolean;
+  messagingAvailable: boolean;
 };
 
 export type SelectedConversation = {
@@ -64,6 +72,8 @@ export type SelectedConversation = {
   conversationDeletedAt?: string | null;
   otherNickname?: string | null;
   themeKey?: string;
+  iBlocked?: boolean;
+  messagingAvailable?: boolean;
 };
 
 export type MessageSidebarItem =
@@ -98,6 +108,8 @@ export type MessageSidebarItem =
       conversationDeletedAt: string | null;
       otherNickname: string | null;
       themeKey: string;
+      iBlocked: boolean;
+      messagingAvailable: boolean;
     };
 
 export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;

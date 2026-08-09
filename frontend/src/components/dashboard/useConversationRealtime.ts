@@ -84,7 +84,8 @@ function parseParticipantPreferences(value: unknown): ParticipantConversationPre
   if (row.archived_at !== null && typeof row.archived_at !== "string") return null;
   if (row.history_cleared_at !== null && typeof row.history_cleared_at !== "string") return null;
   if (row.deleted_at !== null && typeof row.deleted_at !== "string") return null;
-  return { conversationId: row.conversation_id, userId: row.user_id, isPinned: row.is_pinned, archivedAt: row.archived_at, historyClearedAt: row.history_cleared_at, conversationDeletedAt: row.deleted_at };
+  if (row.interaction_updated_at !== undefined && row.interaction_updated_at !== null && typeof row.interaction_updated_at !== "string") return null;
+  return { conversationId: row.conversation_id, userId: row.user_id, isPinned: row.is_pinned, archivedAt: row.archived_at, historyClearedAt: row.history_cleared_at, conversationDeletedAt: row.deleted_at, interactionUpdatedAt: typeof row.interaction_updated_at === "string" ? row.interaction_updated_at : null };
 }
 
 function parseProfileLastSeen(value: unknown): RealtimeProfileLastSeenEvent | null {
@@ -236,6 +237,8 @@ function useConversationRealtime({ currentUserId, onRequestsChanged, onConversat
         if (muteState) callbacksRef.current.onParticipantMuteUpdated(muteState);
         const preferences = parseParticipantPreferences(payload.new);
         if (preferences) callbacksRef.current.onParticipantPreferencesUpdated(preferences);
+        const previousPreferences = parseParticipantPreferences(payload.old);
+        if (preferences?.interactionUpdatedAt !== previousPreferences?.interactionUpdatedAt) scheduleInvalidation({ conversationData: true });
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "conversation_participants" }, () => {
         scheduleInvalidation({ conversationData: true });
