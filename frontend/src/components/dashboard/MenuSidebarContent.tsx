@@ -6,6 +6,7 @@ import NotificationSettings from "./NotificationSettings";
 import ProfileAvatar from "./ProfileAvatar";
 import ProfileDetailsSettings from "./ProfileDetailsSettings";
 import QuickReactionSettings from "./QuickReactionSettings";
+import SettingsSidebarContent from "./SettingsSidebarContent";
 import { getProfileDisplayName } from "./profileUtils";
 
 type MenuSidebarContentProps = {
@@ -21,14 +22,15 @@ type MenuSidebarContentProps = {
   onBeforeSignOut: () => void;
 };
 
-type MenuSubsection = "profile" | "notifications" | "quick-reactions";
+type MenuSubsection = "profile" | "notifications" | "quick-reactions" | "settings";
 type MenuView = "landing" | MenuSubsection;
-type MenuIconKind = MenuSubsection | "settings" | "signout" | "back" | "chevron";
+type MenuIconKind = MenuSubsection | "back" | "chevron";
 
 const subsectionCopy: Record<MenuSubsection, { title: string; description: string }> = {
   profile: { title: "Profile", description: "Manage your profile and personal details." },
   notifications: { title: "Notifications", description: "Manage browser notifications, sounds, and preferences." },
   "quick-reactions": { title: "Quick reactions", description: "Choose your preferred message reactions." },
+  settings: { title: "Settings", description: "Appearance, privacy, account and storage." },
 };
 
 function MenuIcon({ kind }: { kind: MenuIconKind }) {
@@ -40,7 +42,7 @@ function MenuIcon({ kind }: { kind: MenuIconKind }) {
   if (kind === "settings") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M9 4v6M8 14v6" strokeLinecap="round" /></svg>;
   if (kind === "back") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={iconClass} aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   if (kind === "chevron") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  return null;
 }
 
 function MenuCategoryButton({
@@ -76,19 +78,6 @@ function MenuCategoryButton({
   );
 }
 
-function ComingSoonSettingsRow() {
-  return (
-    <div aria-disabled="true" aria-label="Settings, coming soon" className="flex min-h-16 w-full items-center gap-3 rounded-2xl border border-border bg-background px-4 py-3 opacity-70">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-accent text-muted"><MenuIcon kind="settings" /></span>
-      <span className="min-w-0 flex-1">
-        <span className="block font-semibold text-heading">Settings</span>
-        <span className="mt-0.5 block text-xs leading-5 text-body">More Nemissive settings</span>
-      </span>
-      <span className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-primary">Coming soon</span>
-    </div>
-  );
-}
-
 function SubsectionHeader({ headingRef, title, description, onBack }: { headingRef: RefObject<HTMLHeadingElement | null>; title: string; description: string; onBack: () => void }) {
   return (
     <header className="shrink-0 px-4 pb-1 pt-4 sm:px-5 sm:pt-5">
@@ -111,6 +100,7 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReac
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
   const quickReactionsButtonRef = useRef<HTMLButtonElement>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const focusOnLandingRef = useRef<MenuSubsection | null>(null);
   const [activeView, setActiveView] = useState<MenuView>("landing");
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -123,6 +113,7 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReac
         if (category === "profile") profileButtonRef.current?.focus();
         else if (category === "notifications") notificationsButtonRef.current?.focus();
         else if (category === "quick-reactions") quickReactionsButtonRef.current?.focus();
+        else if (category === "settings") settingsButtonRef.current?.focus();
         focusOnLandingRef.current = null;
         return;
       }
@@ -162,6 +153,9 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReac
   }
 
   if (activeView !== "landing") {
+    if (activeView === "settings" && profile) {
+      return <SettingsSidebarContent profile={profile} isSigningOut={isSigningOut} signOutError={signOutError} onBackToMenu={returnToLanding} onSignOut={() => void handleSignOut()} />;
+    }
     const copy = subsectionCopy[activeView];
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
@@ -194,13 +188,8 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReac
           <MenuCategoryButton buttonRef={profileButtonRef} kind="profile" title="Profile" description="Manage your profile and personal details" disabled={categoriesDisabled} onClick={() => openSubsection("profile")} />
           <MenuCategoryButton buttonRef={notificationsButtonRef} kind="notifications" title="Notifications" description="Browser notifications, sounds and preferences" disabled={categoriesDisabled} onClick={() => openSubsection("notifications")} />
           <MenuCategoryButton buttonRef={quickReactionsButtonRef} kind="quick-reactions" title="Quick reactions" description="Choose your preferred message reactions" disabled={categoriesDisabled} onClick={() => openSubsection("quick-reactions")} />
-          <ComingSoonSettingsRow />
+          <MenuCategoryButton buttonRef={settingsButtonRef} kind="settings" title="Settings" description="Appearance, privacy, account and storage" disabled={categoriesDisabled} onClick={() => openSubsection("settings")} />
         </nav>
-
-        <div className="mt-5">
-          <button type="button" onClick={() => void handleSignOut()} disabled={isSigningOut} className="flex min-h-14 w-full items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"><span className="text-primary"><MenuIcon kind="signout" /></span><span className="min-w-0 flex-1 font-semibold text-heading">{isSigningOut ? "Signing out..." : "Sign out"}</span></button>
-        </div>
-        {signOutError && <p role="alert" className="mt-4 rounded-2xl border border-primary/25 bg-accent px-4 py-3 text-sm leading-6 text-body">{signOutError}</p>}
       </div>
     </div>
   );

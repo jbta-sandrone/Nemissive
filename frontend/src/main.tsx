@@ -6,6 +6,9 @@ import "@fontsource/geist/600.css";
 import "@fontsource/geist/700.css";
 import App from "./App";
 import "./index.css";
+import { initializeAppearance } from "./lib/appearance";
+
+initializeAppearance();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -40,6 +40,22 @@ body {
   font-family: var(--font-sans);
 }
 
+:root[data-appearance="dark"] {
+  --color-background: #181614;
+  --color-surface: #211e1b;
+  --color-card: #292521;
+  --color-primary: #d38c69;
+  --color-primary-hover: #e09a76;
+  --color-accent: #352b25;
+  --color-accent-hover: #49382f;
+  --color-border: #443b35;
+  --color-heading: #f5eee8;
+  --color-body: #c8bbb1;
+  --color-muted: #9e9188;
+  --color-online: #9fbd96;
+  --shadow-soft: 0 8px 30px rgb(0 0 0 / 0.22);
+}
+
 /* Conversation themes are deliberately scoped to the active ChatPanel. */
 .chat-theme {
   background: var(--chat-background);
