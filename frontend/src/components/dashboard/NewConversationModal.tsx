@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { privacyPreferencesChangeEvent } from "../../lib/privacyPreferences";
 import type { CreateConversationRequestResult, PendingOutgoingRequest, ProfileRelationship, ProfileSearchResult, SelectedConversation } from "../../types/conversations";
 import ProfileAvatar from "./ProfileAvatar";
 import { getProfileDisplayName } from "./profileUtils";
@@ -10,6 +11,7 @@ type NewConversationModalProps = {
   currentUserId: string | null;
   isAccountResolved: boolean;
   accountError: string;
+  initialProfile?: ProfileSearchResult | null;
   relationshipsByProfileId: ReadonlyMap<string, ProfileRelationship>;
   isRelationshipsLoading: boolean;
   relationshipsError: string;
@@ -27,26 +29,23 @@ type RequestOutcome = "sent" | "outgoing_pending" | "incoming_pending" | null;
 const searchDebounceMs = 350;
 const introductionMaxLength = 500;
 
-function escapePostgrestIlikeValue(value: string) {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "\\%").replace(/_/g, "\\_").replace(/\*/g, "\\*");
-}
-
-function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accountError, relationshipsByProfileId, isRelationshipsLoading, relationshipsError, onClose, onConversationSelected, onPendingRequestSelected, onRequestCreated, onOpenIncomingRequests, onRefreshRelationships }: NewConversationModalProps) {
+function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accountError, initialProfile = null, relationshipsByProfileId, isRelationshipsLoading, relationshipsError, onClose, onConversationSelected, onPendingRequestSelected, onRequestCreated, onOpenIncomingRequests, onRefreshRelationships }: NewConversationModalProps) {
   const shouldReduceMotion = useReducedMotion();
   const latestProfileRequestRef = useRef(0);
   const isSubmittingRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const introductionRef = useRef<HTMLTextAreaElement>(null);
-  const [step, setStep] = useState<ModalStep>("search");
+  const [step, setStep] = useState<ModalStep>(initialProfile ? "compose" : "search");
   const [searchQuery, setSearchQuery] = useState("");
   const [profiles, setProfiles] = useState<ProfileSearchResult[]>([]);
-  const [selectedProfile, setSelectedProfile] = useState<ProfileSearchResult | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState<ProfileSearchResult | null>(initialProfile);
   const [introduction, setIntroduction] = useState("");
   const [requestOutcome, setRequestOutcome] = useState<RequestOutcome>(null);
   const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
   const [hasLoadedProfiles, setHasLoadedProfiles] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [searchStatusMessage, setSearchStatusMessage] = useState("");
   const [composerError, setComposerError] = useState("");
   const [profileRetryKey, setProfileRetryKey] = useState(0);
 
@@ -61,14 +60,7 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
     const debounceTimer = window.setTimeout(async () => {
       setIsLoadingProfiles(true);
       setProfileError("");
-      let profileQuery = supabase.from("profiles").select("id, username, display_name, avatar_url").neq("id", currentUserId).order("display_name", { ascending: true, nullsFirst: false }).order("username", { ascending: true, nullsFirst: false }).limit(10);
-
-      if (normalizedQuery) {
-        const escapedQuery = escapePostgrestIlikeValue(normalizedQuery);
-        profileQuery = profileQuery.or(`username.ilike."%${escapedQuery}%",display_name.ilike."%${escapedQuery}%"`);
-      }
-
-      const { data, error } = await profileQuery.abortSignal(abortController.signal);
+      const { data, error } = await supabase.rpc("search_profiles_for_conversation", { search_text: normalizedQuery || null }).abortSignal(abortController.signal);
 
       if (isCancelled || requestId !== latestProfileRequestRef.current) return;
 
@@ -96,6 +88,13 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
 
   useEffect(() => {
     if (!isOpen) return;
+    const refreshAvailability = () => setProfileRetryKey((key) => key + 1);
+    window.addEventListener(privacyPreferencesChangeEvent, refreshAvailability);
+    return () => window.removeEventListener(privacyPreferencesChangeEvent, refreshAvailability);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
 
     const frameId = window.requestAnimationFrame(() => {
       if (step === "compose") introductionRef.current?.focus();
@@ -118,6 +117,7 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
     setHasLoadedProfiles(false);
     setIsSending(false);
     setProfileError("");
+    setSearchStatusMessage("");
     setComposerError("");
   }
 
@@ -134,6 +134,7 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
     latestProfileRequestRef.current += 1;
     setSearchQuery(value);
     setProfileError("");
+    setSearchStatusMessage("");
     setIsLoadingProfiles(true);
     setHasLoadedProfiles(false);
   }
@@ -142,6 +143,7 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
     latestProfileRequestRef.current += 1;
     setProfiles([]);
     setProfileError("");
+    setSearchStatusMessage("");
     setIsLoadingProfiles(false);
     setHasLoadedProfiles(false);
     setProfileRetryKey((key) => key + 1);
@@ -153,7 +155,7 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
   }
 
   function handleRelationshipAction(profile: ProfileSearchResult, relationship: ProfileRelationship) {
-    if (relationship.state === "none") {
+    if (relationship.state === "none" || relationship.state === "disconnected") {
       setSelectedProfile(profile);
       setIntroduction("");
       setComposerError("");
@@ -192,7 +194,7 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
     if (!selectedProfile || isSubmittingRef.current) return;
 
     const currentRelationship = getRelationship(selectedProfile.id);
-    if (currentRelationship.state !== "none") {
+    if (currentRelationship.state !== "none" && currentRelationship.state !== "disconnected") {
       handleRelationshipAction(selectedProfile, currentRelationship);
       return;
     }
@@ -222,6 +224,16 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
 
     if (error) {
       if (import.meta.env.DEV) console.error("create_conversation_request failed", error);
+      if (error.code === "42501" && error.message.includes("not accepting new conversation requests")) {
+        setProfiles((currentProfiles) => currentProfiles.map((profile) => profile.id === selectedProfile.id ? { ...profile, request_available: false } : profile));
+        setSelectedProfile(null);
+        setIntroduction("");
+        setComposerError("");
+        setSearchStatusMessage("This person isn’t accepting new conversation requests right now.");
+        setStep("search");
+        onRefreshRelationships();
+        return;
+      }
       setComposerError("We couldn’t send your request. The relationship may have changed, or you may be offline. Return to search and refresh to check.");
       return;
     }
@@ -295,12 +307,13 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
                 <div className="shrink-0 px-4 py-4 sm:px-6 sm:py-5"><label htmlFor="user-search" className="sr-only">Search users</label><div className="flex min-w-0 items-center gap-3 rounded-2xl border border-border bg-background px-4 focus-within:border-primary focus-within:bg-card focus-within:ring-4 focus-within:ring-accent-hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0 text-muted" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" strokeLinecap="round" /></svg><input ref={searchInputRef} id="user-search" type="search" value={searchQuery} onChange={(event) => handleSearchChange(event.target.value)} placeholder="Search by name or username..." disabled={!currentUserId || Boolean(effectiveError)} className="min-w-0 flex-1 bg-transparent py-3 text-sm text-heading outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60" /></div></div>
 
                 <div className="px-2 pb-3 sm:px-3 sm:pb-4">
+                  {searchStatusMessage && <p role="status" aria-live="polite" className="mx-2 mb-2 rounded-2xl border border-border bg-background px-4 py-3 text-sm leading-6 text-body">{searchStatusMessage}</p>}
                   {isSearchBusy ? (
                     <div role="status" aria-live="polite" aria-label="Loading users and relationship status" className="space-y-2 px-1 py-1">{[0, 1, 2].map((item) => <div key={item} className="flex items-center gap-3 rounded-2xl p-3"><div className="h-12 w-12 shrink-0 animate-pulse rounded-full bg-accent" /><div className="min-w-0 flex-1 space-y-2"><div className="h-4 w-2/5 animate-pulse rounded-full bg-accent" /><div className="h-3 w-3/5 animate-pulse rounded-full bg-accent" /></div></div>)}</div>
                   ) : effectiveError ? (
                     <div role="alert" className="px-5 py-10 text-center sm:px-6 sm:py-12"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-xl font-bold text-primary" aria-hidden="true">!</div><h3 className="mt-4 font-semibold text-heading">Unable to load users</h3><p className="mt-2 text-sm leading-6 text-body">{effectiveError}</p><button type="button" onClick={handleRetrySearch} className="mt-5 inline-flex min-h-11 items-center justify-center rounded-2xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry</button></div>
                   ) : profiles.length > 0 ? (
-                    <motion.div layout={!shouldReduceMotion} className="space-y-1">{profiles.map((profile) => { const displayName = getProfileDisplayName(profile); const relationship = getRelationship(profile.id); const status = relationship.state === "outgoing_pending" ? "Request pending" : relationship.state === "incoming_pending" ? "Sent you a request" : relationship.state === "accepted" ? "Already in your messages" : null; const action = relationship.state === "outgoing_pending" ? "Open pending request" : relationship.state === "incoming_pending" ? "View request" : relationship.state === "accepted" ? "Open conversation" : null; return <motion.button layout={!shouldReduceMotion} key={profile.id} type="button" onClick={() => handleRelationshipAction(profile, relationship)} aria-label={action ? `${action} for ${displayName}. ${status}.` : `Start a conversation with ${displayName}`} className="flex min-h-16 w-full min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><ProfileAvatar profile={profile} /><div className="min-w-0 flex-1"><p className="truncate font-semibold text-heading">{displayName}</p>{profile.username && <p className="mt-0.5 truncate text-sm text-body">@{profile.username}</p>}{status && <p className="mt-1 text-xs font-semibold text-primary">{status}</p>}</div>{action ? <span className="max-w-24 shrink-0 text-right text-xs font-semibold leading-5 text-primary">{action}</span> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0 text-muted" aria-hidden="true"><path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>}</motion.button>; })}</motion.div>
+                    <motion.div layout={!shouldReduceMotion} className="space-y-1">{profiles.map((profile) => { const displayName = getProfileDisplayName(profile); const relationship = getRelationship(profile.id); const isDisconnected = relationship.state === "disconnected"; const isRequestUnavailable = (relationship.state === "none" || isDisconnected) && profile.request_available === false; const status = relationship.state === "outgoing_pending" ? "Request pending" : relationship.state === "incoming_pending" ? "Sent you a request" : relationship.state === "accepted" ? "Already in your messages" : isRequestUnavailable ? "Requests unavailable" : isDisconnected ? "Disconnected" : null; const action = relationship.state === "outgoing_pending" ? "Open pending request" : relationship.state === "incoming_pending" ? "View request" : relationship.state === "accepted" ? "Open conversation" : isDisconnected ? "Connect again" : null; const content = <><ProfileAvatar profile={profile} /><div className="min-w-0 flex-1"><p className="truncate font-semibold text-heading">{displayName}</p>{profile.username && <p className="mt-0.5 truncate text-sm text-body">@{profile.username}</p>}{status && <p className="mt-1 text-xs font-semibold text-primary">{status}</p>}</div>{action && !isRequestUnavailable ? <span className="max-w-24 shrink-0 text-right text-xs font-semibold leading-5 text-primary">{action}</span> : !isRequestUnavailable && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0 text-muted" aria-hidden="true"><path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>}</>; return isRequestUnavailable ? <motion.div layout={!shouldReduceMotion} key={profile.id} role="group" aria-label={`Requests unavailable for ${displayName}`} className="flex min-h-16 w-full min-w-0 items-center gap-3 rounded-2xl p-3 text-left">{content}</motion.div> : <motion.button layout={!shouldReduceMotion} key={profile.id} type="button" onClick={() => handleRelationshipAction(profile, relationship)} aria-label={action ? `${action} for ${displayName}. ${status}.` : `Start a conversation with ${displayName}`} className="flex min-h-16 w-full min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">{content}</motion.button>; })}</motion.div>
                   ) : (
                     <div className="px-5 py-10 text-center sm:px-6 sm:py-12"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-primary" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" strokeLinecap="round" /></svg></div><h3 className="mt-4 font-semibold text-heading">No users found</h3><p className="mt-1 text-sm leading-6 text-body">{searchQuery.trim() ? "Try searching with another name or username." : "No other registered users are available yet."}</p></div>
                   )}

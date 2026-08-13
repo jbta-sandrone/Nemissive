@@ -13,6 +13,7 @@ type ReactionDetailsProps = {
   error: string;
   isLoading: boolean;
   isMutationPending: boolean;
+  canMutate: boolean;
   messageLabel: string;
   mutationError: string;
   pendingReactionKeys: ReadonlySet<string>;
@@ -40,7 +41,7 @@ function getReactionMutationKey(reaction: Pick<MessageReaction, "messageId" | "u
   return `${reaction.messageId}\u0000${reaction.userId}\u0000${reaction.emoji}`;
 }
 
-function ReactionDetailsContent({ currentUserId, error, isLoading, isMutationPending, isTouchOriented, mutationError, pendingReactionKeys, profilesById, reactions, onRemoveOwnReaction, onRetry }: ReactionDetailsContentProps) {
+function ReactionDetailsContent({ currentUserId, error, isLoading, isMutationPending, canMutate, isTouchOriented, mutationError, pendingReactionKeys, profilesById, reactions, onRemoveOwnReaction, onRetry }: ReactionDetailsContentProps) {
   const sortedReactions = useMemo(() => sortReactions(reactions), [reactions]);
   const emojiCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -65,8 +66,8 @@ function ReactionDetailsContent({ currentUserId, error, isLoading, isMutationPen
           const displayName = getProfileDisplayName(profile);
           const isCurrentUser = reaction.userId === currentUserId;
           const isPending = pendingReactionKeys.has(getReactionMutationKey(reaction));
-          const rowContent = <><ProfileAvatar profile={profile} size="sm" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-heading">{displayName}{isCurrentUser && <span className="font-medium text-muted"> · You</span>}</p>{isCurrentUser && <p className="mt-0.5 text-xs text-muted">{isTouchOriented ? "Tap to remove" : "Click to remove"}</p>}</div><span aria-label={`${getEmojiLabel(reaction.emoji)} reaction`} className="shrink-0 text-xl">{reaction.emoji}</span></>;
-          if (isCurrentUser) return <button key={reaction.id} type="button" onClick={() => onRemoveOwnReaction(reaction)} disabled={isPending} aria-label={`Remove your ${getEmojiLabel(reaction.emoji).toLowerCase()} reaction`} aria-busy={isPending} className="flex min-h-14 w-full min-w-0 items-center gap-3 rounded-2xl px-2 py-2 text-left transition hover:bg-accent active:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-60">{rowContent}</button>;
+          const rowContent = <><ProfileAvatar profile={profile} size="sm" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-heading">{displayName}{isCurrentUser && <span className="font-medium text-muted"> · You</span>}</p>{isCurrentUser && canMutate && <p className="mt-0.5 text-xs text-muted">{isTouchOriented ? "Tap to remove" : "Click to remove"}</p>}</div><span aria-label={`${getEmojiLabel(reaction.emoji)} reaction`} className="shrink-0 text-xl">{reaction.emoji}</span></>;
+          if (isCurrentUser) return <button key={reaction.id} type="button" onClick={() => onRemoveOwnReaction(reaction)} disabled={isPending || !canMutate} aria-label={canMutate ? `Remove your ${getEmojiLabel(reaction.emoji).toLowerCase()} reaction` : `Your ${getEmojiLabel(reaction.emoji).toLowerCase()} reaction`} aria-busy={isPending} className="flex min-h-14 w-full min-w-0 items-center gap-3 rounded-2xl px-2 py-2 text-left transition hover:bg-accent active:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60">{rowContent}</button>;
           return <div key={reaction.id} className="flex min-h-14 min-w-0 items-center gap-3 rounded-2xl px-2 py-2">{rowContent}</div>;
         })}
         {isMutationPending && visibleReactions.length > 0 && <p role="status" aria-live="polite" className="sr-only">Removing your reaction.</p>}
@@ -79,7 +80,7 @@ function ReactionDetailsContent({ currentUserId, error, isLoading, isMutationPen
   );
 }
 
-function MobileReactionDetails({ currentUserId, error, isLoading, isMutationPending, isTouchOriented, messageLabel, mutationError, pendingReactionKeys, profilesById, reactions, onClose, onRemoveOwnReaction, onRetry }: Omit<ReactionDetailsProps, "anchorRef"> & { isTouchOriented: boolean }) {
+function MobileReactionDetails({ currentUserId, error, isLoading, isMutationPending, canMutate, isTouchOriented, messageLabel, mutationError, pendingReactionKeys, profilesById, reactions, onClose, onRemoveOwnReaction, onRetry }: Omit<ReactionDetailsProps, "anchorRef"> & { isTouchOriented: boolean }) {
   const shouldReduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -126,7 +127,7 @@ function MobileReactionDetails({ currentUserId, error, isLoading, isMutationPend
       <motion.div ref={panelRef} initial={shouldReduceMotion ? false : { y: "100%", opacity: 0.98 }} animate={{ y: 0, opacity: 1, transition: { duration: shouldReduceMotion ? 0 : 0.25, ease: [0.22, 1, 0.36, 1] } }} exit={shouldReduceMotion ? { opacity: 1 } : { y: "100%", opacity: 0.98, transition: { duration: 0.2, ease: [0.4, 0, 1, 1] } }} role="dialog" aria-modal="true" aria-labelledby="reaction-details-mobile-title" aria-label={`Reactions for ${messageLabel}`} className="max-h-[min(82dvh,38rem)] w-full overflow-hidden rounded-t-3xl border-t border-border bg-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-soft">
         <div aria-hidden="true" className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
         <div className="flex items-center justify-between gap-3"><h2 id="reaction-details-mobile-title" className="text-lg font-semibold text-heading">Reactions</h2><button type="button" onClick={onClose} aria-label="Close reaction details" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>
-        <div className="mt-4 min-h-0 overflow-hidden"><ReactionDetailsContent currentUserId={currentUserId} error={error} isLoading={isLoading} isMutationPending={isMutationPending} isTouchOriented={isTouchOriented} mutationError={mutationError} pendingReactionKeys={pendingReactionKeys} profilesById={profilesById} reactions={reactions} onRemoveOwnReaction={onRemoveOwnReaction} onRetry={onRetry} /></div>
+        <div className="mt-4 min-h-0 overflow-hidden"><ReactionDetailsContent currentUserId={currentUserId} error={error} isLoading={isLoading} isMutationPending={isMutationPending} canMutate={canMutate} isTouchOriented={isTouchOriented} mutationError={mutationError} pendingReactionKeys={pendingReactionKeys} profilesById={profilesById} reactions={reactions} onRemoveOwnReaction={onRemoveOwnReaction} onRetry={onRetry} /></div>
         <button type="button" onClick={onClose} className="mt-4 min-h-11 w-full rounded-2xl bg-accent px-4 py-2.5 text-sm font-semibold text-heading transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Close</button>
       </motion.div>
     </motion.div>,
@@ -154,12 +155,12 @@ function ReactionDetails(props: ReactionDetailsProps) {
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
-  if (!isDesktop) return <MobileReactionDetails currentUserId={props.currentUserId} error={props.error} isLoading={props.isLoading} isMutationPending={props.isMutationPending} isTouchOriented={isTouchOriented} messageLabel={props.messageLabel} mutationError={props.mutationError} pendingReactionKeys={props.pendingReactionKeys} profilesById={props.profilesById} reactions={props.reactions} onClose={props.onClose} onRemoveOwnReaction={props.onRemoveOwnReaction} onRetry={props.onRetry} />;
+  if (!isDesktop) return <MobileReactionDetails currentUserId={props.currentUserId} error={props.error} isLoading={props.isLoading} isMutationPending={props.isMutationPending} canMutate={props.canMutate} isTouchOriented={isTouchOriented} messageLabel={props.messageLabel} mutationError={props.mutationError} pendingReactionKeys={props.pendingReactionKeys} profilesById={props.profilesById} reactions={props.reactions} onClose={props.onClose} onRemoveOwnReaction={props.onRemoveOwnReaction} onRetry={props.onRetry} />;
 
   return (
     <AnchoredPopover anchorRef={props.anchorRef} ariaLabel={`Reactions for ${props.messageLabel}`} onClose={props.onClose} placement="top" panelClassName="w-80 max-w-[calc(100vw-1rem)] rounded-3xl border border-border bg-surface p-4 shadow-soft">
       <h2 className="mb-4 text-base font-semibold text-heading">Reactions</h2>
-      <ReactionDetailsContent currentUserId={props.currentUserId} error={props.error} isLoading={props.isLoading} isMutationPending={props.isMutationPending} isTouchOriented={isTouchOriented} mutationError={props.mutationError} pendingReactionKeys={props.pendingReactionKeys} profilesById={props.profilesById} reactions={props.reactions} onRemoveOwnReaction={props.onRemoveOwnReaction} onRetry={props.onRetry} />
+      <ReactionDetailsContent currentUserId={props.currentUserId} error={props.error} isLoading={props.isLoading} isMutationPending={props.isMutationPending} canMutate={props.canMutate} isTouchOriented={isTouchOriented} mutationError={props.mutationError} pendingReactionKeys={props.pendingReactionKeys} profilesById={props.profilesById} reactions={props.reactions} onRemoveOwnReaction={props.onRemoveOwnReaction} onRetry={props.onRetry} />
     </AnchoredPopover>
   );
 }

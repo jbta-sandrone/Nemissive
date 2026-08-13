@@ -1,8 +1,8 @@
 export function formatLastSeen(value: string | null | undefined, nowValue = Date.now()) {
-  if (!value) return "Offline";
+  if (!value) return null;
 
   const lastSeen = new Date(value);
-  if (Number.isNaN(lastSeen.getTime())) return "Offline";
+  if (Number.isNaN(lastSeen.getTime())) return null;
 
   const elapsedMs = Math.max(0, nowValue - lastSeen.getTime());
   const elapsedMinutes = Math.floor(elapsedMs / 60_000);

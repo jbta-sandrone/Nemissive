@@ -1,13 +1,15 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { appearanceChangeEvent, getAppearancePreference, setAppearancePreference, type AppearancePreference } from "../../lib/appearance";
+import { announcePrivacyPreferencesChanged, parsePrivacyPreferences, privacyPreferencesChangeEvent, type PrivacyPreferences } from "../../lib/privacyPreferences";
 import { supabase } from "../../lib/supabase";
 import type { ProfileSearchResult } from "../../types/conversations";
+import ConfirmationDialog from "./ConfirmationDialog";
 import ProfileAvatar from "./ProfileAvatar";
 import UserBlockDialog from "./UserBlockDialog";
 import { getProfileDisplayName } from "./profileUtils";
 
-type SettingsScreen = "landing" | "appearance" | "privacy" | "blocked-accounts" | "account" | "data-storage";
+type SettingsScreen = "landing" | "appearance" | "privacy" | "message-requests" | "blocked-accounts" | "account" | "data-storage";
 type SettingsIconKind = "appearance" | "privacy" | "blocked" | "account" | "storage" | "premium" | "back" | "chevron" | "signout";
 
 type BlockedAccount = {
@@ -26,6 +28,7 @@ type Props = {
 const screenCopy: Record<Exclude<SettingsScreen, "landing">, { title: string; description: string; parent: "Settings" | "Privacy & Safety" }> = {
   appearance: { title: "Appearance", description: "Customize how Nemissive looks on this device.", parent: "Settings" },
   privacy: { title: "Privacy & Safety", description: "Manage blocked accounts and privacy controls.", parent: "Settings" },
+  "message-requests": { title: "Message requests", description: "Choose who can send you new conversation requests.", parent: "Privacy & Safety" },
   "blocked-accounts": { title: "Blocked accounts", description: "Review and manage people you have blocked.", parent: "Privacy & Safety" },
   account: { title: "Account", description: "Your sign-in identity and account controls.", parent: "Settings" },
   "data-storage": { title: "Data & Storage", description: "Understand attachment limits and data behavior.", parent: "Settings" },
@@ -146,18 +149,159 @@ function BlockedAccountsSettings({ headingRef }: { headingRef: RefObject<HTMLHea
   </>;
 }
 
-function PrivacySettings({ onOpenBlocked }: { onOpenBlocked: () => void }) {
-  return <div className="space-y-3"><NavigationRow icon="blocked" title="Blocked accounts" description="Manage people you’ve blocked" onClick={onOpenBlocked} /><ComingSoonRow icon="privacy" title="Report & moderation" description="More safety controls" /></div>;
+type PrivacyPreferenceKey = Exclude<keyof PrivacyPreferences, "messageRequestPermission">;
+
+function PrivacySwitch({ id, label, description, checked, disabled, onChange }: { id: string; label: string; description: string; checked: boolean; disabled: boolean; onChange: () => void }) {
+  const descriptionId = `${id}-description`;
+  return <div className="flex min-w-0 items-start gap-4 py-3 first:pt-0 last:pb-0"><div className="min-w-0 flex-1"><label htmlFor={id} className="text-sm font-semibold text-heading">{label}</label><p id={descriptionId} className="mt-1 text-xs leading-5 text-body">{description}</p></div><button id={id} type="button" role="switch" aria-checked={checked} aria-describedby={descriptionId} disabled={disabled} onClick={onChange} className={`relative mt-0.5 inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60 ${checked ? "border-primary bg-primary" : "border-border bg-surface"}`}><span className={`h-5 w-5 rounded-full bg-white shadow-sm transition-transform motion-reduce:transition-none ${checked ? "translate-x-6" : "translate-x-1"}`} aria-hidden="true" /><span className="sr-only">{checked ? "On" : "Off"}</span></button></div>;
+}
+
+function PrivacySettings({ onOpenBlocked, onOpenMessageRequests }: { onOpenBlocked: () => void; onOpenMessageRequests: () => void }) {
+  const [preferences, setPreferences] = useState<PrivacyPreferences | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [savingKey, setSavingKey] = useState<PrivacyPreferenceKey | null>(null);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setIsLoading(true);
+      setLoadError("");
+      const { data, error } = await supabase.rpc("get_my_privacy_preferences");
+      if (cancelled) return;
+      setIsLoading(false);
+      const parsed = parsePrivacyPreferences(data);
+      if (error || !parsed) {
+        setLoadError("We couldn’t load your privacy preferences. Please try again.");
+        if (error && import.meta.env.DEV) console.warn("Loading privacy preferences failed", { code: error.code });
+        return;
+      }
+      setPreferences(parsed);
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [reloadKey]);
+
+  useEffect(() => {
+    const refresh = () => setReloadKey((key) => key + 1);
+    window.addEventListener(privacyPreferencesChangeEvent, refresh);
+    return () => window.removeEventListener(privacyPreferencesChangeEvent, refresh);
+  }, []);
+
+  async function togglePreference(key: PrivacyPreferenceKey) {
+    if (!preferences || savingKey) return;
+    const previous = preferences;
+    const next = { ...previous, [key]: !previous[key] };
+    setPreferences(next);
+    setSavingKey(key);
+    setStatusMessage("Saving privacy preference…");
+    const { data, error } = await supabase.rpc("set_privacy_preferences", {
+      active_status_enabled: next.activeStatusEnabled,
+      last_active_enabled: next.lastActiveEnabled,
+      read_receipts_enabled: next.readReceiptsEnabled,
+    });
+    const saved = parsePrivacyPreferences(data);
+    setSavingKey(null);
+    if (error || !saved) {
+      setPreferences(previous);
+      setStatusMessage("We couldn’t save that privacy preference. Your previous setting was restored.");
+      if (error && import.meta.env.DEV) console.warn("Saving privacy preferences failed", { code: error.code });
+      return;
+    }
+    setPreferences(saved);
+    setStatusMessage("Privacy preference saved.");
+    announcePrivacyPreferencesChanged();
+  }
+
+  if (isLoading && !preferences) return <div role="status" aria-live="polite" className="rounded-3xl border border-border bg-background px-4 py-6 text-sm text-body shadow-soft">Loading privacy preferences…</div>;
+  if (loadError && !preferences) return <div role="alert" className="rounded-3xl border border-border bg-background p-4 text-sm text-body shadow-soft"><p>{loadError}</p><button type="button" onClick={() => setReloadKey((key) => key + 1)} className="mt-3 min-h-10 rounded-xl px-3 font-semibold text-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry</button></div>;
+  if (!preferences) return null;
+
+  return <div className="space-y-5">
+    <section aria-labelledby="privacy-activity-heading"><h2 id="privacy-activity-heading" className="px-1 text-xs font-bold uppercase tracking-[0.16em] text-muted">Activity</h2><div className="mt-2 rounded-3xl border border-border bg-background px-4 py-3 shadow-soft"><PrivacySwitch id="active-status-privacy" label="Active status" description="Let people you chat with see when you’re currently active." checked={preferences.activeStatusEnabled} disabled={Boolean(savingKey)} onChange={() => void togglePreference("activeStatusEnabled")} /><div className="border-t border-border"><PrivacySwitch id="last-active-privacy" label="Last active" description="Let people you chat with see when you were last active." checked={preferences.lastActiveEnabled} disabled={Boolean(savingKey)} onChange={() => void togglePreference("lastActiveEnabled")} /></div></div></section>
+    <section aria-labelledby="privacy-messaging-heading"><h2 id="privacy-messaging-heading" className="px-1 text-xs font-bold uppercase tracking-[0.16em] text-muted">Messaging</h2><div className="mt-2 space-y-3"><div className="rounded-3xl border border-border bg-background px-4 py-3 shadow-soft"><PrivacySwitch id="read-receipts-privacy" label="Read receipts" description="Let people know when you’ve seen their messages. If you turn this off, you won’t see their read receipts either." checked={preferences.readReceiptsEnabled} disabled={Boolean(savingKey)} onChange={() => void togglePreference("readReceiptsEnabled")} /></div><NavigationRow icon="privacy" title="Message requests" description="Who can send you conversation requests" onClick={onOpenMessageRequests} /></div></section>
+    <section aria-labelledby="privacy-safety-heading"><h2 id="privacy-safety-heading" className="px-1 text-xs font-bold uppercase tracking-[0.16em] text-muted">Safety</h2><div className="mt-2 space-y-3"><NavigationRow icon="blocked" title="Blocked accounts" description="Manage people you’ve blocked" onClick={onOpenBlocked} /><ComingSoonRow icon="privacy" title="Report & moderation" description="More safety controls" /></div></section>
+    <p role={statusMessage.startsWith("We couldn’t") ? "alert" : "status"} aria-live="polite" aria-atomic="true" className="min-h-5 px-1 text-xs leading-5 text-body">{statusMessage}</p>
+  </div>;
+}
+
+function MessageRequestSettings() {
+  const [permission, setPermission] = useState<PrivacyPreferences["messageRequestPermission"] | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setIsLoading(true);
+      setStatusMessage("");
+      const { data, error } = await supabase.rpc("get_my_privacy_preferences");
+      if (cancelled) return;
+      setIsLoading(false);
+      const parsed = parsePrivacyPreferences(data);
+      if (error || !parsed) {
+        setPermission(null);
+        setStatusMessage("We couldn’t load your message request preference. Please try again.");
+        if (error && import.meta.env.DEV) console.warn("Loading message request privacy failed", { code: error.code });
+        return;
+      }
+      setPermission(parsed.messageRequestPermission);
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [reloadKey]);
+
+  useEffect(() => {
+    const refresh = () => setReloadKey((key) => key + 1);
+    window.addEventListener(privacyPreferencesChangeEvent, refresh);
+    return () => window.removeEventListener(privacyPreferencesChangeEvent, refresh);
+  }, []);
+
+  async function savePermission(nextPermission: PrivacyPreferences["messageRequestPermission"]) {
+    if (!permission || isSaving || nextPermission === permission) return;
+    const previous = permission;
+    setPermission(nextPermission);
+    setIsSaving(true);
+    setStatusMessage("Saving message request preference…");
+    const { data, error } = await supabase.rpc("set_message_request_permission", { message_request_permission: nextPermission });
+    const saved = parsePrivacyPreferences(data);
+    setIsSaving(false);
+    if (error || !saved) {
+      setPermission(previous);
+      setStatusMessage("We couldn’t save that preference. Your previous setting was restored.");
+      if (error && import.meta.env.DEV) console.warn("Saving message request privacy failed", { code: error.code });
+      return;
+    }
+    setPermission(saved.messageRequestPermission);
+    setStatusMessage("Message request preference saved.");
+    announcePrivacyPreferencesChanged();
+  }
+
+  const options: Array<{ value: PrivacyPreferences["messageRequestPermission"]; title: string; description: string }> = [
+    { value: "everyone", title: "Everyone", description: "Anyone you can discover on Nemissive may send you a request, subject to existing safety rules." },
+    { value: "no_one", title: "No one", description: "New conversation requests to you will be disabled." },
+  ];
+
+  if (isLoading && permission === null) return <div role="status" aria-live="polite" className="rounded-3xl border border-border bg-background px-4 py-6 text-sm text-body shadow-soft">Loading message request preference…</div>;
+  if (permission === null) return <div role="alert" className="rounded-3xl border border-border bg-background p-4 text-sm text-body shadow-soft"><p>{statusMessage}</p><button type="button" onClick={() => setReloadKey((key) => key + 1)} className="mt-3 min-h-10 rounded-xl px-3 font-semibold text-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry</button></div>;
+
+  return <div className="space-y-4"><Card labelledBy="message-request-permission-heading"><fieldset disabled={isSaving}><legend id="message-request-permission-heading" className="sr-only">Who can send you new conversation requests</legend><div className="space-y-2">{options.map((option) => <label key={option.value} className={`flex min-h-20 cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 transition focus-within:ring-4 focus-within:ring-accent-hover ${permission === option.value ? "border-primary bg-accent" : "border-border bg-surface hover:bg-accent"} ${isSaving ? "cursor-wait opacity-60" : ""}`}><input type="radio" name="message-request-permission" value={option.value} checked={permission === option.value} onChange={() => void savePermission(option.value)} aria-describedby={`message-request-${option.value}-description`} className="mt-1 h-4 w-4 shrink-0 accent-[var(--color-primary)]" /><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-heading">{option.title}</span><span id={`message-request-${option.value}-description`} className="mt-1 block text-xs leading-5 text-body">{option.description}</span></span>{permission === option.value && <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true"><path d="m4 10 4 4 8-8" strokeLinecap="round" strokeLinejoin="round" /></svg>}</label>)}</div></fieldset></Card><p role={statusMessage.startsWith("We couldn’t") ? "alert" : "status"} aria-live="polite" aria-atomic="true" className="min-h-5 px-1 text-xs leading-5 text-body">{statusMessage}</p></div>;
 }
 
 function AccountSettings({ profile, isSigningOut, signOutError, onSignOut }: { profile: ProfileSearchResult; isSigningOut: boolean; signOutError: string; onSignOut: () => void }) {
   const [email, setEmail] = useState<string | null>(null);
+  const [isSignOutDialogOpen, setIsSignOutDialogOpen] = useState(false);
+  const signOutButtonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     let cancelled = false;
     void supabase.auth.getUser().then(({ data }) => { if (!cancelled) setEmail(data.user?.email ?? null); });
     return () => { cancelled = true; };
   }, []);
-  return <div className="space-y-3"><Card labelledBy="account-identity-heading"><h2 id="account-identity-heading" className="font-semibold text-heading">Account identity</h2><div className="mt-4 flex min-w-0 items-center gap-3"><ProfileAvatar profile={profile} size="md" /><div className="min-w-0"><p className="truncate text-sm font-semibold text-heading">{getProfileDisplayName(profile)}</p><p className="truncate text-xs text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p></div></div>{email && <div className="mt-4 border-t border-border pt-4"><p className="text-xs font-semibold uppercase tracking-wider text-muted">Email</p><p className="mt-1 break-all text-sm text-heading">{email}</p></div>}</Card><Card><button type="button" onClick={onSignOut} disabled={isSigningOut} className="flex min-h-12 w-full items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:opacity-60"><SettingsIcon kind="signout" className="h-5 w-5 shrink-0 text-primary" /><span className="font-semibold text-heading">{isSigningOut ? "Signing out…" : "Sign out"}</span></button>{signOutError && <p role="alert" className="mt-3 rounded-2xl border border-primary/25 bg-accent px-3 py-2.5 text-xs leading-5 text-body">{signOutError}</p>}</Card><ComingSoonRow icon="account" title="Change password" description="Account credential controls" /><ComingSoonRow icon="account" title="Delete account" description="Account deletion controls" /></div>;
+  return <><div className="space-y-3"><Card labelledBy="account-identity-heading"><h2 id="account-identity-heading" className="font-semibold text-heading">Account identity</h2><div className="mt-4 flex min-w-0 items-center gap-3"><ProfileAvatar profile={profile} size="md" /><div className="min-w-0"><p className="truncate text-sm font-semibold text-heading">{getProfileDisplayName(profile)}</p><p className="truncate text-xs text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p></div></div>{email && <div className="mt-4 border-t border-border pt-4"><p className="text-xs font-semibold uppercase tracking-wider text-muted">Email</p><p className="mt-1 break-all text-sm text-heading">{email}</p></div>}</Card><ComingSoonRow icon="account" title="Change password" description="Account credential controls" /><ComingSoonRow icon="account" title="Delete account" description="Account deletion controls" /><div className="pt-5"><Card><button ref={signOutButtonRef} type="button" onClick={() => setIsSignOutDialogOpen(true)} disabled={isSigningOut} className="flex min-h-12 w-full items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:opacity-60"><SettingsIcon kind="signout" className="h-5 w-5 shrink-0 text-primary" /><span className="font-semibold text-heading">{isSigningOut ? "Signing out…" : "Sign out"}</span></button>{signOutError && !isSignOutDialogOpen && <p role="alert" className="mt-3 rounded-2xl border border-primary/25 bg-accent px-3 py-2.5 text-xs leading-5 text-body">{signOutError}</p>}</Card></div></div><AnimatePresence>{isSignOutDialogOpen && <ConfirmationDialog dialogId="sign-out" title="Sign out of Nemissive?" description="You'll need to sign in again to access your conversations on this device." confirmLabel="Sign out" pendingLabel="Signing out…" pendingAnnouncement="Signing out of Nemissive." icon={<SettingsIcon kind="signout" className="h-5 w-5" />} error={signOutError} isPending={isSigningOut} returnFocusRef={signOutButtonRef} onCancel={() => { if (!isSigningOut) setIsSignOutDialogOpen(false); }} onConfirm={onSignOut} />}</AnimatePresence></>;
 }
 
 function DataStorageSettings() {
@@ -180,10 +324,10 @@ function SettingsSidebarContent({ profile, isSigningOut, signOutError, onBackToM
   const copy = screen === "landing" ? { title: "Settings", description: "Appearance, privacy, account and storage.", parent: "Menu" } : screenCopy[screen];
   function goBack() {
     if (screen === "landing") onBackToMenu();
-    else if (screen === "blocked-accounts") setScreen("privacy");
+    else if (screen === "blocked-accounts" || screen === "message-requests") setScreen("privacy");
     else setScreen("landing");
   }
-  return <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"><SettingsHeader title={copy.title} description={copy.description} backLabel={copy.parent} headingRef={headingRef} onBack={goBack} /><div className="flex-1 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 sm:px-5">{screen === "landing" && <SettingsLanding onOpen={setScreen} />}{screen === "appearance" && <AppearanceSettings />}{screen === "privacy" && <PrivacySettings onOpenBlocked={() => setScreen("blocked-accounts")} />}{screen === "blocked-accounts" && <BlockedAccountsSettings headingRef={headingRef} />}{screen === "account" && <AccountSettings profile={profile} isSigningOut={isSigningOut} signOutError={signOutError} onSignOut={onSignOut} />}{screen === "data-storage" && <DataStorageSettings />}</div></div>;
+  return <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"><SettingsHeader title={copy.title} description={copy.description} backLabel={copy.parent} headingRef={headingRef} onBack={goBack} /><div className="flex-1 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 sm:px-5">{screen === "landing" && <SettingsLanding onOpen={setScreen} />}{screen === "appearance" && <AppearanceSettings />}{screen === "privacy" && <PrivacySettings onOpenBlocked={() => setScreen("blocked-accounts")} onOpenMessageRequests={() => setScreen("message-requests")} />}{screen === "message-requests" && <MessageRequestSettings />}{screen === "blocked-accounts" && <BlockedAccountsSettings headingRef={headingRef} />}{screen === "account" && <AccountSettings profile={profile} isSigningOut={isSigningOut} signOutError={signOutError} onSignOut={onSignOut} />}{screen === "data-storage" && <DataStorageSettings />}</div></div>;
 }
 
 export default SettingsSidebarContent;

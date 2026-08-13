@@ -35,6 +35,7 @@ type UseMessageRequestsOptions = {
 function useMessageRequests({ currentUserId, isAccountResolved, onConversationReady, onRequestsChanged }: UseMessageRequestsOptions) {
   const latestLoadRef = useRef(0);
   const respondingRef = useRef<string | null>(null);
+  const dismissingUpdateRef = useRef<string | null>(null);
   const [requests, setRequests] = useState<ConversationRequestItem[]>([]);
   const [updates, setUpdates] = useState<RequestUpdateItem[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
@@ -56,7 +57,7 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
     async function loadRequests() {
       const [incomingResult, updatesResult] = await Promise.all([
         supabase.from("conversation_requests").select("id, sender_id, introduction, created_at", { count: "exact" }).eq("recipient_id", currentUserId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
-        supabase.from("conversation_requests").select("id, recipient_id, status, conversation_id, created_at, updated_at").eq("sender_id", currentUserId).in("status", ["accepted", "declined"]).order("updated_at", { ascending: false }).limit(50).abortSignal(abortController.signal),
+        supabase.rpc("list_request_updates").abortSignal(abortController.signal),
       ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
@@ -169,8 +170,47 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
       return;
     }
 
-    onConversationReady({ id: result.conversation_id as string, otherProfile: request.senderProfile, introductoryMessage: request.introduction, introductoryMessageCreatedAt: request.created_at });
+    onConversationReady({
+      id: result.conversation_id as string,
+      otherProfile: request.senderProfile,
+      connectionStatus: "accepted",
+      interactionAllowed: true,
+      messagingAvailable: true,
+      ...(result.reconnected ? {} : { introductoryMessage: request.introduction, introductoryMessageCreatedAt: request.created_at }),
+    });
   }, [onConversationReady, onRequestsChanged]);
+
+  const dismissUpdate = useCallback(async (requestId: string) => {
+    if (dismissingUpdateRef.current) return "Another request update is already being deleted.";
+
+    dismissingUpdateRef.current = requestId;
+    const { error } = await supabase.rpc("dismiss_request_update", { target_request_id: requestId });
+    dismissingUpdateRef.current = null;
+
+    if (error) {
+      if (import.meta.env.DEV) console.error("dismiss_request_update failed", { requestId, error });
+      return "We couldnâ€™t delete this request update. Please try again.";
+    }
+
+    setUpdates((currentUpdates) => currentUpdates.filter((update) => update.id !== requestId));
+    return null;
+  }, []);
+
+  const dismissAllUpdates = useCallback(async () => {
+    if (dismissingUpdateRef.current) return "Another request update is already being deleted.";
+
+    dismissingUpdateRef.current = "all";
+    const { error } = await supabase.rpc("dismiss_all_request_updates");
+    dismissingUpdateRef.current = null;
+
+    if (error) {
+      if (import.meta.env.DEV) console.error("dismiss_all_request_updates failed", error);
+      return "We couldnâ€™t clear request updates. Please try again.";
+    }
+
+    setUpdates([]);
+    return null;
+  }, []);
 
   return {
     requests: currentUserId ? requests : [],
@@ -185,6 +225,8 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
     refresh,
     refreshSilently,
     respond,
+    dismissUpdate,
+    dismissAllUpdates,
   };
 }
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import type { AcceptedConversationItem, ChatMessage, ConversationNicknameRealtimeChange, ConversationThemeRealtimeChange, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileSearchResult } from "../../types/conversations";
+import type { AcceptedConversationItem, ChatMessage, ConversationConnectionStatus, ConversationNicknameRealtimeChange, ConversationThemeRealtimeChange, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileSearchResult } from "../../types/conversations";
 
 type UseMessagesDataOptions = {
   currentUserId: string | null;
@@ -45,6 +45,7 @@ type DirectConversationRow = {
   created_at: string;
   updated_at: string;
   theme_key: string;
+  connection_status: ConversationConnectionStatus;
   conversation_participants: Array<{ user_id: string }>;
   messages: Array<{ id: string; body: string; message_type: "text" | "image" | "voice" | "file"; created_at: string; edited_at: string | null; is_deleted: boolean; deleted_at: string | null; sender_id: string; message_attachments: Array<{ id: string }> }>;
 };
@@ -58,8 +59,18 @@ type ConversationNicknameRow = {
 type ConversationInteractionStatusRow = {
   conversation_id: string;
   target_user_id: string;
+  connection_status: ConversationConnectionStatus;
   i_blocked: boolean;
+  interaction_allowed: boolean;
   messaging_available: boolean;
+  request_available: boolean;
+};
+
+type ConversationPresenceRow = {
+  conversation_id: string;
+  profile_id: string;
+  active_status_visible: boolean;
+  last_seen_at: string | null;
 };
 
 function compareConversations(first: AcceptedConversationItem, second: AcceptedConversationItem) {
@@ -99,35 +110,38 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     let isCancelled = false;
 
     async function loadMessagesData() {
-      const [pendingResult, membershipResult, interactionStatusResult] = await Promise.all([
+      const [pendingResult, membershipResult, interactionStatusResult, presenceResult] = await Promise.all([
         supabase.from("conversation_requests").select("id, recipient_id, introduction, created_at, status, conversation_id").eq("sender_id", userId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
-        supabase.from("conversation_participants").select("conversation_id, last_read_at, muted_until, is_pinned, archived_at, history_cleared_at, deleted_at").eq("user_id", userId).abortSignal(abortController.signal),
+        supabase.rpc("list_my_conversation_preferences").abortSignal(abortController.signal),
         supabase.rpc("list_conversation_interaction_statuses").abortSignal(abortController.signal),
+        supabase.rpc("list_conversation_presence").abortSignal(abortController.signal),
       ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
 
-      if (pendingResult.error || membershipResult.error || interactionStatusResult.error) {
+      if (pendingResult.error || membershipResult.error || interactionStatusResult.error || presenceResult.error) {
         setIsLoading(false);
         setHasLoaded(true);
         setLoadError("We couldn’t load your messages right now. Check your connection and try again.");
-        if (import.meta.env.DEV) console.error("Loading message sidebar records failed", { pendingError: pendingResult.error, membershipError: membershipResult.error, interactionStatusError: interactionStatusResult.error });
+        if (import.meta.env.DEV) console.error("Loading message sidebar records failed", { pendingError: pendingResult.error, membershipError: membershipResult.error, interactionStatusError: interactionStatusResult.error, presenceError: presenceResult.error });
         return;
       }
 
       const pendingRows = (pendingResult.data ?? []) as PendingRequestRow[];
       const membershipRows = (membershipResult.data ?? []) as MembershipRow[];
       const interactionStatusRows = (interactionStatusResult.data ?? []) as ConversationInteractionStatusRow[];
+      const presenceRows = (presenceResult.data ?? []) as ConversationPresenceRow[];
       const conversationIds = [...new Set(membershipRows.map((row) => row.conversation_id))];
       const membershipByConversationId = new Map(membershipRows.map((row) => [row.conversation_id, row]));
       const interactionStatusByConversationId = new Map(interactionStatusRows.map((row) => [row.conversation_id, row]));
+      const presenceByConversationId = new Map(presenceRows.map((row) => [row.conversation_id, row]));
       let directConversationRows: DirectConversationRow[] = [];
       let nicknameRows: ConversationNicknameRow[] = [];
 
       if (conversationIds.length > 0) {
         const { data: conversationData, error: conversationError } = await supabase
           .from("conversations")
-          .select("id, created_at, updated_at, theme_key, conversation_participants(user_id), messages(id, body, message_type, created_at, edited_at, is_deleted, deleted_at, sender_id, message_attachments(id))")
+          .select("id, created_at, updated_at, theme_key, connection_status, conversation_participants(user_id), messages(id, body, message_type, created_at, edited_at, is_deleted, deleted_at, sender_id, message_attachments(id))")
           .in("id", conversationIds)
           .eq("conversation_type", "direct")
           .order("created_at", { referencedTable: "messages", ascending: false })
@@ -188,7 +202,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       let profiles: ProfileSearchResult[] = [];
 
       if (profileIds.length > 0) {
-        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, last_seen_at").in("id", profileIds).abortSignal(abortController.signal);
+        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url").in("id", profileIds).abortSignal(abortController.signal);
 
         if (isCancelled || loadId !== latestLoadRef.current) return;
 
@@ -219,11 +233,17 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
         const otherUserId = otherUserIdByConversationId.get(conversation.id);
         if (!otherUserId) return [];
         const latestMessage = conversation.messages[0] ?? null;
+        const presence = presenceByConversationId.get(conversation.id);
+        const baseOtherProfile = profileById.get(otherUserId) ?? fallbackProfile(otherUserId);
         if (latestMessage && latestMessage.sender_id !== userId) onIncomingMessageSynchronized(conversation.id, latestMessage.created_at);
         return [{
           kind: "conversation",
           conversationId: conversation.id,
-          otherProfile: profileById.get(otherUserId) ?? fallbackProfile(otherUserId),
+          otherProfile: {
+            ...baseOtherProfile,
+            active_status_visible: presence?.profile_id === otherUserId ? presence.active_status_visible : false,
+            last_seen_at: presence?.profile_id === otherUserId ? presence.last_seen_at : null,
+          },
           latestMessageId: latestMessage?.id ?? null,
           latestMessage: latestMessage ? latestMessage.is_deleted ? "Message deleted" : latestMessage.message_type === "voice" ? "Voice message" : latestMessage.message_type === "image" ? latestMessage.body || "Photo" : latestMessage.message_type === "file" ? latestMessage.body || ((latestMessage.message_attachments?.length ?? 0) > 1 ? `${latestMessage.message_attachments.length} files` : "File") : latestMessage.body : null,
           latestMessageAt: latestMessage?.created_at ?? null,
@@ -242,8 +262,11 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           conversationDeletedAt: membershipByConversationId.get(conversation.id)?.deleted_at ?? null,
           otherNickname: nicknameByConversationAndUser.get(`${conversation.id}:${otherUserId}`) ?? null,
           themeKey: conversation.theme_key || "default",
+          connectionStatus: interactionStatusByConversationId.get(conversation.id)?.connection_status ?? conversation.connection_status ?? "accepted",
           iBlocked: interactionStatusByConversationId.get(conversation.id)?.i_blocked ?? false,
+          interactionAllowed: interactionStatusByConversationId.get(conversation.id)?.interaction_allowed ?? true,
           messagingAvailable: interactionStatusByConversationId.get(conversation.id)?.messaging_available ?? true,
+          requestAvailable: interactionStatusByConversationId.get(conversation.id)?.request_available ?? false,
         }];
       }).sort(compareConversations);
 
@@ -272,18 +295,6 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
   const refreshSilently = useCallback(() => {
     latestLoadRef.current += 1;
     setLoadKey((key) => key + 1);
-  }, []);
-
-  const mergeProfileLastSeen = useCallback((profileId: string, lastSeenAt: string) => {
-    const incomingTime = Date.parse(lastSeenAt);
-    if (Number.isNaN(incomingTime)) return;
-
-    setConversations((currentConversations) => currentConversations.map((conversation) => {
-      if (conversation.otherProfile.id !== profileId) return conversation;
-      const currentTime = Date.parse(conversation.otherProfile.last_seen_at ?? "");
-      if (!Number.isNaN(currentTime) && currentTime >= incomingTime) return conversation;
-      return { ...conversation, otherProfile: { ...conversation.otherProfile, last_seen_at: lastSeenAt } };
-    }));
   }, []);
 
   const patchMessagePreview = useCallback((message: ChatMessage, allowDeletedRestore = false) => {
@@ -373,6 +384,15 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === conversationId ? { ...conversation, iBlocked, messagingAvailable } : conversation));
   }, []);
 
+  const patchConversationConnectionStatus = useCallback((conversationId: string, connectionStatus: ConversationConnectionStatus, requestAvailable?: boolean) => {
+    setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === conversationId ? {
+      ...conversation,
+      connectionStatus,
+      messagingAvailable: connectionStatus === "accepted" && conversation.interactionAllowed,
+      requestAvailable: requestAvailable ?? conversation.requestAvailable,
+    } : conversation));
+  }, []);
+
   const conversationsWithReceiptState = useMemo(() => conversations.map((conversation) => {
     const receipt = currentUserReceiptsByConversationId.get(conversation.conversationId);
     const nextReadAt = receipt?.lastReadAt ?? null;
@@ -387,11 +407,13 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
   const visibleConversations = useMemo(() => conversationsWithReceiptState.filter((conversation) => !conversation.conversationDeletedAt), [conversationsWithReceiptState]);
   const inboxConversations = useMemo(() => visibleConversations.filter((conversation) => !conversation.archivedAt).sort(compareConversations), [visibleConversations]);
   const archivedConversations = useMemo(() => visibleConversations.filter((conversation) => Boolean(conversation.archivedAt)).sort(compareConversationActivity), [visibleConversations]);
+  const connectedConversations = useMemo(() => conversationsWithReceiptState.filter((conversation) => conversation.connectionStatus === "accepted"), [conversationsWithReceiptState]);
 
   return {
     pendingRequests: currentUserId ? pendingRequests : [],
     conversations: currentUserId ? visibleConversations : [],
     relationshipConversations: currentUserId ? conversationsWithReceiptState : [],
+    connectedConversations: currentUserId ? connectedConversations : [],
     notificationConversations: currentUserId ? conversationsWithReceiptState : [],
     inboxConversations: currentUserId ? inboxConversations : [],
     archivedConversations: currentUserId ? archivedConversations : [],
@@ -401,7 +423,6 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     aggregateUnreadCount: currentUserId ? visibleConversations.reduce((total, conversation) => total + conversation.unreadCount, 0) : 0,
     refresh,
     refreshSilently,
-    mergeProfileLastSeen,
     patchMessagePreview,
     patchConversationMute,
     setConversationPinned,
@@ -411,6 +432,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     patchConversationNickname,
     patchConversationTheme,
     patchConversationInteractionStatus,
+    patchConversationConnectionStatus,
   };
 }
 

@@ -4,9 +4,11 @@ export type ProfileSearchResult = {
   display_name: string | null;
   avatar_url: string | null;
   last_seen_at?: string | null;
+  active_status_visible?: boolean;
   quick_reactions?: string[] | null;
   browser_notifications_enabled?: boolean;
   notification_sound_enabled?: boolean;
+  request_available?: boolean;
 };
 
 export type BirthdayVisibility = "hidden" | "month_day" | "full";
@@ -27,11 +29,6 @@ export type ConversationProfileDetails = ProfileSearchResult & {
   birthdayDisplay: string | null;
   age: number | null;
   joinedMonth: string;
-};
-
-export type RealtimeProfileLastSeenEvent = {
-  profileId: string;
-  lastSeenAt: string;
 };
 
 export type RealtimeNotificationPreferencesEvent = {
@@ -59,9 +56,14 @@ export type ParticipantConversationPreferencesState = {
 export type ConversationInteractionStatus = {
   conversationId: string;
   targetUserId: string;
+  connectionStatus: ConversationConnectionStatus;
   iBlocked: boolean;
+  interactionAllowed: boolean;
   messagingAvailable: boolean;
+  requestAvailable: boolean;
 };
+
+export type ConversationConnectionStatus = "accepted" | "disconnected";
 
 export type SelectedConversation = {
   id: string;
@@ -72,8 +74,11 @@ export type SelectedConversation = {
   conversationDeletedAt?: string | null;
   otherNickname?: string | null;
   themeKey?: string;
+  connectionStatus?: ConversationConnectionStatus;
   iBlocked?: boolean;
+  interactionAllowed?: boolean;
   messagingAvailable?: boolean;
+  requestAvailable?: boolean;
 };
 
 export type MessageSidebarItem =
@@ -108,8 +113,11 @@ export type MessageSidebarItem =
       conversationDeletedAt: string | null;
       otherNickname: string | null;
       themeKey: string;
+      connectionStatus: ConversationConnectionStatus;
       iBlocked: boolean;
+      interactionAllowed: boolean;
       messagingAvailable: boolean;
+      requestAvailable: boolean;
     };
 
 export type PendingOutgoingRequest = Extract<MessageSidebarItem, { kind: "pending" }>;
@@ -374,6 +382,11 @@ export type ConversationThemeRealtimeChange = {
   themeKey: string;
 };
 
+export type ConversationConnectionRealtimeChange = {
+  conversationId: string;
+  connectionStatus: ConversationConnectionStatus;
+};
+
 export type RealtimeConversationThemeEvent = ConversationThemeRealtimeChange & {
   sequence: number;
 };
@@ -394,6 +407,7 @@ export type ConfirmedMessageStatus = "sent" | "delivered" | "seen";
 
 export type ProfileRelationship =
   | { state: "none" }
+  | { state: "disconnected"; conversation: SelectedConversation }
   | { state: "outgoing_pending"; request: PendingOutgoingRequest }
   | { state: "incoming_pending"; requestId: string }
   | { state: "accepted"; conversation: SelectedConversation };
@@ -416,4 +430,5 @@ export type RespondToConversationRequestResult = {
   request_id: string;
   request_status: "accepted" | "declined";
   conversation_id: string | null;
+  reconnected?: boolean;
 };

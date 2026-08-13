@@ -131,9 +131,18 @@ function useConversationReceipts(currentUserId: string | null) {
     enqueueReceipt(conversationId, messageCreatedAt, messageCreatedAt);
   }, [enqueueReceipt]);
 
-  const handleRealtimeReceipt = useCallback((receipt: ParticipantReceiptCursor) => {
-    if (receipt.userId === currentUserId) rememberCurrentUserReceipt(receipt);
-    publishReceipt(receipt);
+  const refreshConversationReceipts = useCallback(async (conversationId: string) => {
+    if (!currentUserId) return;
+    const { data, error } = await supabase.rpc("get_conversation_receipts", { target_conversation_id: conversationId });
+    if (error) {
+      if (import.meta.env.DEV) console.warn("Refreshing privacy-filtered conversation receipts failed", { conversationId, code: error.code });
+      return;
+    }
+
+    ((data ?? []) as ReceiptRpcRow[]).map(mapReceiptRow).forEach((receipt) => {
+      if (receipt.userId === currentUserId) rememberCurrentUserReceipt(receipt);
+      publishReceipt(receipt);
+    });
   }, [currentUserId, publishReceipt, rememberCurrentUserReceipt]);
 
   useEffect(() => {
@@ -150,7 +159,7 @@ function useConversationReceipts(currentUserId: string | null) {
     };
   }, [currentUserId]);
 
-  return { receiptEvents, currentUserReceiptsByConversationId, advanceDelivered, advanceRead, handleRealtimeReceipt };
+  return { receiptEvents, currentUserReceiptsByConversationId, advanceDelivered, advanceRead, refreshConversationReceipts };
 }
 
 export default useConversationReceipts;
