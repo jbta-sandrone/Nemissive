@@ -2,6 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { privacyPreferencesChangeEvent } from "../../lib/privacyPreferences";
+import { profileIdentityChangeEvent } from "../../lib/profileIdentity";
 import type { CreateConversationRequestResult, PendingOutgoingRequest, ProfileRelationship, ProfileSearchResult, SelectedConversation } from "../../types/conversations";
 import ProfileAvatar from "./ProfileAvatar";
 import { getProfileDisplayName } from "./profileUtils";
@@ -90,7 +91,11 @@ function NewConversationModal({ isOpen, currentUserId, isAccountResolved, accoun
     if (!isOpen) return;
     const refreshAvailability = () => setProfileRetryKey((key) => key + 1);
     window.addEventListener(privacyPreferencesChangeEvent, refreshAvailability);
-    return () => window.removeEventListener(privacyPreferencesChangeEvent, refreshAvailability);
+    window.addEventListener(profileIdentityChangeEvent, refreshAvailability);
+    return () => {
+      window.removeEventListener(privacyPreferencesChangeEvent, refreshAvailability);
+      window.removeEventListener(profileIdentityChangeEvent, refreshAvailability);
+    };
   }, [isOpen]);
 
   useEffect(() => {

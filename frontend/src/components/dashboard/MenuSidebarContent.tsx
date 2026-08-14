@@ -19,6 +19,7 @@ type MenuSidebarContentProps = {
   isNotificationSupported: boolean;
   onEnableNotifications: () => Promise<string | null>;
   onSaveNotificationPreferences: (notificationsEnabled: boolean, soundEnabled: boolean) => Promise<string | null>;
+  onProfileIdentityUpdated: (profile: ProfileSearchResult) => void;
   onBeforeSignOut: () => void;
 };
 
@@ -93,7 +94,7 @@ function SubsectionHeader({ headingRef, title, description, onBack }: { headingR
   );
 }
 
-function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onBeforeSignOut }: MenuSidebarContentProps) {
+function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onBeforeSignOut }: MenuSidebarContentProps) {
   const navigate = useNavigate();
   const isSigningOutRef = useRef(false);
   const subsectionHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -161,7 +162,7 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReac
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
         <SubsectionHeader headingRef={subsectionHeadingRef} title={copy.title} description={copy.description} onBack={returnToLanding} />
         <div className="flex-1 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-5">
-          {activeView === "profile" && <ProfileDetailsSettings />}
+          {activeView === "profile" && profile && <ProfileDetailsSettings profile={profile} onIdentityUpdated={onProfileIdentityUpdated} />}
           {activeView === "notifications" && profile && <NotificationSettings isSupported={isNotificationSupported} permission={notificationPermission} notificationsEnabled={profile.browser_notifications_enabled ?? false} soundEnabled={profile.notification_sound_enabled ?? true} onEnable={onEnableNotifications} onSave={onSaveNotificationPreferences} />}
           {activeView === "quick-reactions" && <QuickReactionSettings quickReactions={quickReactions} onSave={onSaveQuickReactions} />}
         </div>

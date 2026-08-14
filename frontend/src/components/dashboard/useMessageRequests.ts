@@ -212,6 +212,11 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
     return null;
   }, []);
 
+  const patchProfileIdentity = useCallback((identity: Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url">) => {
+    setRequests((currentRequests) => currentRequests.map((request) => request.senderProfile.id === identity.id ? { ...request, senderProfile: { ...request.senderProfile, ...identity } } : request));
+    setUpdates((currentUpdates) => currentUpdates.map((update) => update.recipientProfile.id === identity.id ? { ...update, recipientProfile: { ...update.recipientProfile, ...identity } } : update));
+  }, []);
+
   return {
     requests: currentUserId ? requests : [],
     updates: currentUserId ? updates : [],
@@ -227,6 +232,7 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
     respond,
     dismissUpdate,
     dismissAllUpdates,
+    patchProfileIdentity,
   };
 }
 

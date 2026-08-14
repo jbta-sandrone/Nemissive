@@ -380,6 +380,11 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === change.conversationId ? { ...conversation, themeKey: change.themeKey } : conversation));
   }, []);
 
+  const patchProfileIdentity = useCallback((identity: Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url">) => {
+    setPendingRequests((currentRequests) => currentRequests.map((request) => request.otherProfile.id === identity.id ? { ...request, otherProfile: { ...request.otherProfile, ...identity } } : request));
+    setConversations((currentConversations) => currentConversations.map((conversation) => conversation.otherProfile.id === identity.id ? { ...conversation, otherProfile: { ...conversation.otherProfile, ...identity } } : conversation));
+  }, []);
+
   const patchConversationInteractionStatus = useCallback((conversationId: string, iBlocked: boolean, messagingAvailable: boolean) => {
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === conversationId ? { ...conversation, iBlocked, messagingAvailable } : conversation));
   }, []);
@@ -431,6 +436,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     patchConversationPreferences,
     patchConversationNickname,
     patchConversationTheme,
+    patchProfileIdentity,
     patchConversationInteractionStatus,
     patchConversationConnectionStatus,
   };

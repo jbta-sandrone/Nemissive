@@ -115,7 +115,7 @@ function ConversationProfileDrawer({ conversationId, profile, conversationNickna
     return () => { cancelled = true; };
   }, [conversationId, profile.id, retryKey]);
 
-  const visibleProfile = details ?? profile;
+  const visibleProfile = details ? { ...details, username: profile.username, display_name: profile.display_name, avatar_url: profile.avatar_url } : profile;
   const displayName = getProfileDisplayName(visibleProfile);
   const birthday = details?.birthdayDisplay ? formatBirthday(details.birthdayDisplay) : null;
   const hasOptionalDetails = details ? Boolean(details.bio || details.locationText || birthday || details.age !== null || details.interests.length) : false;

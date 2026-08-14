@@ -37,6 +37,8 @@ export type RealtimeNotificationPreferencesEvent = {
   notificationSoundEnabled: boolean;
 };
 
+export type RealtimeProfileIdentityEvent = Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url">;
+
 export type ParticipantMuteState = {
   conversationId: string;
   userId: string;

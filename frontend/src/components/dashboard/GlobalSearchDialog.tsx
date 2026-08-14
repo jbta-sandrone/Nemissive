@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "motion/react";
+import { profileIdentityChangeEvent } from "../../lib/profileIdentity";
 import { supabase } from "../../lib/supabase";
 import type { AcceptedConversationItem, MessageSearchResult, PendingOutgoingRequest, ProfileSearchResult, SelectedConversation } from "../../types/conversations";
 import type { ConversationRequestItem } from "./useMessageRequests";
@@ -225,6 +226,12 @@ function GlobalSearchDialog({ currentProfile, conversations, outgoingRequests, i
   }, [canSearchMessages, datePreset, imageOnly, normalizedQuery, runMessageSearch, senderFilter, showsMessages]);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
+
+  useEffect(() => {
+    const refreshIdentityResults = () => { if (canSearchMessages) void runMessageSearch(false); };
+    window.addEventListener(profileIdentityChangeEvent, refreshIdentityResults);
+    return () => window.removeEventListener(profileIdentityChangeEvent, refreshIdentityResults);
+  }, [canSearchMessages, runMessageSearch]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
