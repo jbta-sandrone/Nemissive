@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { useNavigate } from "react-router-dom";
-import { supabase } from "../../lib/supabase";
 import type { ProfileSearchResult } from "../../types/conversations";
 import NotificationSettings from "./NotificationSettings";
 import ProfileAvatar from "./ProfileAvatar";
@@ -20,12 +18,13 @@ type MenuSidebarContentProps = {
   onEnableNotifications: () => Promise<string | null>;
   onSaveNotificationPreferences: (notificationsEnabled: boolean, soundEnabled: boolean) => Promise<string | null>;
   onProfileIdentityUpdated: (profile: ProfileSearchResult) => void;
-  onBeforeSignOut: () => void;
+  onRequestSignOut: (trigger: HTMLButtonElement) => void;
+  onAccountDeleted: () => void;
 };
 
 type MenuSubsection = "profile" | "notifications" | "quick-reactions" | "settings";
 type MenuView = "landing" | MenuSubsection;
-type MenuIconKind = MenuSubsection | "back" | "chevron";
+type MenuIconKind = MenuSubsection | "back" | "chevron" | "signout";
 
 const subsectionCopy: Record<MenuSubsection, { title: string; description: string }> = {
   profile: { title: "Profile", description: "Manage your profile and personal details." },
@@ -41,6 +40,7 @@ function MenuIcon({ kind }: { kind: MenuIconKind }) {
   if (kind === "notifications") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><path d="M6.5 9a5.5 5.5 0 0 1 11 0c0 5 2 5.5 2 7H4.5c0-1.5 2-2 2-7Z" strokeLinejoin="round" /><path d="M9.5 19a3 3 0 0 0 5 0" strokeLinecap="round" /></svg>;
   if (kind === "quick-reactions") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M8.5 10h.01M15.5 10h.01M8.5 14.5c1.9 1.7 5.1 1.7 7 0" strokeLinecap="round" /></svg>;
   if (kind === "settings") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M9 4v6M8 14v6" strokeLinecap="round" /></svg>;
+  if (kind === "signout") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   if (kind === "back") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={iconClass} aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   if (kind === "chevron") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   return null;
@@ -94,9 +94,7 @@ function SubsectionHeader({ headingRef, title, description, onBack }: { headingR
   );
 }
 
-function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onBeforeSignOut }: MenuSidebarContentProps) {
-  const navigate = useNavigate();
-  const isSigningOutRef = useRef(false);
+function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onRequestSignOut, onAccountDeleted }: MenuSidebarContentProps) {
   const subsectionHeadingRef = useRef<HTMLHeadingElement>(null);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
@@ -104,8 +102,6 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReac
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const focusOnLandingRef = useRef<MenuSubsection | null>(null);
   const [activeView, setActiveView] = useState<MenuView>("landing");
-  const [isSigningOut, setIsSigningOut] = useState(false);
-  const [signOutError, setSignOutError] = useState("");
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -132,30 +128,9 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReac
     setActiveView("landing");
   }
 
-  async function handleSignOut() {
-    if (isSigningOutRef.current) return;
-
-    isSigningOutRef.current = true;
-    setIsSigningOut(true);
-    setSignOutError("");
-    onBeforeSignOut();
-
-    const { error } = await supabase.auth.signOut();
-
-    if (error) {
-      isSigningOutRef.current = false;
-      setIsSigningOut(false);
-      setSignOutError("We couldn’t sign you out. Please try again.");
-      if (import.meta.env.DEV) console.error("Supabase sign out failed", error);
-      return;
-    }
-
-    navigate("/login", { replace: true });
-  }
-
   if (activeView !== "landing") {
     if (activeView === "settings" && profile) {
-      return <SettingsSidebarContent profile={profile} isSigningOut={isSigningOut} signOutError={signOutError} onBackToMenu={returnToLanding} onSignOut={() => void handleSignOut()} />;
+      return <SettingsSidebarContent profile={profile} onBackToMenu={returnToLanding} onAccountDeleted={onAccountDeleted} />;
     }
     const copy = subsectionCopy[activeView];
     return (
@@ -191,6 +166,7 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReac
           <MenuCategoryButton buttonRef={quickReactionsButtonRef} kind="quick-reactions" title="Quick reactions" description="Choose your preferred message reactions" disabled={categoriesDisabled} onClick={() => openSubsection("quick-reactions")} />
           <MenuCategoryButton buttonRef={settingsButtonRef} kind="settings" title="Settings" description="Appearance, privacy, account and storage" disabled={categoriesDisabled} onClick={() => openSubsection("settings")} />
         </nav>
+        <div className="mt-6 border-t border-border pt-4"><button type="button" onClick={(event) => onRequestSignOut(event.currentTarget)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-body transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><span className="text-primary"><MenuIcon kind="signout" /></span><span className="font-semibold">Sign out</span></button></div>
       </div>
     </div>
   );

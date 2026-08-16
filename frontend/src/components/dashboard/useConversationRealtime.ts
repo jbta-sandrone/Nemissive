@@ -96,7 +96,9 @@ function parseProfileIdentity(value: unknown): RealtimeProfileIdentityEvent | nu
   if (row.username !== null && typeof row.username !== "string") return null;
   if (row.display_name !== null && typeof row.display_name !== "string") return null;
   if (row.avatar_url !== null && typeof row.avatar_url !== "string") return null;
-  return { id: row.id, username: row.username, display_name: row.display_name, avatar_url: row.avatar_url };
+  if (row.account_status !== "active" && row.account_status !== "deleting" && row.account_status !== "deleted") return null;
+  if (row.deleted_at !== null && typeof row.deleted_at !== "string") return null;
+  return { id: row.id, username: row.username, display_name: row.display_name, avatar_url: row.avatar_url, account_status: row.account_status, deleted_at: row.deleted_at };
 }
 
 function parseConversationTheme(value: unknown): ConversationThemeRealtimeChange | null {

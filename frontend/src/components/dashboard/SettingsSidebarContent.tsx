@@ -6,13 +6,13 @@ import { profileIdentityChangeEvent } from "../../lib/profileIdentity";
 import { supabase } from "../../lib/supabase";
 import type { ProfileSearchResult } from "../../types/conversations";
 import ChangePasswordSettings from "./ChangePasswordSettings";
-import ConfirmationDialog from "./ConfirmationDialog";
+import DeleteAccountSettings from "./DeleteAccountSettings";
 import ProfileAvatar from "./ProfileAvatar";
 import UserBlockDialog from "./UserBlockDialog";
 import { getProfileDisplayName } from "./profileUtils";
 
-type SettingsScreen = "landing" | "appearance" | "privacy" | "message-requests" | "blocked-accounts" | "account" | "change-password" | "data-storage";
-type SettingsIconKind = "appearance" | "privacy" | "blocked" | "account" | "storage" | "premium" | "back" | "chevron" | "signout";
+type SettingsScreen = "landing" | "appearance" | "privacy" | "message-requests" | "blocked-accounts" | "account" | "change-password" | "delete-account" | "data-storage";
+type SettingsIconKind = "appearance" | "privacy" | "blocked" | "account" | "storage" | "premium" | "back" | "chevron";
 
 type BlockedAccount = {
   profile: ProfileSearchResult;
@@ -21,10 +21,9 @@ type BlockedAccount = {
 
 type Props = {
   profile: ProfileSearchResult;
-  isSigningOut: boolean;
-  signOutError: string;
   onBackToMenu: () => void;
-  onSignOut: () => void;
+  rootBackLabel?: string;
+  onAccountDeleted: () => void;
 };
 
 const screenCopy: Record<Exclude<SettingsScreen, "landing">, { title: string; description: string; parent: "Settings" | "Privacy & Safety" | "Account" }> = {
@@ -34,6 +33,7 @@ const screenCopy: Record<Exclude<SettingsScreen, "landing">, { title: string; de
   "blocked-accounts": { title: "Blocked accounts", description: "Review and manage people you have blocked.", parent: "Privacy & Safety" },
   account: { title: "Account", description: "Your sign-in identity and account controls.", parent: "Settings" },
   "change-password": { title: "Change password", description: "Verify your current password and choose a stronger one.", parent: "Account" },
+  "delete-account": { title: "Delete account", description: "Permanently remove your active Nemissive account.", parent: "Account" },
   "data-storage": { title: "Data & Storage", description: "Understand attachment limits and data behavior.", parent: "Settings" },
 };
 
@@ -45,7 +45,7 @@ function SettingsIcon({ kind, className = "h-5 w-5" }: { kind: SettingsIconKind;
   if (kind === "premium") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true"><path d="m12 3 2.2 5.2L20 9l-4.2 3.8 1.2 5.7-5-2.9-5 2.9 1.2-5.7L4 9l5.8-.8L12 3Z" strokeLinejoin="round" /></svg>;
   if (kind === "back") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   if (kind === "chevron") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true"><path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true"><path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  return null;
 }
 
 function SettingsHeader({ title, description, backLabel, headingRef, onBack }: { title: string; description: string; backLabel: string; headingRef: RefObject<HTMLHeadingElement | null>; onBack: () => void }) {
@@ -300,16 +300,14 @@ function MessageRequestSettings() {
   return <div className="space-y-4"><Card labelledBy="message-request-permission-heading"><fieldset disabled={isSaving}><legend id="message-request-permission-heading" className="sr-only">Who can send you new conversation requests</legend><div className="space-y-2">{options.map((option) => <label key={option.value} className={`flex min-h-20 cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 transition focus-within:ring-4 focus-within:ring-accent-hover ${permission === option.value ? "border-primary bg-accent" : "border-border bg-surface hover:bg-accent"} ${isSaving ? "cursor-wait opacity-60" : ""}`}><input type="radio" name="message-request-permission" value={option.value} checked={permission === option.value} onChange={() => void savePermission(option.value)} aria-describedby={`message-request-${option.value}-description`} className="mt-1 h-4 w-4 shrink-0 accent-[var(--color-primary)]" /><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-heading">{option.title}</span><span id={`message-request-${option.value}-description`} className="mt-1 block text-xs leading-5 text-body">{option.description}</span></span>{permission === option.value && <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true"><path d="m4 10 4 4 8-8" strokeLinecap="round" strokeLinejoin="round" /></svg>}</label>)}</div></fieldset></Card><p role={statusMessage.startsWith("We couldn’t") ? "alert" : "status"} aria-live="polite" aria-atomic="true" className="min-h-5 px-1 text-xs leading-5 text-body">{statusMessage}</p></div>;
 }
 
-function AccountSettings({ profile, isSigningOut, signOutError, onChangePassword, onSignOut }: { profile: ProfileSearchResult; isSigningOut: boolean; signOutError: string; onChangePassword: () => void; onSignOut: () => void }) {
+function AccountSettings({ profile, onChangePassword, onDeleteAccount }: { profile: ProfileSearchResult; onChangePassword: () => void; onDeleteAccount: () => void }) {
   const [email, setEmail] = useState<string | null>(null);
-  const [isSignOutDialogOpen, setIsSignOutDialogOpen] = useState(false);
-  const signOutButtonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     let cancelled = false;
     void supabase.auth.getUser().then(({ data }) => { if (!cancelled) setEmail(data.user?.email ?? null); });
     return () => { cancelled = true; };
   }, []);
-  return <><div className="space-y-3"><Card labelledBy="account-identity-heading"><h2 id="account-identity-heading" className="font-semibold text-heading">Account identity</h2><div className="mt-4 flex min-w-0 items-center gap-3"><ProfileAvatar profile={profile} size="md" /><div className="min-w-0"><p className="truncate text-sm font-semibold text-heading">{getProfileDisplayName(profile)}</p><p className="truncate text-xs text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p></div></div>{email && <div className="mt-4 border-t border-border pt-4"><p className="text-xs font-semibold uppercase tracking-wider text-muted">Email</p><p className="mt-1 break-all text-sm text-heading">{email}</p></div>}</Card><NavigationRow icon="account" title="Change password" description="Update your account password securely" onClick={onChangePassword} /><ComingSoonRow icon="account" title="Delete account" description="Account deletion controls" /><div className="pt-5"><Card><button ref={signOutButtonRef} type="button" onClick={() => setIsSignOutDialogOpen(true)} disabled={isSigningOut} className="flex min-h-12 w-full items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:opacity-60"><SettingsIcon kind="signout" className="h-5 w-5 shrink-0 text-primary" /><span className="font-semibold text-heading">{isSigningOut ? "Signing out…" : "Sign out"}</span></button>{signOutError && !isSignOutDialogOpen && <p role="alert" className="mt-3 rounded-2xl border border-primary/25 bg-accent px-3 py-2.5 text-xs leading-5 text-body">{signOutError}</p>}</Card></div></div><AnimatePresence>{isSignOutDialogOpen && <ConfirmationDialog dialogId="sign-out" title="Sign out of Nemissive?" description="You'll need to sign in again to access your conversations on this device." confirmLabel="Sign out" pendingLabel="Signing out…" pendingAnnouncement="Signing out of Nemissive." icon={<SettingsIcon kind="signout" className="h-5 w-5" />} error={signOutError} isPending={isSigningOut} returnFocusRef={signOutButtonRef} onCancel={() => { if (!isSigningOut) setIsSignOutDialogOpen(false); }} onConfirm={onSignOut} />}</AnimatePresence></>;
+  return <div className="space-y-3"><Card labelledBy="account-identity-heading"><h2 id="account-identity-heading" className="font-semibold text-heading">Account identity</h2><div className="mt-4 flex min-w-0 items-center gap-3"><ProfileAvatar profile={profile} size="md" /><div className="min-w-0"><p className="truncate text-sm font-semibold text-heading">{getProfileDisplayName(profile)}</p><p className="truncate text-xs text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p></div></div>{email && <div className="mt-4 border-t border-border pt-4"><p className="text-xs font-semibold uppercase tracking-wider text-muted">Email</p><p className="mt-1 break-all text-sm text-heading">{email}</p></div>}</Card><NavigationRow icon="account" title="Change password" description="Update your account password securely" onClick={onChangePassword} /><NavigationRow icon="account" title="Delete account" description="Permanently remove your account" onClick={onDeleteAccount} /></div>;
 }
 
 function DataStorageSettings() {
@@ -325,18 +323,18 @@ function SettingsLanding({ onOpen }: { onOpen: (screen: SettingsScreen) => void 
   return <nav aria-label="Settings categories" className="space-y-3"><NavigationRow icon="appearance" title="Appearance" description="Customize how Nemissive looks" onClick={() => onOpen("appearance")} /><NavigationRow icon="privacy" title="Privacy & Safety" description="Blocked accounts and privacy controls" onClick={() => onOpen("privacy")} /><NavigationRow icon="account" title="Account" description="Manage account-related preferences" onClick={() => onOpen("account")} /><NavigationRow icon="storage" title="Data & Storage" description="Storage and data preferences" onClick={() => onOpen("data-storage")} /><ComingSoonRow icon="premium" title="Nemissive Premium" description="Premium live themes and more customization" /></nav>;
 }
 
-function SettingsSidebarContent({ profile, isSigningOut, signOutError, onBackToMenu, onSignOut }: Props) {
+function SettingsSidebarContent({ profile, onBackToMenu, rootBackLabel = "Menu", onAccountDeleted }: Props) {
   const [screen, setScreen] = useState<SettingsScreen>("landing");
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => { const frame = requestAnimationFrame(() => headingRef.current?.focus()); return () => cancelAnimationFrame(frame); }, [screen]);
-  const copy = screen === "landing" ? { title: "Settings", description: "Appearance, privacy, account and storage.", parent: "Menu" } : screenCopy[screen];
+  const copy = screen === "landing" ? { title: "Settings", description: "Appearance, privacy, account and storage.", parent: rootBackLabel } : screenCopy[screen];
   function goBack() {
     if (screen === "landing") onBackToMenu();
     else if (screen === "blocked-accounts" || screen === "message-requests") setScreen("privacy");
-    else if (screen === "change-password") setScreen("account");
+    else if (screen === "change-password" || screen === "delete-account") setScreen("account");
     else setScreen("landing");
   }
-  return <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"><SettingsHeader title={copy.title} description={copy.description} backLabel={copy.parent} headingRef={headingRef} onBack={goBack} /><div className="flex-1 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 sm:px-5">{screen === "landing" && <SettingsLanding onOpen={setScreen} />}{screen === "appearance" && <AppearanceSettings />}{screen === "privacy" && <PrivacySettings onOpenBlocked={() => setScreen("blocked-accounts")} onOpenMessageRequests={() => setScreen("message-requests")} />}{screen === "message-requests" && <MessageRequestSettings />}{screen === "blocked-accounts" && <BlockedAccountsSettings headingRef={headingRef} />}{screen === "account" && <AccountSettings profile={profile} isSigningOut={isSigningOut} signOutError={signOutError} onChangePassword={() => setScreen("change-password")} onSignOut={onSignOut} />}{screen === "change-password" && <ChangePasswordSettings />}{screen === "data-storage" && <DataStorageSettings />}</div></div>;
+  return <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"><SettingsHeader title={copy.title} description={copy.description} backLabel={copy.parent} headingRef={headingRef} onBack={goBack} /><div className="flex-1 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 sm:px-5">{screen === "landing" && <SettingsLanding onOpen={setScreen} />}{screen === "appearance" && <AppearanceSettings />}{screen === "privacy" && <PrivacySettings onOpenBlocked={() => setScreen("blocked-accounts")} onOpenMessageRequests={() => setScreen("message-requests")} />}{screen === "message-requests" && <MessageRequestSettings />}{screen === "blocked-accounts" && <BlockedAccountsSettings headingRef={headingRef} />}{screen === "account" && <AccountSettings profile={profile} onChangePassword={() => setScreen("change-password")} onDeleteAccount={() => setScreen("delete-account")} />}{screen === "change-password" && <ChangePasswordSettings />}{screen === "delete-account" && <DeleteAccountSettings onDeleted={onAccountDeleted} />}{screen === "data-storage" && <DataStorageSettings />}</div></div>;
 }
 
 export default SettingsSidebarContent;

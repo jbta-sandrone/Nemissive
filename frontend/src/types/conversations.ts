@@ -9,6 +9,8 @@ export type ProfileSearchResult = {
   browser_notifications_enabled?: boolean;
   notification_sound_enabled?: boolean;
   request_available?: boolean;
+  account_status?: "active" | "deleting" | "deleted";
+  deleted_at?: string | null;
 };
 
 export type BirthdayVisibility = "hidden" | "month_day" | "full";
@@ -37,7 +39,7 @@ export type RealtimeNotificationPreferencesEvent = {
   notificationSoundEnabled: boolean;
 };
 
-export type RealtimeProfileIdentityEvent = Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url">;
+export type RealtimeProfileIdentityEvent = Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "account_status" | "deleted_at">;
 
 export type ParticipantMuteState = {
   conversationId: string;
@@ -65,7 +67,7 @@ export type ConversationInteractionStatus = {
   requestAvailable: boolean;
 };
 
-export type ConversationConnectionStatus = "accepted" | "disconnected";
+export type ConversationConnectionStatus = "accepted" | "disconnected" | "deleted";
 
 export type SelectedConversation = {
   id: string;

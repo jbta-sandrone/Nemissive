@@ -7,7 +7,7 @@ import { getConversationTheme, type ConversationThemeId } from "./conversationTh
 import InterestIcon from "./InterestIcon";
 import ProfileAvatar from "./ProfileAvatar";
 import { getInterestOption, normalizeInterestKeys } from "./profileInterests";
-import { getProfileDisplayName } from "./profileUtils";
+import { getProfileDisplayName, isDeletedProfile } from "./profileUtils";
 
 type Props = {
   conversationId: string;
@@ -77,6 +77,7 @@ function ConversationProfileDrawer({ conversationId, profile, conversationNickna
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => { if (isDeletedProfile(profile)) onCloseRef.current(); }, [profile]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;

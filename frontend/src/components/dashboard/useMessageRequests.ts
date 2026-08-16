@@ -75,7 +75,7 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
       let profiles: ProfileSearchResult[] = [];
 
       if (profileIds.length > 0) {
-        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url").in("id", profileIds).abortSignal(abortController.signal);
+        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, account_status, deleted_at").in("id", profileIds).abortSignal(abortController.signal);
 
         if (isCancelled || loadId !== latestLoadRef.current) return;
 

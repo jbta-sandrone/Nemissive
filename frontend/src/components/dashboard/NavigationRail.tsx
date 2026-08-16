@@ -1,5 +1,8 @@
-import { motion, useReducedMotion } from "motion/react";
 import type { DashboardSection } from "../../types/dashboard";
+import type { ProfileSearchResult } from "../../types/conversations";
+import AccountMenuPopover, { type PersonalSurface } from "./AccountMenuPopover";
+import { DashboardDestinationButton, SearchNavigationButton } from "./DashboardNavigationControls";
+import { mobileDashboardDestinations, workspaceDestinations } from "./dashboardNavigation";
 
 type NavigationRailProps = {
   activeSection: DashboardSection;
@@ -7,65 +10,38 @@ type NavigationRailProps = {
   unreadMessageCount: number;
   archivedConversationCount: number;
   isCompactChatVisible: boolean;
+  isFocusMode: boolean;
+  currentProfile: ProfileSearchResult | null;
+  isSigningOut: boolean;
+  pulseVisible: boolean;
+  onPulseVisibilityChange: (visible: boolean) => void;
+  onOpenPersonalSurface: (surface: PersonalSurface, trigger: HTMLButtonElement) => void;
+  onRequestSignOut: (trigger: HTMLButtonElement) => void;
   onSectionChange: (section: DashboardSection) => void;
   onSearch: (trigger: HTMLButtonElement) => void;
 };
 
-const navigationItems: Array<{ section: DashboardSection; label: string }> = [
-  { section: "messages", label: "Messages" },
-  { section: "archived", label: "Archived" },
-  { section: "people", label: "People" },
-  { section: "requests", label: "Requests" },
-];
-
-function SectionIcon({ section }: { section: DashboardSection }) {
-  if (section === "messages") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M4 5.5h16v11H8l-4 3v-14Z" strokeLinejoin="round" /><path d="M8 10h8M8 13h5" strokeLinecap="round" /></svg>;
-  if (section === "archived") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M5 8.5h14v10H5v-10Z" strokeLinejoin="round" /><path d="M4 5h16v3.5H4V5Zm5 7h6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  if (section === "people") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.25" /><path d="M3.5 18c.5-3.2 2.4-4.8 5.5-4.8s5 1.6 5.5 4.8M14.5 14c2.9-.4 4.8.9 5.7 3.8" strokeLinecap="round" /></svg>;
-  if (section === "requests") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M4 6.5h16v11H7l-3 2.5V6.5Z" strokeLinejoin="round" /><path d="m7 10 3.5 2.5a2.5 2.5 0 0 0 3 0L17 10" strokeLinecap="round" /></svg>;
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M9 4v6M8 14v6" strokeLinecap="round" /></svg>;
+function PulseIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function CountBadge({ count, label, compact = false }: { count: number; label: string; compact?: boolean }) {
-  if (count <= 0) return null;
+function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, isCompactChatVisible, isFocusMode, currentProfile, isSigningOut, pulseVisible, onPulseVisibilityChange, onOpenPersonalSurface, onRequestSignOut, onSectionChange, onSearch }: NavigationRailProps) {
+  const sharedDestinationProps = { activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, onSectionChange };
 
-  return <span className={`${compact ? "-right-1 -top-1" : "-right-1.5 -top-1.5"} absolute z-20 inline-flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-surface bg-primary px-1 text-[10px] font-bold leading-none text-white shadow-soft`}><span aria-hidden="true">{count > 9 ? "9+" : count}</span><span className="sr-only">{label}</span></span>;
-}
-
-function SearchNavigationButton({ showLabel, onSearch }: { showLabel: boolean; onSearch: (trigger: HTMLButtonElement) => void }) {
-  return <button type="button" aria-label="Search Nemissive" title="Search (Ctrl or Command K)" onClick={(event) => onSearch(event.currentTarget)} className={`${showLabel ? "min-w-0 flex-1 flex-col gap-1 py-2" : "h-12 w-12"} relative flex items-center justify-center rounded-2xl text-sm font-medium text-muted transition-colors hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-5 w-5" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" strokeLinecap="round" /></svg>{showLabel && <span className="text-[11px] leading-none">Search</span>}</button>;
-}
-
-function NavigationButton({ section, label, activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, layoutId, showLabel, onSectionChange }: { section: DashboardSection; label: string; activeSection: DashboardSection; pendingRequestCount: number; unreadMessageCount: number; archivedConversationCount: number; layoutId: string; showLabel: boolean; onSectionChange: (section: DashboardSection) => void }) {
-  const shouldReduceMotion = useReducedMotion();
-  const isActive = activeSection === section;
-  const badgeCount = section === "requests" ? pendingRequestCount : section === "messages" ? unreadMessageCount : section === "archived" ? archivedConversationCount : 0;
-  const badgeDescription = section === "requests" ? `${badgeCount} pending message ${badgeCount === 1 ? "request" : "requests"}` : section === "archived" ? `${badgeCount} archived ${badgeCount === 1 ? "conversation" : "conversations"}` : `${badgeCount} unread ${badgeCount === 1 ? "message" : "messages"}`;
-  const accessibleLabel = badgeCount > 0 ? `${label}, ${badgeDescription}` : label;
-
-  return (
-    <button type="button" aria-label={accessibleLabel} aria-current={isActive ? "page" : undefined} title={label} onClick={() => onSectionChange(section)} className={`${showLabel ? "min-w-0 flex-1 flex-col gap-1 py-2" : "h-12 w-12"} relative flex items-center justify-center rounded-2xl text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isActive ? "text-white" : "text-muted hover:bg-accent hover:text-heading"}`}>
-      {isActive && <motion.span layoutId={layoutId} className="absolute inset-0 rounded-2xl bg-primary shadow-soft" transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }} />}
-      <span className="relative z-10 flex items-center justify-center"><SectionIcon section={section} /></span>
-      {showLabel && <span className="relative z-10 text-[11px] leading-none">{label}</span>}
-      {(section === "requests" || section === "messages" || section === "archived") && <CountBadge count={badgeCount} label={badgeDescription} compact={showLabel} />}
-    </button>
-  );
-}
-
-function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, isCompactChatVisible, onSectionChange, onSearch }: NavigationRailProps) {
   return (
     <>
-      <aside className="hidden h-full w-16 shrink-0 flex-col items-center border-r border-border bg-background py-4 md:flex lg:w-[72px]" aria-label="Dashboard navigation">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-surface text-lg font-bold text-primary shadow-soft" aria-label="Nemissive">N</div>
-        <nav className="mt-7 flex flex-col gap-2" aria-label="Dashboard sections">
+      <aside className={`hidden h-full w-16 shrink-0 flex-col items-center border-r border-border bg-background py-4 md:flex lg:w-[72px] ${isFocusMode ? "lg:hidden" : ""}`} aria-label="Nemissive command rail">
+        <AccountMenuPopover profile={currentProfile} variant="rail" isSigningOut={isSigningOut} onOpenSurface={onOpenPersonalSurface} onRequestSignOut={onRequestSignOut} />
+        <nav className="mt-7 flex flex-col gap-2" aria-label="Nemissive destinations">
           <SearchNavigationButton showLabel={false} onSearch={onSearch} />
-          {navigationItems.map((item) => <NavigationButton key={item.section} {...item} activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} archivedConversationCount={archivedConversationCount} layoutId="desktop-dashboard-section" showLabel={false} onSectionChange={onSectionChange} />)}
+          {workspaceDestinations.map((item) => <DashboardDestinationButton key={item.section} {...item} {...sharedDestinationProps} layoutId="desktop-dashboard-section" showLabel={false} />)}
         </nav>
-        <div className="mt-auto"><NavigationButton section="menu" label="Menu" activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} archivedConversationCount={archivedConversationCount} layoutId="desktop-dashboard-section" showLabel={false} onSectionChange={onSectionChange} /></div>
+        <div className="mt-auto flex flex-col gap-2">
+          <button type="button" data-pulse-visibility-control="true" onClick={() => onPulseVisibilityChange(!pulseVisible)} aria-label={pulseVisible ? "Hide Pulse" : "Show Pulse"} aria-pressed={pulseVisible} title={pulseVisible ? "Hide Pulse" : "Show Pulse"} className={`relative hidden h-12 w-12 items-center justify-center rounded-2xl transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover xl:flex ${pulseVisible ? "bg-accent text-primary" : "text-muted hover:bg-accent hover:text-heading"}`}><PulseIcon /></button>
+        </div>
       </aside>
 
-      {!isCompactChatVisible && <nav className="order-last flex shrink-0 items-center gap-0.5 border-t border-border bg-surface px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden" aria-label="Dashboard sections"><SearchNavigationButton showLabel onSearch={onSearch} />{[...navigationItems, { section: "menu" as const, label: "Menu" }].map((item) => <NavigationButton key={item.section} {...item} activeSection={activeSection} pendingRequestCount={pendingRequestCount} unreadMessageCount={unreadMessageCount} archivedConversationCount={archivedConversationCount} layoutId="mobile-dashboard-section" showLabel onSectionChange={onSectionChange} />)}</nav>}
+      {!isCompactChatVisible && <nav className="order-last flex shrink-0 items-center gap-0.5 border-t border-border bg-surface px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden" aria-label="Dashboard sections"><SearchNavigationButton showLabel onSearch={onSearch} />{mobileDashboardDestinations.map((item) => <DashboardDestinationButton key={item.section} {...item} {...sharedDestinationProps} layoutId="mobile-dashboard-section" showLabel />)}</nav>}
     </>
   );
 }

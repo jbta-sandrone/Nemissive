@@ -410,6 +410,26 @@ body {
   text-underline-offset: 0.16em;
 }
 
+.pulse-list {
+  scrollbar-color: var(--color-border) transparent;
+  scrollbar-width: thin;
+}
+
+.pulse-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.pulse-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pulse-list::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
 @media (min-width: 1024px) {
   .chat-theme {
     box-shadow: inset 1px 0 0 var(--chat-boundary), -2px 0 9px rgb(20 17 15 / 0.035);

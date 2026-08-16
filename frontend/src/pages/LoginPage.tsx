@@ -1,10 +1,11 @@
 import { useCallback, useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import LoginTransition from "../components/auth/LoginTransition";
 import { supabase } from "../lib/supabase";
 
 function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const isSubmittingRef = useRef(false);
   const hasNavigatedRef = useRef(false);
 
@@ -14,6 +15,7 @@ function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const accountDeleted = Boolean((location.state as { accountDeleted?: boolean } | null)?.accountDeleted);
 
   const handleTransitionComplete = useCallback(() => {
     if (hasNavigatedRef.current) return;
@@ -66,6 +68,8 @@ function LoginPage() {
         <h1 className="mt-2 text-3xl font-bold tracking-tight text-heading sm:text-4xl">Welcome back</h1>
         <p className="mt-3 text-base leading-7 text-body">Sign in to continue your conversations.</p>
       </div>
+
+      {accountDeleted && !message && <div role="status" aria-live="polite" className="mb-6 rounded-2xl border border-border bg-accent px-4 py-3 text-sm leading-6 text-heading"><p className="font-semibold">Your account has been deleted.</p><p className="mt-1 text-body">You’re signed out of Nemissive on this device.</p></div>}
 
       {message && (
         <div role="alert" aria-live="polite" className="mb-6 rounded-2xl border border-primary/25 bg-accent px-4 py-3 text-sm leading-6 text-body">
