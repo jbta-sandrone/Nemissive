@@ -10,6 +10,7 @@ import NewConversationModal from "../components/dashboard/NewConversationModal";
 import PersonalSettingsDialog from "../components/dashboard/PersonalSettingsDialog";
 import Pulse from "../components/dashboard/Pulse";
 import Sidebar from "../components/dashboard/Sidebar";
+import UtilityShelf from "../components/dashboard/UtilityShelf";
 import useConversationReceipts from "../components/dashboard/useConversationReceipts";
 import useConversationRealtime from "../components/dashboard/useConversationRealtime";
 import useBrowserNotifications from "../components/dashboard/useBrowserNotifications";
@@ -47,6 +48,7 @@ function DashboardPage() {
   const [isNewConversationOpen, setIsNewConversationOpen] = useState(false);
   const [reconnectProfile, setReconnectProfile] = useState<ProfileSearchResult | null>(null);
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+  const [isUtilityShelfOpen, setIsUtilityShelfOpen] = useState(false);
   const [personalSurface, setPersonalSurface] = useState<PersonalSurface | null>(null);
   const [isSignOutDialogOpen, setIsSignOutDialogOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -75,6 +77,7 @@ function DashboardPage() {
   const searchReturnFocusRef = useRef<HTMLElement | null>(null);
   const personalSurfaceReturnFocusRef = useRef<HTMLElement | null>(null);
   const signOutReturnFocusRef = useRef<HTMLElement | null>(null);
+  const utilityShelfReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const isSigningOutRef = useRef(false);
 
   useEffect(() => {
@@ -164,6 +167,21 @@ function DashboardPage() {
   const openGlobalSearch = useCallback((trigger?: HTMLElement | null) => {
     searchReturnFocusRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setIsGlobalSearchOpen(true);
+  }, []);
+
+  const toggleUtilityShelf = useCallback((trigger: HTMLButtonElement) => {
+    utilityShelfReturnFocusRef.current = trigger;
+    setIsUtilityShelfOpen((open) => !open);
+  }, []);
+
+  const closeUtilityShelf = useCallback(() => {
+    setIsUtilityShelfOpen(false);
+    window.requestAnimationFrame(() => {
+      const preferredTrigger = utilityShelfReturnFocusRef.current;
+      const visibleTrigger = [...document.querySelectorAll<HTMLButtonElement>("[data-utility-shelf-trigger]")].find((trigger) => trigger.getClientRects().length > 0);
+      if (preferredTrigger?.isConnected && preferredTrigger.getClientRects().length > 0) preferredTrigger.focus();
+      else visibleTrigger?.focus();
+    });
   }, []);
 
   useEffect(() => {
@@ -565,7 +583,8 @@ function DashboardPage() {
           <ChatPanel chatState={resolvedChatState} currentProfile={currentProfile} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} layoutMode={effectiveLayoutMode} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeConversationNicknameEvents={realtimeConversationNicknameEvents} realtimeReceiptEvents={receiptEvents} onlineUserIds={visibleOnlineUserIds} quickReactions={quickReactions} conversationMutedUntil={activeConversationMutedUntil} conversationArchivedAt={activeConversationArchivedAt} onConversationMuteChange={setConversationMute} onConversationThemeChange={setConversationTheme} onConversationArchiveChange={messagesController.setConversationArchived} onConversationDelete={handleConversationDeleted} onConversationDisconnect={handleConversationDisconnect} onReconnectRequested={handleReconnectRequested} onIncomingMessagesSynchronized={advanceDelivered} onConversationRead={advanceRead} onMessageConfirmed={refreshMessagesSilently} onMessageUpdated={patchMessagePreview} onMessageDeletionRolledBack={handleMessageDeletionRolledBack} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} onEnterFocusMode={enterFocusMode} />
           {!isFocusMode && <Pulse conversations={pulseConversations} expanded={workspaceLayout.pulseVisible} onHide={hidePulse} onConversationSelect={openPulseConversation} />}
         </div>
-        {isFocusMode && <CommandDock activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} unreadMessageCount={messagesController.aggregateUnreadCount} archivedConversationCount={messagesController.archivedConversations.length} currentProfile={currentProfile} isSigningOut={isSigningOut} onDestinationChange={handleDockDestinationChange} onOpenPersonalSurface={openPersonalSurface} onRequestSignOut={requestSignOut} onExitFocus={exitFocusMode} onSearch={openGlobalSearch} />}
+        {isFocusMode && <CommandDock activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} unreadMessageCount={messagesController.aggregateUnreadCount} archivedConversationCount={messagesController.archivedConversations.length} currentProfile={currentProfile} isSigningOut={isSigningOut} isUtilityShelfOpen={isUtilityShelfOpen} onDestinationChange={handleDockDestinationChange} onOpenPersonalSurface={openPersonalSurface} onRequestSignOut={requestSignOut} onExitFocus={exitFocusMode} onSearch={openGlobalSearch} onUtilityShelfToggle={toggleUtilityShelf} />}
+        <UtilityShelf isOpen={isUtilityShelfOpen} isFocusMode={isFocusMode} isCompactChatVisible={effectiveCompactChatVisible} onToggle={toggleUtilityShelf} onClose={closeUtilityShelf} />
         <div id="nemissive-activity-layer" className="pointer-events-none fixed inset-0 z-[70]" />
       </div>
 

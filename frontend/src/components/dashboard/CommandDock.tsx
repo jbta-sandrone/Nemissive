@@ -4,6 +4,7 @@ import type { ProfileSearchResult } from "../../types/conversations";
 import AccountMenuPopover, { type PersonalSurface } from "./AccountMenuPopover";
 import { DashboardDestinationButton, SearchNavigationButton } from "./DashboardNavigationControls";
 import { workspaceDestinations } from "./dashboardNavigation";
+import { UtilityShelfIcon } from "./UtilityShelf";
 
 type CommandDockProps = {
   activeSection: DashboardSection;
@@ -12,11 +13,13 @@ type CommandDockProps = {
   archivedConversationCount: number;
   currentProfile: ProfileSearchResult | null;
   isSigningOut: boolean;
+  isUtilityShelfOpen: boolean;
   onDestinationChange: (section: DashboardSection) => void;
   onOpenPersonalSurface: (surface: PersonalSurface, trigger: HTMLButtonElement) => void;
   onRequestSignOut: (trigger: HTMLButtonElement) => void;
   onExitFocus: () => void;
   onSearch: (trigger: HTMLButtonElement) => void;
+  onUtilityShelfToggle: (trigger: HTMLButtonElement) => void;
 };
 
 const dockIdleDelayMs = 3200;
@@ -25,7 +28,7 @@ function WorkspaceIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9 4.5v15" /></svg>;
 }
 
-function CommandDock({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, currentProfile, isSigningOut, onDestinationChange, onOpenPersonalSurface, onRequestSignOut, onExitFocus, onSearch }: CommandDockProps) {
+function CommandDock({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, currentProfile, isSigningOut, isUtilityShelfOpen, onDestinationChange, onOpenPersonalSurface, onRequestSignOut, onExitFocus, onSearch, onUtilityShelfToggle }: CommandDockProps) {
   const [expanded, setExpanded] = useState(true);
   const dockRef = useRef<HTMLDivElement>(null);
   const idleTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
@@ -83,6 +86,7 @@ function CommandDock({ activeSection, pendingRequestCount, unreadMessageCount, a
           <SearchNavigationButton showLabel={false} onSearch={onSearch} />
           {workspaceDestinations.map((item) => <DashboardDestinationButton key={item.section} {...item} {...sharedDestinationProps} layoutId="focus-dashboard-section" showLabel={false} />)}
           <span className="mx-1 h-7 w-px bg-border" aria-hidden="true" />
+          <button type="button" data-utility-shelf-trigger="focus-dock" onClick={(event) => onUtilityShelfToggle(event.currentTarget)} aria-label={isUtilityShelfOpen ? "Close utility shelf" : "Open utility shelf"} aria-controls="nemissive-utility-shelf" aria-expanded={isUtilityShelfOpen} title={isUtilityShelfOpen ? "Close utility shelf" : "Open utility shelf"} className={`flex h-12 w-12 items-center justify-center rounded-2xl transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isUtilityShelfOpen ? "bg-accent text-primary" : "text-muted hover:bg-accent hover:text-heading"}`}><UtilityShelfIcon /></button>
           <button type="button" data-focus-mode-control="exit" onClick={onExitFocus} aria-label="Exit focus mode" title="Exit focus mode" className="flex h-12 w-12 items-center justify-center rounded-2xl text-muted transition-colors hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><WorkspaceIcon /></button>
         </nav>
       ) : (
