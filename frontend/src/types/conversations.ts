@@ -41,6 +41,17 @@ export type RealtimeNotificationPreferencesEvent = {
 
 export type RealtimeProfileIdentityEvent = Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "account_status" | "deleted_at">;
 
+export type ConversationRequestRealtimeChange = {
+  action: "insert" | "update";
+  request: {
+    id: string;
+    senderId: string;
+    recipientId: string;
+    status: "pending" | "accepted" | "declined" | "cancelled";
+    conversationId: string | null;
+  };
+};
+
 export type ParticipantMuteState = {
   conversationId: string;
   userId: string;

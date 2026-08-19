@@ -41,8 +41,9 @@ function CommandDock({ activeSection, pendingRequestCount, unreadMessageCount, a
 
   function scheduleMinimize() {
     clearIdleTimer();
+    if (isUtilityShelfOpen) return;
     idleTimerRef.current = window.setTimeout(() => {
-      if (!isAccountMenuOpenRef.current && !dockRef.current?.contains(document.activeElement) && !dockRef.current?.matches(":hover")) setExpanded(false);
+      if (!isUtilityShelfOpen && !isAccountMenuOpenRef.current && !dockRef.current?.contains(document.activeElement) && !dockRef.current?.matches(":hover")) setExpanded(false);
     }, dockIdleDelayMs);
   }
 
@@ -58,12 +59,12 @@ function CommandDock({ activeSection, pendingRequestCount, unreadMessageCount, a
 
   useEffect(() => {
     idleTimerRef.current = window.setTimeout(() => {
-      if (!isAccountMenuOpenRef.current && !dockRef.current?.contains(document.activeElement) && !dockRef.current?.matches(":hover")) setExpanded(false);
+      if (!isUtilityShelfOpen && !isAccountMenuOpenRef.current && !dockRef.current?.contains(document.activeElement) && !dockRef.current?.matches(":hover")) setExpanded(false);
     }, dockIdleDelayMs);
     return () => {
       if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
     };
-  }, []);
+  }, [isUtilityShelfOpen]);
 
   const sharedDestinationProps = { activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, onSectionChange: onDestinationChange };
 
@@ -78,7 +79,7 @@ function CommandDock({ activeSection, pendingRequestCount, unreadMessageCount, a
   }
 
   return (
-    <div ref={dockRef} className="pointer-events-auto fixed bottom-[max(6.5rem,calc(env(safe-area-inset-bottom)+5.5rem))] left-1/2 z-40 hidden -translate-x-1/2 lg:flex" onPointerEnter={reveal} onPointerMove={scheduleMinimize} onPointerLeave={scheduleMinimize} onFocusCapture={() => { clearIdleTimer(); setExpanded(true); }} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) scheduleMinimize(); }}>
+    <div ref={dockRef} data-shelf-open={isUtilityShelfOpen ? "true" : "false"} className="utility-shelf-aware-dock pointer-events-auto fixed left-1/2 z-[46] hidden -translate-x-1/2 transition-[bottom] duration-200 ease-out motion-reduce:transition-none lg:flex" onPointerEnter={reveal} onPointerMove={scheduleMinimize} onPointerLeave={scheduleMinimize} onFocusCapture={() => { clearIdleTimer(); setExpanded(true); }} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) scheduleMinimize(); }}>
       {expanded ? (
         <nav aria-label="Focus mode command dock" className="flex items-center gap-1 rounded-[1.4rem] border border-border bg-surface/95 p-1.5 shadow-soft backdrop-blur-md transition motion-reduce:transition-none">
           <AccountMenuPopover profile={currentProfile} variant="dock" isSigningOut={isSigningOut} onOpenChange={handleAccountMenuOpenChange} onOpenSurface={onOpenPersonalSurface} onRequestSignOut={onRequestSignOut} />

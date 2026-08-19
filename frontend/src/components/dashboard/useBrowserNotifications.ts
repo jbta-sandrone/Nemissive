@@ -47,7 +47,7 @@ function isNotificationCoordinationMessage(value: unknown): value is Notificatio
   return message.type === "handled" && typeof message.messageId === "string" && typeof message.handledAt === "number";
 }
 
-function isMuted(mutedUntil: string | null) {
+export function isConversationMuted(mutedUntil: string | null) {
   if (!mutedUntil) return false;
   if (mutedUntil === "infinity") return true;
   const timestamp = Date.parse(mutedUntil);
@@ -219,7 +219,7 @@ function useBrowserNotifications({ currentUserId, browserNotificationsEnabled, n
     // Missing relationship data is suppressed rather than risking content or mute-state leakage.
     if (!conversation) return;
     if (document.visibilityState === "visible" && document.hasFocus()) return;
-    if (!state.browserNotificationsEnabled || !isSupported || Notification.permission !== "granted" || isMuted(conversation.mutedUntil)) return;
+    if (!state.browserNotificationsEnabled || !isSupported || Notification.permission !== "granted" || isConversationMuted(conversation.mutedUntil)) return;
 
     const title = getConversationDisplayName(conversation.otherProfile, conversation.otherNickname);
     const body = message.messageType === "voice" ? "Sent a voice message" : message.messageType === "image" ? message.body.trim() ? normalizeNotificationPreview(message.body) : "Sent a photo" : message.messageType === "file" ? message.body.trim() ? normalizeNotificationPreview(message.body) : message.attachments.length > 1 ? `Sent ${message.attachments.length} files` : "Sent a file" : normalizeNotificationPreview(message.body);
