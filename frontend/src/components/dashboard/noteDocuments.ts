@@ -3,6 +3,7 @@ import type { JSONContent } from "@tiptap/core";
 export const noteTitleMaxLength = 120;
 export const noteTextMaxLength = 20_000;
 export const noteDocumentMaxBytes = 128 * 1024;
+export const noteMessageMaxLength = 2000;
 
 export const noteThemeIds = ["default", "midnight", "ocean", "lavender", "emerald", "rose", "sunset"] as const;
 export type NoteThemeId = (typeof noteThemeIds)[number];
@@ -33,6 +34,39 @@ export function getDocumentText(document: JSONContent): string {
   }
   visit(document);
   return pieces.join("").replace(/\n{3,}/gu, "\n\n").trim();
+}
+
+function inlineText(node: JSONContent): string {
+  if (node.type === "hardBreak") return "\n";
+  return `${typeof node.text === "string" ? node.text : ""}${node.content?.map(inlineText).join("") ?? ""}`;
+}
+
+function renderNoteBlock(node: JSONContent, depth = 0, ordinal = 1, parentListType: string | null = null): string {
+  const content = node.content ?? [];
+  if (node.type === "noteAttachment") return "";
+  if (node.type === "paragraph" || node.type === "heading") return inlineText(node).trimEnd();
+  if (node.type === "horizontalRule") return "---";
+  if (node.type === "blockquote") return content.map((child) => renderNoteBlock(child, depth)).filter(Boolean).join("\n").split("\n").map((line) => `> ${line}`).join("\n");
+  if (node.type === "bulletList" || node.type === "orderedList" || node.type === "taskList") {
+    return content.map((child, index) => renderNoteBlock(child, depth, index + 1, node.type ?? null)).filter(Boolean).join("\n");
+  }
+  if (node.type === "listItem" || node.type === "taskItem") {
+    const [first, ...nested] = content;
+    const marker = node.type === "taskItem" ? `[${node.attrs?.checked === true ? "x" : " "}]` : parentListType === "orderedList" ? `${ordinal}.` : "-";
+    const firstText = first ? renderNoteBlock(first, depth + 1) : "";
+    const nestedText = nested.map((child) => renderNoteBlock(child, depth + 1)).filter(Boolean).join("\n");
+    const indent = "  ".repeat(depth);
+    return `${indent}${marker} ${firstText}${nestedText ? `\n${nestedText}` : ""}`.trimEnd();
+  }
+  return content.map((child) => renderNoteBlock(child, depth)).filter(Boolean).join("\n");
+}
+
+export function createNoteMessageSnapshot(title: string, document: JSONContent, maximumLength = noteMessageMaxLength) {
+  const normalizedTitle = title.trim();
+  const body = (document.content ?? []).map((node) => renderNoteBlock(node)).filter(Boolean).join("\n\n").replace(/\n{3,}/gu, "\n\n").trim();
+  const complete = [normalizedTitle, body].filter(Boolean).join("\n\n");
+  if (complete.length <= maximumLength) return { body: complete, wasTruncated: false };
+  return { body: complete.slice(0, Math.max(0, maximumLength - 1)).trimEnd() + "…", wasTruncated: true };
 }
 
 export function getDocumentAttachmentIds(document: JSONContent): string[] {

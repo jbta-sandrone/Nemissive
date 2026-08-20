@@ -6,6 +6,8 @@ import { getEmojiLabel } from "./emojiData";
 type MessageActionSheetProps = {
   canDelete: boolean;
   canEdit: boolean;
+  canCopy: boolean;
+  canForward: boolean;
   canPin: boolean;
   canInteract: boolean;
   isPinned: boolean;
@@ -15,8 +17,10 @@ type MessageActionSheetProps = {
   returnFocusRef: RefObject<HTMLElement | null>;
   themeStyle?: CSSProperties;
   onClose: () => void;
+  onCopy: () => void;
   onDelete: () => void;
   onEdit: () => void;
+  onForward: () => void;
   onOpenEmojiPicker: () => void;
   onPin: () => void;
   onReact: (emoji: string) => void;
@@ -39,7 +43,15 @@ function PinIcon({ filled }: { filled: boolean }) {
   return <svg viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="m8 4 8 0-1 5 3 3v2H6v-2l3-3-1-5Z" strokeLinejoin="round" /><path d="M12 14v6" strokeLinecap="round" /></svg>;
 }
 
-function MessageActionSheet({ canDelete, canEdit, canPin, canInteract, isPinned, isPinPending, messageLabel, quickReactions, returnFocusRef, themeStyle, onClose, onDelete, onEdit, onOpenEmojiPicker, onPin, onReact, onReply }: MessageActionSheetProps) {
+function CopyIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M9 8h10v11H9V8Zm-4 8V5h10" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+
+function ForwardIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="m14 7 5 5-5 5M19 12H9a5 5 0 0 0-5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+
+function MessageActionSheet({ canCopy, canDelete, canEdit, canForward, canPin, canInteract, isPinned, isPinPending, messageLabel, quickReactions, returnFocusRef, themeStyle, onClose, onCopy, onDelete, onEdit, onForward, onOpenEmojiPicker, onPin, onReact, onReply }: MessageActionSheetProps) {
   const shouldReduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const shouldRestoreFocusRef = useRef(true);
@@ -101,6 +113,8 @@ function MessageActionSheet({ canDelete, canEdit, canPin, canInteract, isPinned,
         </section>}
         <section aria-label="Message actions" className="border-b border-border py-2">
           {canInteract && <button type="button" onClick={() => runAction(onReply)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ReplyIcon /></span><span>Reply</span></button>}
+          {canCopy && <button type="button" onClick={() => { onClose(); onCopy(); }} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><CopyIcon /></span><span>Copy</span></button>}
+          <button type="button" onClick={() => runAction(onForward)} disabled={!canForward} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ForwardIcon /></span><span><span className="block">Forward</span>{!canForward && <span className="block text-xs font-medium text-muted">Text messages only</span>}</span></button>
           {canPin && <button type="button" onClick={() => { onClose(); onPin(); }} disabled={isPinPending} aria-pressed={isPinned} aria-label={isPinned ? "Unpin this message" : "Pin this message"} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-60"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><PinIcon filled={isPinned} /></span><span>{isPinned ? "Unpin message" : "Pin message"}</span></button>}
           {canEdit && <button type="button" onClick={() => runAction(onEdit)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><EditIcon /></span><span>Edit</span></button>}
           {canDelete && <button type="button" onClick={() => runAction(onDelete)} aria-label="Delete your message" className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><DeleteIcon /></span><span>Delete</span></button>}

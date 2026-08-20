@@ -255,6 +255,7 @@ export type ChatMessage = {
   attachments: MessageAttachment[];
   replyToMessageId: string | null;
   replyPreview: MessageReplyPreview | null;
+  isForwarded: boolean;
 };
 
 export type OptimisticChatMessage = {

@@ -55,6 +55,7 @@ function parseRealtimeMessage(value: unknown): ChatMessage | null {
     attachments: [],
     replyToMessageId: typeof row.reply_to_message_id === "string" ? row.reply_to_message_id : null,
     replyPreview: null,
+    isForwarded: row.is_forwarded === true,
   };
 }
 
