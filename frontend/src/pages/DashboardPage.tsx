@@ -268,8 +268,28 @@ function DashboardPage() {
   }, []);
 
   const handleForwardMessage = useCallback((message: ChatMessage, trigger: HTMLElement) => {
-    if (message.isDeleted || message.isIntroduction || message.messageType !== "text" || !message.body) return;
-    openMessageDelivery({ kind: "forward", sourceMessageId: message.id, preview: message.body }, trigger);
+    if (message.isDeleted || message.isIntroduction) return;
+    if (message.messageType === "text" && !message.body) return;
+    if (message.messageType !== "text" && message.attachments.length === 0) return;
+    const preview = message.body || (message.messageType === "image" ? "Sent a photo" : message.messageType === "voice" ? "Sent a voice message" : message.attachments.length === 1 ? message.attachments[0].originalName : `${message.attachments.length} files`);
+    openMessageDelivery({
+      kind: "forward",
+      sourceMessageId: message.id,
+      messageType: message.messageType,
+      preview,
+      attachments: message.attachments.map((attachment) => ({
+        id: attachment.id,
+        type: attachment.attachmentKind,
+        mimeType: attachment.mimeType,
+        fileName: attachment.originalName,
+        fileSize: attachment.size,
+        durationMs: attachment.durationMs,
+        width: attachment.width,
+        height: attachment.height,
+        storagePath: attachment.storagePath,
+        signedUrl: null,
+      })),
+    }, trigger);
   }, [openMessageDelivery]);
 
   function openPersonalSurface(surface: PersonalSurface, trigger: HTMLButtonElement) {

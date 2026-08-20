@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { AcceptedConversationItem } from "../../types/conversations";
 import ConfirmationDialog from "./ConfirmationDialog";
+import { formatFileSize } from "./fileAttachments";
 import ProfileAvatar from "./ProfileAvatar";
 import { getConversationDisplayName } from "./profileUtils";
 import { formatScheduledInstant, formatScheduledInstantAccessible, localInputsFromInstant, parseLocalScheduledTime } from "./scheduledMessageTime";
@@ -17,6 +18,7 @@ type ScheduledMessagesDialogProps = {
 };
 
 type ConfirmationState = { kind: "cancel" | "send"; item: ScheduledMessage } | null;
+const mediaOnlyEditingPlaceholder = "\u200B";
 
 function CalendarIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M6 3v3m12-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z" strokeLinecap="round" strokeLinejoin="round" /></svg>;
@@ -75,7 +77,7 @@ function ScheduledMessagesDialog({ currentUserId, conversations, returnFocusRef,
     confirmationTriggerRef.current = trigger;
     const local = localInputsFromInstant(item.scheduledFor);
     setEditingId(item.id);
-    setContent(item.contentSnapshot);
+    setContent(item.contentSnapshot || (item.hasAttachments ? mediaOnlyEditingPlaceholder : ""));
     setDateValue(local.date);
     setTimeValue(local.time);
     setError("");
@@ -84,8 +86,8 @@ function ScheduledMessagesDialog({ currentUserId, conversations, returnFocusRef,
 
   async function saveEdit() {
     if (!editingItem || isBusy) return;
-    const normalizedContent = content.trim();
-    if (!normalizedContent) { setError("Enter message text before saving."); return; }
+    const normalizedContent = content.replaceAll(mediaOnlyEditingPlaceholder, "").trim();
+    if (!normalizedContent && !editingItem.hasAttachments) { setError("Enter message text before saving."); return; }
     const parsed = parseLocalScheduledTime(dateValue, timeValue);
     if (!parsed.instant) { setError(parsed.error); return; }
     setIsBusy(true); setError(""); setStatusMessage("");
@@ -120,7 +122,7 @@ function ScheduledMessagesDialog({ currentUserId, conversations, returnFocusRef,
     const conversation = conversationById.get(item.conversationId);
     const name = conversation ? getConversationDisplayName(conversation.otherProfile, conversation.otherNickname) : "Unavailable conversation";
     const statusLabel = item.status === "scheduled" ? "Scheduled" : item.status === "processing" ? "Processing" : item.status === "sent" ? "Sent" : item.status === "failed" ? "Failed" : "Cancelled";
-    return <li key={item.id} className="rounded-2xl border border-border bg-background p-4"><div className="flex items-start gap-3">{conversation ? <ProfileAvatar profile={conversation.otherProfile} size="sm" /> : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-primary"><CalendarIcon /></span>}<div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="truncate text-sm font-semibold text-heading">{name}</p><span className="rounded-full bg-accent px-2.5 py-1 text-xs font-semibold text-primary">{statusLabel}</span></div><time dateTime={item.scheduledFor} aria-label={formatScheduledInstantAccessible(item.scheduledFor)} className="mt-1 block text-xs font-medium text-muted">{formatScheduledInstant(item.scheduledFor)}</time><p className="mt-3 line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6 text-body">{item.contentSnapshot}</p>{item.failureMessage && <p className="mt-3 text-xs leading-5 text-body">{item.failureMessage}</p>}{item.status === "scheduled" && <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={(event) => beginEdit(item, event.currentTarget)} className="min-h-10 rounded-xl border border-border px-3 py-2 text-xs font-semibold text-heading hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Edit / Reschedule</button><button type="button" onClick={(event) => requestConfirmation("send", item, event.currentTarget)} className="min-h-10 rounded-xl border border-border px-3 py-2 text-xs font-semibold text-heading hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Send now</button><button type="button" onClick={(event) => requestConfirmation("cancel", item, event.currentTarget)} className="min-h-10 rounded-xl px-3 py-2 text-xs font-semibold text-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Cancel</button></div>}</div></div></li>;
+    return <li key={item.id} className="rounded-2xl border border-border bg-background p-4"><div className="flex items-start gap-3">{conversation ? <ProfileAvatar profile={conversation.otherProfile} size="sm" /> : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-primary"><CalendarIcon /></span>}<div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="truncate text-sm font-semibold text-heading">{name}</p><span className="rounded-full bg-accent px-2.5 py-1 text-xs font-semibold text-primary">{statusLabel}</span></div><time dateTime={item.scheduledFor} aria-label={formatScheduledInstantAccessible(item.scheduledFor)} className="mt-1 block text-xs font-medium text-muted">{formatScheduledInstant(item.scheduledFor)}</time>{item.contentSnapshot && <p className="mt-3 line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6 text-body">{item.contentSnapshot}</p>}{item.attachmentSummaries.length > 0 && <ul aria-label="Scheduled attachments" className="mt-3 space-y-1.5">{item.attachmentSummaries.map((attachment) => <li key={attachment.id} className="flex min-w-0 items-center justify-between gap-3 rounded-xl bg-card px-3 py-2 text-xs"><span className="min-w-0 truncate font-medium text-heading">{attachment.type === "image" ? "Photo" : attachment.type === "voice" ? "Voice message" : attachment.fileName}</span><span className="shrink-0 text-muted">{formatFileSize(attachment.fileSize)}</span></li>)}</ul>}{item.failureMessage && <p className="mt-3 text-xs leading-5 text-body">{item.failureMessage}</p>}{item.status === "scheduled" && <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={(event) => beginEdit(item, event.currentTarget)} className="min-h-10 rounded-xl border border-border px-3 py-2 text-xs font-semibold text-heading hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Edit / Reschedule</button><button type="button" onClick={(event) => requestConfirmation("send", item, event.currentTarget)} className="min-h-10 rounded-xl border border-border px-3 py-2 text-xs font-semibold text-heading hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Send now</button><button type="button" onClick={(event) => requestConfirmation("cancel", item, event.currentTarget)} className="min-h-10 rounded-xl px-3 py-2 text-xs font-semibold text-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Cancel</button></div>}</div></div></li>;
   }
 
   if (typeof document === "undefined") return null;

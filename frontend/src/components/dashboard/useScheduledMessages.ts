@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 export type ScheduledMessageStatus = "scheduled" | "processing" | "sent" | "failed" | "cancelled";
+export type ScheduledAttachmentSummary = { id: string; type: "image" | "voice" | "file"; mimeType: string; fileName: string; fileSize: number; durationMs: number | null; ordinal: number };
 export type ScheduledMessage = {
   id: string;
   senderId: string;
@@ -11,6 +12,9 @@ export type ScheduledMessage = {
   nextAttemptAt: string;
   status: ScheduledMessageStatus;
   attemptCount: number;
+  hasAttachments: boolean;
+  deliveredMessageIds: string[];
+  attachmentSummaries: ScheduledAttachmentSummary[];
   messageId: string | null;
   failureCode: string | null;
   failureMessage: string | null;
@@ -22,7 +26,7 @@ export type ScheduledMessage = {
 };
 
 type MutationResult = { item: ScheduledMessage | null; error: string | null };
-const scheduledMessageSelect = "id, sender_id, conversation_id, content_snapshot, scheduled_for, next_attempt_at, status, attempt_count, message_id, failure_code, failure_message, sent_at, failed_at, cancelled_at, created_at, updated_at";
+const scheduledMessageSelect = "id, sender_id, conversation_id, content_snapshot, scheduled_for, next_attempt_at, status, attempt_count, has_attachments, delivered_message_ids, message_id, failure_code, failure_message, sent_at, failed_at, cancelled_at, created_at, updated_at";
 
 function isStatus(value: unknown): value is ScheduledMessageStatus {
   return value === "scheduled" || value === "processing" || value === "sent" || value === "failed" || value === "cancelled";
@@ -41,6 +45,9 @@ function parseScheduledMessage(value: unknown): ScheduledMessage | null {
     nextAttemptAt: row.next_attempt_at,
     status: row.status,
     attemptCount: row.attempt_count,
+    hasAttachments: row.has_attachments === true,
+    deliveredMessageIds: Array.isArray(row.delivered_message_ids) ? row.delivered_message_ids.filter((item): item is string => typeof item === "string") : [],
+    attachmentSummaries: [],
     messageId: typeof row.message_id === "string" ? row.message_id : null,
     failureCode: typeof row.failure_code === "string" ? row.failure_code : null,
     failureMessage: typeof row.failure_message === "string" ? row.failure_message : null,
@@ -83,7 +90,19 @@ function useScheduledMessages(currentUserId: string | null) {
     if (!mountedRef.current) return;
     setIsLoading(false);
     if (error) { setLoadError(normalizeScheduledMessageError(error, "Scheduled messages couldn't be loaded.")); return; }
-    setItems(sortItems((data ?? []).map(parseScheduledMessage).filter((item): item is ScheduledMessage => Boolean(item))));
+    const parsed = (data ?? []).map(parseScheduledMessage).filter((item): item is ScheduledMessage => Boolean(item));
+    const mediaIds = parsed.filter((item) => item.hasAttachments).map((item) => item.id);
+    const summariesBySchedule = new Map<string, ScheduledAttachmentSummary[]>();
+    if (mediaIds.length) {
+      const attachmentResult = await supabase.from("scheduled_message_attachments").select("id, scheduled_message_id, attachment_type, mime_type, file_name, file_size, duration_ms, ordinal, created_at").in("scheduled_message_id", mediaIds).order("ordinal", { ascending: true });
+      if (attachmentResult.error) { setLoadError(normalizeScheduledMessageError(attachmentResult.error, "Scheduled media details couldn't be loaded.")); return; }
+      for (const row of attachmentResult.data ?? []) {
+        if (typeof row.scheduled_message_id !== "string" || typeof row.id !== "string" || !["image", "voice", "file"].includes(String(row.attachment_type)) || typeof row.mime_type !== "string" || typeof row.file_name !== "string" || typeof row.file_size !== "number" || typeof row.ordinal !== "number") continue;
+        const summary: ScheduledAttachmentSummary = { id: row.id, type: row.attachment_type as ScheduledAttachmentSummary["type"], mimeType: row.mime_type, fileName: row.file_name, fileSize: row.file_size, durationMs: typeof row.duration_ms === "number" ? row.duration_ms : null, ordinal: row.ordinal };
+        summariesBySchedule.set(row.scheduled_message_id, [...(summariesBySchedule.get(row.scheduled_message_id) ?? []), summary]);
+      }
+    }
+    setItems(sortItems(parsed.map((item) => ({ ...item, attachmentSummaries: summariesBySchedule.get(item.id) ?? [] }))));
     setLoadError("");
   }, [currentUserId]);
 
@@ -98,7 +117,10 @@ function useScheduledMessages(currentUserId: string | null) {
         return;
       }
       const item = parseScheduledMessage(payload.new);
-      if (item?.senderId === currentUserId) merge(item);
+      if (item?.senderId === currentUserId) {
+        if (item.hasAttachments) void load(false);
+        else merge(item);
+      }
     }).subscribe((status) => { if (status === "SUBSCRIBED") { if (subscribed) void load(false); subscribed = true; } });
     const refresh = () => { if (document.visibilityState === "visible") void load(false); };
     window.addEventListener("online", refresh);
@@ -115,14 +137,25 @@ function useScheduledMessages(currentUserId: string | null) {
     return { item, error: null };
   }, [merge]);
 
+  const mutateMedia = useCallback(async (action: "cancel_schedule" | "send_schedule_now", id: string, fallback: string): Promise<MutationResult> => {
+    const { data, error } = await supabase.functions.invoke("message-media-delivery", { body: { action, scheduledMessageId: id } });
+    if (error || !data || typeof data !== "object") return { item: null, error: normalizeScheduledMessageError(error, fallback) };
+    const item = parseScheduledMessage((data as Record<string, unknown>).schedule);
+    if (!item) return { item: null, error: fallback };
+    const existing = items.find((current) => current.id === id);
+    const merged = { ...item, attachmentSummaries: existing?.attachmentSummaries ?? [] };
+    merge(merged);
+    return { item: merged, error: null };
+  }, [items, merge]);
+
   return {
     items,
     isLoading,
     loadError,
     refresh: () => load(true),
     update: (id: string, content: string, instant: string) => mutate("update_scheduled_message", { target_scheduled_message_id: id, candidate_content_snapshot: content, candidate_scheduled_for: instant }, "This scheduled message couldn't be updated."),
-    cancel: (id: string) => mutate("cancel_scheduled_message", { target_scheduled_message_id: id }, "This scheduled message couldn't be cancelled."),
-    sendNow: (id: string) => mutate("send_scheduled_message_now", { target_scheduled_message_id: id }, "This scheduled message couldn't be sent now."),
+    cancel: (id: string) => items.find((item) => item.id === id)?.hasAttachments ? mutateMedia("cancel_schedule", id, "This scheduled multimedia message couldn't be cancelled.") : mutate("cancel_scheduled_message", { target_scheduled_message_id: id }, "This scheduled message couldn't be cancelled."),
+    sendNow: (id: string) => items.find((item) => item.id === id)?.hasAttachments ? mutateMedia("send_schedule_now", id, "This scheduled multimedia message couldn't be sent now.") : mutate("send_scheduled_message_now", { target_scheduled_message_id: id }, "This scheduled message couldn't be sent now."),
   };
 }
 

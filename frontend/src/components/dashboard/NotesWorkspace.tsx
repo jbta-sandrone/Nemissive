@@ -7,7 +7,7 @@ import ConfirmationDialog from "./ConfirmationDialog";
 import type { MessageDeliveryDraft } from "./MessageDeliveryDialog";
 import NoteRichTextEditor from "./NoteRichTextEditor";
 import ScheduledMessagesDialog from "./ScheduledMessagesDialog";
-import { countWords, createNoteMessageSnapshot, documentsEqual, emptyNoteDocument, noteDocumentMaxBytes, noteTextMaxLength, noteThemeIds, noteTitleMaxLength, type NoteThemeId } from "./noteDocuments";
+import { countWords, createNoteMessageSnapshot, documentsEqual, emptyNoteDocument, getDocumentAttachmentIds, noteDocumentMaxBytes, noteTextMaxLength, noteThemeIds, noteTitleMaxLength, type NoteThemeId } from "./noteDocuments";
 import useNoteAttachments, { type NoteAttachment, type NoteAttachmentType } from "./useNoteAttachments";
 import useNotes, { type NoteRecord } from "./useNotes";
 import useVoiceRecorder from "./useVoiceRecorder";
@@ -173,12 +173,36 @@ function NotesWorkspace({ currentUserId, conversations, returnFocusRef, onClose,
     const current = editorRef.current;
     if (!current) return;
     const snapshot = createNoteMessageSnapshot(current.title, current.document);
-    if (!snapshot.body) {
-      setSendError("Add a title or some note text before sending.");
+    const referencedIds = new Set(getDocumentAttachmentIds(current.document));
+    const referencedAttachments = attachmentsApi.attachments.filter((attachment) => referencedIds.has(attachment.id));
+    if (!snapshot.body && referencedAttachments.length === 0) {
+      setSendError("Add note text or an attachment before sending.");
       return;
     }
-    onSend({ kind: "note", body: snapshot.body, preview: snapshot.body, omittedAttachmentCount: attachmentsApi.attachments.length, wasTruncated: snapshot.wasTruncated }, trigger);
-  }, [attachmentsApi.attachments.length, flushEdits, onSend]);
+    if (!current.noteId) {
+      setSendError("Wait for this Note to finish saving before sending.");
+      return;
+    }
+    onSend({
+      kind: "note",
+      noteId: current.noteId,
+      body: snapshot.body,
+      preview: snapshot.body,
+      attachments: referencedAttachments.map((attachment) => ({
+        id: attachment.id,
+        type: attachment.attachmentType,
+        mimeType: attachment.mimeType,
+        fileName: attachment.fileName,
+        fileSize: attachment.fileSize,
+        durationMs: attachment.durationMs,
+        width: null,
+        height: null,
+        storagePath: null,
+        signedUrl: attachment.signedUrl,
+      })),
+      wasTruncated: snapshot.wasTruncated,
+    }, trigger);
+  }, [attachmentsApi.attachments, flushEdits, onSend]);
   useEffect(() => {
     const overflow = document.body.style.overflow; const returnTo = returnFocusRef.current; document.body.style.overflow = "hidden";
     function keys(event: KeyboardEvent) {

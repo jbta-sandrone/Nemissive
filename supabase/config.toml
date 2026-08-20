@@ -1,2 +1,8 @@
 [functions.delete-account]
 verify_jwt = true
+
+[functions.message-media-delivery]
+verify_jwt = true
+
+[functions.scheduled-message-worker]
+verify_jwt = false
