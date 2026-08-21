@@ -190,7 +190,7 @@ type ChatPanelProps = {
   onStartConversation: () => void;
   onMobileBack: () => void;
   onEnterFocusMode: () => void;
-  onMobileComposerClearanceChange: (clearance: number | null) => void;
+  onComposerClearanceChange: (clearance: number | null) => void;
 };
 
 const initialMessageLimit = 50;
@@ -536,7 +536,7 @@ function ReplyQuote({ preview, isStrongOutgoing, canJump, onJump }: { preview: M
   return <div aria-label={`Reply to ${preview.senderName}: ${previewText ?? ""}`} className={className}>{content}</div>;
 }
 
-function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, layoutMode, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onConversationDisconnect, onReconnectRequested, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onForwardMessage, onMobileBack, onEnterFocusMode, onMobileComposerClearanceChange }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; layoutMode: WorkspaceLayoutMode; messageSearchTarget: MessageSearchTarget | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimePinnedMessageEvents: RealtimePinnedMessageEvent[]; realtimeConversationActivityEvents: RealtimeConversationActivityEvent[]; realtimeConversationNicknameEvents: RealtimeConversationNicknameEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; conversationMutedUntil: string | null; conversationArchivedAt: string | null; onConversationMuteChange: (conversationId: string, mutedUntil: string | null) => Promise<string | null>; onConversationThemeChange: (conversationId: string, themeKey: string) => Promise<string | null>; onConversationArchiveChange: (conversationId: string, archived: boolean) => Promise<string | null>; onConversationDelete: (conversationId: string) => Promise<string | null>; onConversationDisconnect: (conversationId: string) => Promise<string | null>; onReconnectRequested: (profile: ProfileSearchResult) => void; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onForwardMessage: (message: ChatMessage, trigger: HTMLElement) => void; onMobileBack: () => void; onEnterFocusMode: () => void; onMobileComposerClearanceChange: (clearance: number | null) => void }) {
+function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, layoutMode, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onConversationDisconnect, onReconnectRequested, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onForwardMessage, onMobileBack, onEnterFocusMode, onComposerClearanceChange }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; layoutMode: WorkspaceLayoutMode; messageSearchTarget: MessageSearchTarget | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimePinnedMessageEvents: RealtimePinnedMessageEvent[]; realtimeConversationActivityEvents: RealtimeConversationActivityEvent[]; realtimeConversationNicknameEvents: RealtimeConversationNicknameEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; conversationMutedUntil: string | null; conversationArchivedAt: string | null; onConversationMuteChange: (conversationId: string, mutedUntil: string | null) => Promise<string | null>; onConversationThemeChange: (conversationId: string, themeKey: string) => Promise<string | null>; onConversationArchiveChange: (conversationId: string, archived: boolean) => Promise<string | null>; onConversationDelete: (conversationId: string) => Promise<string | null>; onConversationDisconnect: (conversationId: string) => Promise<string | null>; onReconnectRequested: (profile: ProfileSearchResult) => void; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onForwardMessage: (message: ChatMessage, trigger: HTMLElement) => void; onMobileBack: () => void; onEnterFocusMode: () => void; onComposerClearanceChange: (clearance: number | null) => void }) {
   const shouldReduceMotion = useReducedMotion();
   const latestLoadRef = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -676,32 +676,30 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const previousVoiceModeRef = useRef(voiceRecorder.mode);
 
   useEffect(() => {
-    if (!compactVisibilitySignal || !composerRegionElement) {
-      onMobileComposerClearanceChange(null);
+    if (!composerRegionElement) {
+      onComposerClearanceChange(null);
       return;
     }
 
     const composerElement = composerRegionElement;
-    const compactQuery = window.matchMedia("(max-width: 767px)");
     let measureFrame: number | null = null;
     function measureComposerBoundary() {
       if (measureFrame !== null) window.cancelAnimationFrame(measureFrame);
       measureFrame = window.requestAnimationFrame(() => {
         measureFrame = null;
-        if (!compactQuery.matches) {
-          onMobileComposerClearanceChange(null);
+        if (composerElement.getClientRects().length === 0) {
+          onComposerClearanceChange(null);
           return;
         }
         const viewport = window.visualViewport;
         const visibleBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
         const composerTop = composerElement.getBoundingClientRect().top;
-        onMobileComposerClearanceChange(Math.max(0, visibleBottom - composerTop) + 12);
+        onComposerClearanceChange(Math.max(0, visibleBottom - composerTop) + 14);
       });
     }
 
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measureComposerBoundary);
     resizeObserver?.observe(composerElement);
-    compactQuery.addEventListener("change", measureComposerBoundary);
     window.addEventListener("resize", measureComposerBoundary);
     window.visualViewport?.addEventListener("resize", measureComposerBoundary);
     window.visualViewport?.addEventListener("scroll", measureComposerBoundary);
@@ -710,13 +708,12 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     return () => {
       if (measureFrame !== null) window.cancelAnimationFrame(measureFrame);
       resizeObserver?.disconnect();
-      compactQuery.removeEventListener("change", measureComposerBoundary);
       window.removeEventListener("resize", measureComposerBoundary);
       window.visualViewport?.removeEventListener("resize", measureComposerBoundary);
       window.visualViewport?.removeEventListener("scroll", measureComposerBoundary);
-      onMobileComposerClearanceChange(null);
+      onComposerClearanceChange(null);
     };
-  }, [compactVisibilitySignal, composerRegionElement, onMobileComposerClearanceChange]);
+  }, [compactVisibilitySignal, composerRegionElement, onComposerClearanceChange]);
 
   useEffect(() => {
     if (interactionStatus.messagingAvailable) return;
@@ -2852,7 +2849,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   );
 }
 
-function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, layoutMode, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onConversationDisconnect, onReconnectRequested, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onForwardMessage, onStartConversation, onMobileBack, onEnterFocusMode, onMobileComposerClearanceChange }: ChatPanelProps) {
+function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, layoutMode, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onConversationDisconnect, onReconnectRequested, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onForwardMessage, onStartConversation, onMobileBack, onEnterFocusMode, onComposerClearanceChange }: ChatPanelProps) {
   const visibilityClasses = isMobileVisible ? "flex" : "hidden lg:flex";
 
   if (chatState?.kind === "pending") {
@@ -2867,7 +2864,7 @@ function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, 
   }
 
   if (chatState?.kind === "accepted") {
-    return <main className={`${visibilityClasses} chat-theme min-w-0 flex-1 flex-col overflow-hidden bg-background`} style={getConversationThemeStyle(chatState.conversation.themeKey)} data-chat-theme={normalizeConversationThemeId(chatState.conversation.themeKey)}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} layoutMode={layoutMode} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeConversationNicknameEvents={realtimeConversationNicknameEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} conversationMutedUntil={conversationMutedUntil} conversationArchivedAt={conversationArchivedAt} onConversationMuteChange={onConversationMuteChange} onConversationThemeChange={onConversationThemeChange} onConversationArchiveChange={onConversationArchiveChange} onConversationDelete={onConversationDelete} onConversationDisconnect={onConversationDisconnect} onReconnectRequested={onReconnectRequested} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onForwardMessage={onForwardMessage} onMobileBack={onMobileBack} onEnterFocusMode={onEnterFocusMode} onMobileComposerClearanceChange={onMobileComposerClearanceChange} /></main>;
+    return <main className={`${visibilityClasses} chat-theme min-w-0 flex-1 flex-col overflow-hidden bg-background`} style={getConversationThemeStyle(chatState.conversation.themeKey)} data-chat-theme={normalizeConversationThemeId(chatState.conversation.themeKey)}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} layoutMode={layoutMode} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeConversationNicknameEvents={realtimeConversationNicknameEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} conversationMutedUntil={conversationMutedUntil} conversationArchivedAt={conversationArchivedAt} onConversationMuteChange={onConversationMuteChange} onConversationThemeChange={onConversationThemeChange} onConversationArchiveChange={onConversationArchiveChange} onConversationDelete={onConversationDelete} onConversationDisconnect={onConversationDisconnect} onReconnectRequested={onReconnectRequested} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onForwardMessage={onForwardMessage} onMobileBack={onMobileBack} onEnterFocusMode={onEnterFocusMode} onComposerClearanceChange={onComposerClearanceChange} /></main>;
   }
 
   return (

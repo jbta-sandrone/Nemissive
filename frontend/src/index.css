@@ -40,61 +40,8 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Application-level Utility Shelf metrics. The Shelf is portalled and fixed, so
-   opening it never participates in Dashboard grid/flex sizing. */
-.utility-shelf-layer {
-  --utility-shelf-bottom: max(0.5rem, env(safe-area-inset-bottom));
-  --utility-shelf-height: min(62dvh, 30rem);
-  --utility-shelf-inline: 0.5rem;
-  --utility-shelf-closed-handle-bottom: max(5.25rem, calc(env(safe-area-inset-bottom) + 4.75rem));
-}
-
-.utility-shelf-layer[data-compact-chat="true"] {
-  --utility-shelf-closed-handle-bottom: var(
-    --utility-shelf-mobile-composer-clearance,
-    max(5.25rem, calc(env(safe-area-inset-bottom) + 4.75rem))
-  );
-}
-
-.utility-shelf-panel {
-  inset-inline: var(--utility-shelf-inline);
-  bottom: var(--utility-shelf-bottom);
-  height: var(--utility-shelf-height);
-}
-
-.utility-shelf-handle {
-  bottom: var(--utility-shelf-closed-handle-bottom);
-}
-
-.utility-shelf-handle[data-open="true"] {
-  bottom: calc(var(--utility-shelf-bottom) + var(--utility-shelf-height) - 1.375rem);
-}
-
-.utility-shelf-aware-dock {
+.command-dock {
   bottom: max(6.5rem, calc(env(safe-area-inset-bottom) + 5.5rem));
-}
-
-@media (min-width: 40rem) {
-  .utility-shelf-layer {
-    --utility-shelf-bottom: max(0.75rem, env(safe-area-inset-bottom));
-    --utility-shelf-height: min(52dvh, 26rem);
-    --utility-shelf-inline: 0.75rem;
-  }
-}
-
-@media (min-width: 48rem) {
-  .utility-shelf-layer {
-    --utility-shelf-bottom: max(1rem, env(safe-area-inset-bottom));
-    --utility-shelf-height: clamp(13rem, 31dvh, 22rem);
-    --utility-shelf-inline: 1rem;
-    --utility-shelf-closed-handle-bottom: max(1rem, env(safe-area-inset-bottom));
-  }
-}
-
-@media (min-width: 64rem) {
-  .utility-shelf-aware-dock[data-shelf-open="true"] {
-    bottom: calc(max(1rem, env(safe-area-inset-bottom)) + clamp(13rem, 31dvh, 22rem) - 1.75rem);
-  }
 }
 
 :root[data-appearance="dark"] {

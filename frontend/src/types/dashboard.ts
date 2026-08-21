@@ -4,5 +4,4 @@ export type WorkspaceLayoutMode = "workspace" | "focus";
 
 export type WorkspaceLayoutState = {
   mode: WorkspaceLayoutMode;
-  pulseVisible: boolean;
 };
