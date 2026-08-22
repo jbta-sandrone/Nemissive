@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
 import type { ChatMessage, ComposerFileSelection, ComposerImageSelection, ComposerVoiceRecording, ConfirmedMessageStatus, ConversationActivityEvent, DashboardChatState, DisplayChatMessage, MessageAttachment, MessageReaction, MessageReactionDeleteIdentity, MessageReplyPreview, MessageSearchTarget, OptimisticChatMessage, OptimisticMessageAttachment, ParticipantReceiptCursor, PinnedMessagePreview, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeConversationActivityEvent, RealtimeConversationNicknameEvent, RealtimeMessageReactionEvent, RealtimeParticipantReceiptEvent, RealtimePinnedMessageEvent, SelectedConversation } from "../../types/conversations";
@@ -35,6 +35,8 @@ import { formatVoiceDuration } from "./voiceUtils";
 import { getConversationTheme, getConversationThemeStyle, normalizeConversationThemeId, type ConversationThemeId } from "./conversationThemes";
 import { acceptedFileInputTypes, fileAttachmentMaxCount, fileAttachmentMaxSize, normalizeAllowedFile, sanitizeAttachmentFilename } from "./fileAttachments";
 import type { WorkspaceLayoutMode } from "../../types/dashboard";
+import { ConversationReminderStatus } from "./ReminderAwareness";
+import type { ReminderRecord } from "./useReminders";
 
 type MessageRow = {
   id: string;
@@ -105,11 +107,14 @@ type ConversationEventRow = {
   event_id: string;
   conversation_id: string;
   actor_id: string;
-  event_type: "message_pinned" | "nickname_changed" | "nickname_removed" | "theme_changed";
+  event_type: "message_pinned" | "nickname_changed" | "nickname_removed" | "theme_changed" | "reminder_created";
   target_message_id: string | null;
   target_user_id: string | null;
   nickname_value: string | null;
   theme_key: string | null;
+  target_reminder_id: string | null;
+  reminder_title: string | null;
+  reminder_due_at: string | null;
   created_at: string;
 };
 
@@ -190,7 +195,9 @@ type ChatPanelProps = {
   onStartConversation: () => void;
   onMobileBack: () => void;
   onEnterFocusMode: () => void;
-  onComposerClearanceChange: (clearance: number | null) => void;
+  sharedReminders: ReminderRecord[];
+  onReminderOpen: (reminder: ReminderRecord, trigger: HTMLElement) => void;
+  onReminderEventOpen: (reminderId: string, trigger: HTMLElement) => void;
 };
 
 const initialMessageLimit = 50;
@@ -324,13 +331,16 @@ function mapConversationEventRow(row: ConversationEventRow, currentUserId: strin
     targetUserName: row.target_user_id === currentUserId ? currentName : row.target_user_id ? otherAccountName : null,
     nicknameValue: row.nickname_value,
     themeKey: row.theme_key,
+    targetReminderId: row.target_reminder_id,
+    reminderTitle: row.reminder_title,
+    reminderDueAt: row.reminder_due_at,
     createdAt: row.created_at,
     isOptimistic: false,
   };
 }
 
 function mergeConversationEvent(events: ConversationActivityEvent[], incoming: ConversationActivityEvent) {
-  return [...events.filter((event) => event.id !== incoming.id && !(event.isOptimistic && event.actorId === incoming.actorId && event.targetMessageId === incoming.targetMessageId)), incoming]
+  return [...events.filter((event) => event.id !== incoming.id && !(event.isOptimistic && event.actorId === incoming.actorId && ((event.targetMessageId && event.targetMessageId === incoming.targetMessageId) || (event.targetReminderId && event.targetReminderId === incoming.targetReminderId)))), incoming]
     .sort((first, second) => {
       const timestampDifference = Date.parse(first.createdAt) - Date.parse(second.createdAt);
       return timestampDifference || first.id.localeCompare(second.id);
@@ -536,13 +546,12 @@ function ReplyQuote({ preview, isStrongOutgoing, canJump, onJump }: { preview: M
   return <div aria-label={`Reply to ${preview.senderName}: ${previewText ?? ""}`} className={className}>{content}</div>;
 }
 
-function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, layoutMode, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onConversationDisconnect, onReconnectRequested, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onForwardMessage, onMobileBack, onEnterFocusMode, onComposerClearanceChange }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; layoutMode: WorkspaceLayoutMode; messageSearchTarget: MessageSearchTarget | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimePinnedMessageEvents: RealtimePinnedMessageEvent[]; realtimeConversationActivityEvents: RealtimeConversationActivityEvent[]; realtimeConversationNicknameEvents: RealtimeConversationNicknameEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; conversationMutedUntil: string | null; conversationArchivedAt: string | null; onConversationMuteChange: (conversationId: string, mutedUntil: string | null) => Promise<string | null>; onConversationThemeChange: (conversationId: string, themeKey: string) => Promise<string | null>; onConversationArchiveChange: (conversationId: string, archived: boolean) => Promise<string | null>; onConversationDelete: (conversationId: string) => Promise<string | null>; onConversationDisconnect: (conversationId: string) => Promise<string | null>; onReconnectRequested: (profile: ProfileSearchResult) => void; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onForwardMessage: (message: ChatMessage, trigger: HTMLElement) => void; onMobileBack: () => void; onEnterFocusMode: () => void; onComposerClearanceChange: (clearance: number | null) => void }) {
+function AcceptedConversationPanel({ conversation, currentProfile, currentUserId, compactVisibilitySignal, layoutMode, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, isOtherUserOnline, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onConversationDisconnect, onReconnectRequested, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onForwardMessage, onMobileBack, onEnterFocusMode, sharedReminders, onReminderOpen, onReminderEventOpen }: { conversation: SelectedConversation; currentProfile: ProfileSearchResult | null; currentUserId: string | null; compactVisibilitySignal: boolean; layoutMode: WorkspaceLayoutMode; messageSearchTarget: MessageSearchTarget | null; realtimeRefreshKey: number; realtimeMessageEvents: RealtimeChatMessageEvent[]; realtimeMessageUpdateEvents: RealtimeChatMessageUpdateEvent[]; realtimeReactionEvents: RealtimeMessageReactionEvent[]; realtimePinnedMessageEvents: RealtimePinnedMessageEvent[]; realtimeConversationActivityEvents: RealtimeConversationActivityEvent[]; realtimeConversationNicknameEvents: RealtimeConversationNicknameEvent[]; realtimeReceiptEvents: RealtimeParticipantReceiptEvent[]; isOtherUserOnline: boolean; quickReactions: string[]; conversationMutedUntil: string | null; conversationArchivedAt: string | null; onConversationMuteChange: (conversationId: string, mutedUntil: string | null) => Promise<string | null>; onConversationThemeChange: (conversationId: string, themeKey: string) => Promise<string | null>; onConversationArchiveChange: (conversationId: string, archived: boolean) => Promise<string | null>; onConversationDelete: (conversationId: string) => Promise<string | null>; onConversationDisconnect: (conversationId: string) => Promise<string | null>; onReconnectRequested: (profile: ProfileSearchResult) => void; onIncomingMessagesSynchronized: (conversationId: string, messageCreatedAt: string) => void; onConversationRead: (conversationId: string, messageCreatedAt: string) => void; onMessageConfirmed: () => void; onMessageUpdated: (message: ChatMessage) => void; onMessageDeletionRolledBack: (message: ChatMessage) => void; onForwardMessage: (message: ChatMessage, trigger: HTMLElement) => void; onMobileBack: () => void; onEnterFocusMode: () => void; sharedReminders: ReminderRecord[]; onReminderOpen: (reminder: ReminderRecord, trigger: HTMLElement) => void; onReminderEventOpen: (reminderId: string, trigger: HTMLElement) => void }) {
   const shouldReduceMotion = useReducedMotion();
   const latestLoadRef = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [composerRegionElement, setComposerRegionElement] = useState<HTMLElement | null>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -674,46 +683,6 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const signedMedia = useSignedMessageMedia(signedMediaPaths);
   const voiceRecorder = useVoiceRecorder();
   const previousVoiceModeRef = useRef(voiceRecorder.mode);
-
-  useEffect(() => {
-    if (!composerRegionElement) {
-      onComposerClearanceChange(null);
-      return;
-    }
-
-    const composerElement = composerRegionElement;
-    let measureFrame: number | null = null;
-    function measureComposerBoundary() {
-      if (measureFrame !== null) window.cancelAnimationFrame(measureFrame);
-      measureFrame = window.requestAnimationFrame(() => {
-        measureFrame = null;
-        if (composerElement.getClientRects().length === 0) {
-          onComposerClearanceChange(null);
-          return;
-        }
-        const viewport = window.visualViewport;
-        const visibleBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-        const composerTop = composerElement.getBoundingClientRect().top;
-        onComposerClearanceChange(Math.max(0, visibleBottom - composerTop) + 14);
-      });
-    }
-
-    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measureComposerBoundary);
-    resizeObserver?.observe(composerElement);
-    window.addEventListener("resize", measureComposerBoundary);
-    window.visualViewport?.addEventListener("resize", measureComposerBoundary);
-    window.visualViewport?.addEventListener("scroll", measureComposerBoundary);
-    measureComposerBoundary();
-
-    return () => {
-      if (measureFrame !== null) window.cancelAnimationFrame(measureFrame);
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", measureComposerBoundary);
-      window.visualViewport?.removeEventListener("resize", measureComposerBoundary);
-      window.visualViewport?.removeEventListener("scroll", measureComposerBoundary);
-      onComposerClearanceChange(null);
-    };
-  }, [compactVisibilitySignal, composerRegionElement, onComposerClearanceChange]);
 
   useEffect(() => {
     if (interactionStatus.messagingAvailable) return;
@@ -1013,6 +982,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       return loadedEvents.reduce((nextEvents, event) => mergeConversationEvent(nextEvents, event), currentVisibleEvents).slice(-conversationEventLimit);
     });
   }, [conversation.id, currentName, currentUserId, otherAccountName, otherName, rememberConversationEvent]);
+  const sharedReminderActivityKey = useMemo(() => sharedReminders.map((item) => `${item.id}:${item.personalStatus}:${item.updatedAt}`).join("|"), [sharedReminders]);
+  const previousSharedReminderActivityKeyRef = useRef(sharedReminderActivityKey);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
@@ -1022,6 +993,12 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     }, 0);
     return () => window.clearTimeout(loadTimer);
   }, [loadConversationEvents, loadConversationNicknames, loadPinnedMessages, realtimeRefreshKey]);
+
+  useEffect(() => {
+    if (previousSharedReminderActivityKeyRef.current === sharedReminderActivityKey) return;
+    previousSharedReminderActivityKeyRef.current = sharedReminderActivityKey;
+    void loadConversationEvents();
+  }, [loadConversationEvents, sharedReminderActivityKey]);
 
   useEffect(() => {
     const loadId = ++latestLoadRef.current;
@@ -1471,11 +1448,15 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     relevantEvents.forEach((change) => {
       if (change.action === "delete") {
         rememberDeletedConversationEvent(change.event.id);
-        setConversationEvents((currentEvents) => currentEvents.filter((event) => event.id !== change.event.id && (!change.event.targetMessageId || event.targetMessageId !== change.event.targetMessageId)));
+        setConversationEvents((currentEvents) => currentEvents.filter((event) => event.id !== change.event.id && (!change.event.targetMessageId || event.targetMessageId !== change.event.targetMessageId) && (!change.event.targetReminderId || event.targetReminderId !== change.event.targetReminderId)));
         return;
       }
 
       if (deletedConversationEventIdsRef.current.has(change.event.id)) return;
+      if (change.event.eventType === "reminder_created") {
+        void loadConversationEvents();
+        return;
+      }
       if (!rememberConversationEvent(change.event.id)) return;
       const event: ConversationActivityEvent = {
         ...change.event,
@@ -1487,7 +1468,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (change.event.eventType === "message_pinned" && change.event.actorId !== currentUserId) showPinToast(`${otherName} pinned a message`);
       if (change.event.eventType === "theme_changed" && change.event.actorId !== currentUserId) showPinToast(`${otherName} changed the theme to ${getConversationTheme(change.event.themeKey).name}`);
     });
-  }, [conversation.id, currentName, currentUserId, otherAccountName, otherName, realtimeConversationActivityEvents, rememberConversationEvent, rememberDeletedConversationEvent, showPinToast]);
+  }, [conversation.id, currentName, currentUserId, loadConversationEvents, otherAccountName, otherName, realtimeConversationActivityEvents, rememberConversationEvent, rememberDeletedConversationEvent, showPinToast]);
 
   useEffect(() => {
     const newEvents = realtimeReceiptEvents.filter((event) => event.sequence > processedReceiptSequenceRef.current);
@@ -2584,7 +2565,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     setPinMutationError("");
     setPinnedMessages((currentPins) => shouldPin ? [createPinnedMessagePreview(message, currentUserId, otherName), ...currentPins.filter((pin) => pin.messageId !== message.id)] : currentPins.filter((pin) => pin.messageId !== message.id));
     if (shouldPin) {
-      setConversationEvents((currentEvents) => mergeConversationEvent(currentEvents, { id: optimisticEventId, conversationId: conversation.id, actorId: currentUserId, actorName: "You", eventType: "message_pinned", targetMessageId: message.id, targetUserId: null, targetUserName: null, nicknameValue: null, themeKey: null, createdAt: new Date().toISOString(), isOptimistic: true }));
+      setConversationEvents((currentEvents) => mergeConversationEvent(currentEvents, { id: optimisticEventId, conversationId: conversation.id, actorId: currentUserId, actorName: "You", eventType: "message_pinned", targetMessageId: message.id, targetUserId: null, targetUserName: null, nicknameValue: null, themeKey: null, targetReminderId: null, reminderTitle: null, reminderDueAt: null, createdAt: new Date().toISOString(), isOptimistic: true }));
       showPinToast("Message pinned");
     }
 
@@ -2743,6 +2724,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       <p aria-live="polite" className="sr-only">{newMessageAnnouncement}</p>
       <div className="pointer-events-none absolute left-1/2 top-20 z-40 w-[min(calc(100%-2rem),22rem)] -translate-x-1/2"><AnimatePresence initial={false}>{pinToast && <motion.div key={pinToast.id} role="status" aria-live="polite" aria-atomic="true" initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }} transition={{ duration: shouldReduceMotion ? 0 : 0.16 }} className="chat-surface rounded-2xl border border-border bg-surface px-4 py-3 text-center text-sm font-semibold text-heading shadow-soft">{pinToast.message}</motion.div>}</AnimatePresence></div>
       <div className="relative min-h-0 flex-1">
+        <ConversationReminderStatus reminders={sharedReminders} onOpen={onReminderOpen} />
         <div ref={scrollViewportRef} role="region" aria-label={`Messages with ${otherName}`} onScroll={handleScroll} className="chat-timeline absolute inset-0 overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 lg:px-10">
           {isLoading ? (
             <div role="status" aria-live="polite" className="mx-auto max-w-2xl space-y-4"><div className="h-20 w-3/4 animate-pulse rounded-3xl bg-accent" /><div className="ml-auto h-16 w-2/3 animate-pulse rounded-3xl bg-accent" /></div>
@@ -2759,7 +2741,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
               {shouldShowIntroductoryFallback && <article className="flex justify-start"><div className="max-w-[85%] rounded-3xl rounded-bl-md border border-border bg-surface px-4 py-3 text-body shadow-soft sm:max-w-[75%]"><p className="whitespace-pre-wrap break-words text-sm leading-6">{conversation.introductoryMessage}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">{conversation.introductoryMessageCreatedAt && <time dateTime={conversation.introductoryMessageCreatedAt}>{formatMessageTimestamp(conversation.introductoryMessageCreatedAt)}</time>}<span>Introduction</span></div></div></article>}
               {conversationEventsError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>{conversationEventsError}</p><button type="button" onClick={() => void loadConversationEvents()} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry activity</button></div>}
               {timelineItems.map((item) => {
-                if (item.kind === "event") return <ConversationActivityRow key={item.id} event={item.event} currentUserId={currentUserId} onActivate={(event) => { if (event.targetMessageId) openMessageTarget(event.targetMessageId, "event"); }} />;
+                if (item.kind === "event") return <ConversationActivityRow key={item.id} event={item.event} currentUserId={currentUserId} onActivate={(event, trigger) => { if (event.targetMessageId) openMessageTarget(event.targetMessageId, "event"); else if (event.targetReminderId) onReminderEventOpen(event.targetReminderId, trigger); }} />;
                 const message = item.message;
                 const isCurrentUser = message.senderId === currentUserId;
                 const isFailed = message.kind === "optimistic" && message.deliveryState === "failed";
@@ -2813,7 +2795,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
       {reactionError && <p role="status" aria-live="polite" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{reactionError}</p>}
       {pinMutationError && <p role="alert" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{pinMutationError}</p>}
-      {!interactionStatus.messagingAvailable ? <section ref={setComposerRegionElement} aria-label="Messaging availability" className="chat-composer-region shrink-0 border-t border-border bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-5 lg:px-6"><div role="status" className="chat-composer-surface flex min-w-0 flex-col gap-3 rounded-2xl bg-surface px-4 py-4 shadow-soft sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-semibold text-heading">{isDeletedAccount ? "This account has been deleted." : interactionStatus.iBlocked ? `You blocked ${otherName}.` : !isConnected ? `You’re no longer connected with ${otherName}.` : "Messaging is unavailable for this conversation."}</p>{isDeletedAccount ? <p className="mt-1 text-sm leading-6 text-body">You can still view your conversation history.</p> : interactionStatus.iBlocked ? <p className="mt-1 text-sm leading-6 text-body">Unblock this person before reconnecting or sending messages.</p> : !isConnected && <p className="mt-1 text-sm leading-6 text-body">{conversation.requestAvailable ? "Connect again to send new messages." : "Connection requests are unavailable right now."}</p>}</div>{!isDeletedAccount && (interactionStatus.iBlocked ? <button ref={blockedComposerActionRef} type="button" onClick={() => { setUnblockError(""); setUnblockDialogOpen(true); }} className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-2xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-heading hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Unblock</button> : !isConnected && conversation.requestAvailable && <button type="button" onClick={() => onReconnectRequested(conversation.otherProfile)} className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-soft hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Connect again</button>)}</div></section> : <form ref={setComposerRegionElement} onSubmit={handleSend} className="chat-composer-region shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
+      {!interactionStatus.messagingAvailable ? <section aria-label="Messaging availability" className="chat-composer-region shrink-0 border-t border-border bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-5 lg:px-6"><div role="status" className="chat-composer-surface flex min-w-0 flex-col gap-3 rounded-2xl bg-surface px-4 py-4 shadow-soft sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-semibold text-heading">{isDeletedAccount ? "This account has been deleted." : interactionStatus.iBlocked ? `You blocked ${otherName}.` : !isConnected ? `You’re no longer connected with ${otherName}.` : "Messaging is unavailable for this conversation."}</p>{isDeletedAccount ? <p className="mt-1 text-sm leading-6 text-body">You can still view your conversation history.</p> : interactionStatus.iBlocked ? <p className="mt-1 text-sm leading-6 text-body">Unblock this person before reconnecting or sending messages.</p> : !isConnected && <p className="mt-1 text-sm leading-6 text-body">{conversation.requestAvailable ? "Connect again to send new messages." : "Connection requests are unavailable right now."}</p>}</div>{!isDeletedAccount && (interactionStatus.iBlocked ? <button ref={blockedComposerActionRef} type="button" onClick={() => { setUnblockError(""); setUnblockDialogOpen(true); }} className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-2xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-heading hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Unblock</button> : !isConnected && conversation.requestAvailable && <button type="button" onClick={() => onReconnectRequested(conversation.otherProfile)} className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-soft hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Connect again</button>)}</div></section> : <form onSubmit={handleSend} className="chat-composer-region shrink-0 bg-background px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-3 lg:px-6">
         <TypingIndicator isVisible={isOtherUserTyping} name={otherName} shouldReduceMotion={shouldReduceMotion} />
         {replyingTo && <div aria-label={`Replying to ${replyingTo.senderName}`} className="chat-composer-surface mb-2 flex min-w-0 items-start gap-3 rounded-2xl bg-surface px-4 py-3 shadow-soft"><div className="chat-reply-indicator min-w-0 flex-1 border-l-2 border-primary/40 pl-3"><p className="truncate text-xs font-semibold text-heading">Replying to {replyingTo.senderName}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-body">{replyingTo.body ?? "Earlier message unavailable"}</p></div><button type="button" onClick={() => { setReplyingTo(null); window.requestAnimationFrame(() => textareaRef.current?.focus()); }} aria-label={`Cancel reply to ${replyingTo.senderName}`} className="chat-accent-control flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></div>}
         {voiceRecorder.mode === "idle" && <ComposerMediaPreview images={selectedImages} disabled={isSubmitting} onRemove={removeSelectedImage} onRemoveAll={removeAllSelectedImages} />}
@@ -2849,8 +2831,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   );
 }
 
-function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, layoutMode, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onConversationDisconnect, onReconnectRequested, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onForwardMessage, onStartConversation, onMobileBack, onEnterFocusMode, onComposerClearanceChange }: ChatPanelProps) {
-  const visibilityClasses = isMobileVisible ? "flex" : "hidden lg:flex";
+function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, layoutMode, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onConversationDisconnect, onReconnectRequested, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onForwardMessage, onStartConversation, onMobileBack, onEnterFocusMode, sharedReminders, onReminderOpen, onReminderEventOpen }: ChatPanelProps) {
+  const visibilityClasses = isMobileVisible ? "flex" : "hidden md:flex";
 
   if (chatState?.kind === "pending") {
     const recipientName = getProfileDisplayName(chatState.request.otherProfile);
@@ -2864,11 +2846,11 @@ function ChatPanel({ chatState, currentProfile, currentUserId, isMobileVisible, 
   }
 
   if (chatState?.kind === "accepted") {
-    return <main className={`${visibilityClasses} chat-theme min-w-0 flex-1 flex-col overflow-hidden bg-background`} style={getConversationThemeStyle(chatState.conversation.themeKey)} data-chat-theme={normalizeConversationThemeId(chatState.conversation.themeKey)}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} layoutMode={layoutMode} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeConversationNicknameEvents={realtimeConversationNicknameEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} conversationMutedUntil={conversationMutedUntil} conversationArchivedAt={conversationArchivedAt} onConversationMuteChange={onConversationMuteChange} onConversationThemeChange={onConversationThemeChange} onConversationArchiveChange={onConversationArchiveChange} onConversationDelete={onConversationDelete} onConversationDisconnect={onConversationDisconnect} onReconnectRequested={onReconnectRequested} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onForwardMessage={onForwardMessage} onMobileBack={onMobileBack} onEnterFocusMode={onEnterFocusMode} onComposerClearanceChange={onComposerClearanceChange} /></main>;
+    return <main className={`${visibilityClasses} chat-theme min-w-0 flex-1 flex-col overflow-hidden bg-background`} style={getConversationThemeStyle(chatState.conversation.themeKey)} data-chat-theme={normalizeConversationThemeId(chatState.conversation.themeKey)}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} compactVisibilitySignal={isMobileVisible} layoutMode={layoutMode} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeConversationNicknameEvents={realtimeConversationNicknameEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} conversationMutedUntil={conversationMutedUntil} conversationArchivedAt={conversationArchivedAt} onConversationMuteChange={onConversationMuteChange} onConversationThemeChange={onConversationThemeChange} onConversationArchiveChange={onConversationArchiveChange} onConversationDelete={onConversationDelete} onConversationDisconnect={onConversationDisconnect} onReconnectRequested={onReconnectRequested} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onForwardMessage={onForwardMessage} onMobileBack={onMobileBack} onEnterFocusMode={onEnterFocusMode} sharedReminders={sharedReminders} onReminderOpen={onReminderOpen} onReminderEventOpen={onReminderEventOpen} /></main>;
   }
 
   return (
-    <main className="hidden min-w-0 flex-1 items-center justify-center overflow-hidden bg-background p-6 lg:flex lg:p-10">
+    <main className="hidden min-w-0 flex-1 items-center justify-center overflow-hidden bg-background p-6 md:flex lg:p-10">
       <div className="w-full max-w-md text-center"><div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-accent text-primary shadow-soft lg:h-24 lg:w-24"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-10 w-10 lg:h-12 lg:w-12" aria-hidden="true"><path d="M4 5.5h16v11H8l-4 3v-14Z" strokeLinejoin="round" /><path d="M8 10h8M8 13h5" strokeLinecap="round" /></svg></div><h1 className="mt-6 text-2xl font-bold tracking-tight text-heading lg:mt-8 lg:text-3xl">Welcome to Nemissive</h1><p className="mt-4 text-base leading-7 text-body">Every meaningful conversation starts with a hello.</p><p className="mt-2 text-base leading-7 text-body">Choose someone from the left or start a new conversation.</p><button type="button" onClick={onStartConversation} className="mt-8 inline-flex items-center rounded-2xl bg-primary px-6 py-3 text-sm font-medium text-white shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-lg lg:mt-10">Start Conversation</button></div>
     </main>
   );

@@ -349,12 +349,15 @@ export type ConversationActivityEvent = {
   conversationId: string;
   actorId: string;
   actorName: string;
-  eventType: "message_pinned" | "nickname_changed" | "nickname_removed" | "theme_changed";
+  eventType: "message_pinned" | "nickname_changed" | "nickname_removed" | "theme_changed" | "reminder_created";
   targetMessageId: string | null;
   targetUserId: string | null;
   targetUserName: string | null;
   nicknameValue: string | null;
   themeKey: string | null;
+  targetReminderId: string | null;
+  reminderTitle: string | null;
+  reminderDueAt: string | null;
   createdAt: string;
   isOptimistic: boolean;
 };
@@ -370,6 +373,7 @@ export type ConversationActivityRealtimeChange =
         id: string;
         conversationId: string | null;
         targetMessageId: string | null;
+        targetReminderId: string | null;
       };
     };
 

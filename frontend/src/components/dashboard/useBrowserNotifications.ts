@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AcceptedConversationItem, ChatMessage, SelectedConversation } from "../../types/conversations";
 import { getConversationDisplayName } from "./profileUtils";
+import type { ReminderRecord } from "./useReminders";
 
 type BrowserNotificationPermission = NotificationPermission | "unsupported";
 
@@ -10,6 +11,7 @@ type UseBrowserNotificationsOptions = {
   notificationSoundEnabled: boolean;
   conversations: AcceptedConversationItem[];
   onConversationOpen: (conversation: SelectedConversation) => void;
+  onReminderOpen: (reminderId: string) => void;
 };
 
 type NotificationCoordinationMessage = {
@@ -60,7 +62,7 @@ function normalizeNotificationPreview(value: string) {
   return normalized.length > 140 ? `${normalized.slice(0, 139).trimEnd()}…` : normalized;
 }
 
-function useBrowserNotifications({ currentUserId, browserNotificationsEnabled, notificationSoundEnabled, conversations, onConversationOpen }: UseBrowserNotificationsOptions) {
+function useBrowserNotifications({ currentUserId, browserNotificationsEnabled, notificationSoundEnabled, conversations, onConversationOpen, onReminderOpen }: UseBrowserNotificationsOptions) {
   const isSupported = typeof window !== "undefined" && "Notification" in window;
   const [permission, setPermission] = useState<BrowserNotificationPermission>(() => isSupported ? Notification.permission : "unsupported");
   const recentMessageIdsRef = useRef(new Map<string, number>());
@@ -69,11 +71,13 @@ function useBrowserNotifications({ currentUserId, browserNotificationsEnabled, n
   const audioContextRef = useRef<AudioContext | null>(null);
   const hasUserInteractedRef = useRef(false);
   const lastSoundPlayedAtRef = useRef(0);
-  const latestRef = useRef({ currentUserId, browserNotificationsEnabled, notificationSoundEnabled, conversations, onConversationOpen });
+  const pendingReminderNotificationsRef = useRef(new Set<string>());
+  const pendingReminderTimersRef = useRef(new Map<string, number>());
+  const latestRef = useRef({ currentUserId, browserNotificationsEnabled, notificationSoundEnabled, conversations, onConversationOpen, onReminderOpen });
 
   useEffect(() => {
-    latestRef.current = { currentUserId, browserNotificationsEnabled, notificationSoundEnabled, conversations, onConversationOpen };
-  }, [browserNotificationsEnabled, conversations, currentUserId, notificationSoundEnabled, onConversationOpen]);
+    latestRef.current = { currentUserId, browserNotificationsEnabled, notificationSoundEnabled, conversations, onConversationOpen, onReminderOpen };
+  }, [browserNotificationsEnabled, conversations, currentUserId, notificationSoundEnabled, onConversationOpen, onReminderOpen]);
 
   const rememberMessage = useCallback((messageId: string, handledAt = Date.now()) => {
     const entries = recentMessageIdsRef.current;
@@ -102,6 +106,12 @@ function useBrowserNotifications({ currentUserId, browserNotificationsEnabled, n
       if (broadcastChannelRef.current === channel) broadcastChannelRef.current = null;
     };
   }, [currentUserId, rememberMessage]);
+
+  useEffect(() => () => {
+    for (const timer of pendingReminderTimersRef.current.values()) window.clearTimeout(timer);
+    pendingReminderTimersRef.current.clear();
+    pendingReminderNotificationsRef.current.clear();
+  }, [currentUserId]);
 
   useEffect(() => {
     if (!isSupported) return;
@@ -236,7 +246,46 @@ function useBrowserNotifications({ currentUserId, browserNotificationsEnabled, n
     }
   }, [isSupported, playNotificationSound, rememberMessage]);
 
-  return { isSupported, permission, requestPermission, handleIncomingMessage };
+  const handleDueReminder = useCallback((reminder: ReminderRecord) => {
+    const state = latestRef.current;
+    if (!state.currentUserId || reminder.personalStatus !== "due") return;
+    const notificationKey = `reminder:${reminder.id}:${reminder.notificationVersion}`;
+    if (recentMessageIdsRef.current.has(notificationKey) || pendingReminderNotificationsRef.current.has(notificationKey)) return;
+    if (document.visibilityState === "visible" && document.hasFocus()) {
+      rememberMessage(notificationKey);
+      broadcastChannelRef.current?.postMessage({ type: "handled", messageId: notificationKey, handledAt: Date.now() } satisfies NotificationCoordinationMessage);
+      return;
+    }
+    if (!state.browserNotificationsEnabled || !isSupported || Notification.permission !== "granted") {
+      rememberMessage(notificationKey);
+      broadcastChannelRef.current?.postMessage({ type: "handled", messageId: notificationKey, handledAt: Date.now() } satisfies NotificationCoordinationMessage);
+      return;
+    }
+    pendingReminderNotificationsRef.current.add(notificationKey);
+    const timer = window.setTimeout(() => {
+      pendingReminderTimersRef.current.delete(notificationKey);
+      pendingReminderNotificationsRef.current.delete(notificationKey);
+      if (recentMessageIdsRef.current.has(notificationKey)) return;
+      rememberMessage(notificationKey);
+      broadcastChannelRef.current?.postMessage({ type: "handled", messageId: notificationKey, handledAt: Date.now() } satisfies NotificationCoordinationMessage);
+      const current = latestRef.current;
+      if (!current.currentUserId || current.currentUserId !== state.currentUserId) return;
+      if (document.visibilityState === "visible" && document.hasFocus()) return;
+      const title = reminder.scope === "shared" && reminder.conversationPeer
+        ? `Shared reminder with ${getConversationDisplayName(reminder.conversationPeer)}`
+        : "Nemissive Reminder";
+      try {
+        const notification = new Notification(title, { body: reminder.title, tag: `nemissive-${notificationKey}`, silent: true });
+        notification.onclick = () => { window.focus(); current.onReminderOpen(reminder.id); notification.close(); };
+        if (current.notificationSoundEnabled) playNotificationSound();
+      } catch (error) {
+        if (import.meta.env.DEV) console.warn("Nemissive reminder notification could not be displayed", { error: error instanceof Error ? error.message : "unknown error" });
+      }
+    }, 120);
+    pendingReminderTimersRef.current.set(notificationKey, timer);
+  }, [isSupported, playNotificationSound, rememberMessage]);
+
+  return { isSupported, permission, requestPermission, handleIncomingMessage, handleDueReminder };
 }
 
 export type BrowserNotificationsController = ReturnType<typeof useBrowserNotifications>;

@@ -163,23 +163,25 @@ function parseInsertedConversationActivity(value: unknown): Extract<Conversation
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
   const eventType = row.event_type;
-  if (typeof row.id !== "string" || typeof row.conversation_id !== "string" || typeof row.actor_id !== "string" || (eventType !== "message_pinned" && eventType !== "nickname_changed" && eventType !== "nickname_removed" && eventType !== "theme_changed") || typeof row.created_at !== "string") return null;
+  if (typeof row.id !== "string" || typeof row.conversation_id !== "string" || typeof row.actor_id !== "string" || (eventType !== "message_pinned" && eventType !== "nickname_changed" && eventType !== "nickname_removed" && eventType !== "theme_changed" && eventType !== "reminder_created") || typeof row.created_at !== "string") return null;
   const targetMessageId = typeof row.target_message_id === "string" ? row.target_message_id : null;
   const targetUserId = typeof row.target_user_id === "string" ? row.target_user_id : null;
   const nicknameValue = typeof row.nickname_value === "string" ? row.nickname_value : null;
   const themeKey = typeof row.theme_key === "string" ? row.theme_key : null;
+  const targetReminderId = typeof row.target_reminder_id === "string" ? row.target_reminder_id : null;
   if (eventType === "message_pinned" && !targetMessageId) return null;
   if ((eventType === "nickname_changed" || eventType === "nickname_removed") && !targetUserId) return null;
   if (eventType === "nickname_changed" && !nicknameValue) return null;
   if (eventType === "theme_changed" && !themeKey) return null;
-  return { action: "insert", event: { id: row.id, conversationId: row.conversation_id, actorId: row.actor_id, eventType, targetMessageId, targetUserId, nicknameValue, themeKey, createdAt: row.created_at } };
+  if (eventType === "reminder_created" && !targetReminderId) return null;
+  return { action: "insert", event: { id: row.id, conversationId: row.conversation_id, actorId: row.actor_id, eventType, targetMessageId, targetUserId, nicknameValue, themeKey, targetReminderId, reminderTitle: null, reminderDueAt: null, createdAt: row.created_at } };
 }
 
 function parseDeletedConversationActivity(value: unknown): Extract<ConversationActivityRealtimeChange, { action: "delete" }> | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
   if (typeof row.id !== "string") return null;
-  return { action: "delete", event: { id: row.id, conversationId: typeof row.conversation_id === "string" ? row.conversation_id : null, targetMessageId: typeof row.target_message_id === "string" ? row.target_message_id : null } };
+  return { action: "delete", event: { id: row.id, conversationId: typeof row.conversation_id === "string" ? row.conversation_id : null, targetMessageId: typeof row.target_message_id === "string" ? row.target_message_id : null, targetReminderId: typeof row.target_reminder_id === "string" ? row.target_reminder_id : null } };
 }
 
 function parseUpsertedConversationNickname(value: unknown): Extract<ConversationNicknameRealtimeChange, { action: "upsert" }> | null {

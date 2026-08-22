@@ -3,6 +3,7 @@ import type { AcceptedConversationItem, ProfileSearchResult } from "../../types/
 import AccountMenuPopover, { type PersonalSurface } from "./AccountMenuPopover";
 import { DashboardDestinationButton, SearchNavigationButton } from "./DashboardNavigationControls";
 import { mobileDashboardDestinations, workspaceDestinations } from "./dashboardNavigation";
+import MobilePulseDrawer from "./MobilePulseDrawer";
 import Pulse from "./Pulse";
 
 type NavigationRailProps = {
@@ -11,18 +12,20 @@ type NavigationRailProps = {
   unreadMessageCount: number;
   archivedConversationCount: number;
   isCompactChatVisible: boolean;
+  isMobilePulseAvailable: boolean;
   isFocusMode: boolean;
   currentProfile: ProfileSearchResult | null;
   isSigningOut: boolean;
   pulseConversations: AcceptedConversationItem[];
   onPulseConversationSelect: (conversation: AcceptedConversationItem) => void;
+  onMobilePulseOpenChange: (isOpen: boolean) => void;
   onOpenPersonalSurface: (surface: PersonalSurface, trigger: HTMLButtonElement) => void;
   onRequestSignOut: (trigger: HTMLButtonElement) => void;
   onSectionChange: (section: DashboardSection) => void;
   onSearch: (trigger: HTMLButtonElement) => void;
 };
 
-function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, isCompactChatVisible, isFocusMode, currentProfile, isSigningOut, pulseConversations, onPulseConversationSelect, onOpenPersonalSurface, onRequestSignOut, onSectionChange, onSearch }: NavigationRailProps) {
+function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, isCompactChatVisible, isMobilePulseAvailable, isFocusMode, currentProfile, isSigningOut, pulseConversations, onPulseConversationSelect, onMobilePulseOpenChange, onOpenPersonalSurface, onRequestSignOut, onSectionChange, onSearch }: NavigationRailProps) {
   const sharedDestinationProps = { activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, onSectionChange };
 
   return (
@@ -39,6 +42,7 @@ function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount
       </aside>
 
       {!isCompactChatVisible && <nav className="order-last flex shrink-0 items-center gap-0.5 border-t border-border bg-surface px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden" aria-label="Dashboard sections"><SearchNavigationButton showLabel onSearch={onSearch} />{mobileDashboardDestinations.map((item) => <DashboardDestinationButton key={item.section} {...item} {...sharedDestinationProps} layoutId="mobile-dashboard-section" showLabel />)}</nav>}
+      {isMobilePulseAvailable && <MobilePulseDrawer conversations={pulseConversations} onConversationSelect={onPulseConversationSelect} onOpenChange={onMobilePulseOpenChange} />}
     </>
   );
 }

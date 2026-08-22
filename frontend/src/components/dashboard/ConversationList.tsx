@@ -62,7 +62,7 @@ function ConversationList({ pendingRequests, conversations, searchQuery, selecte
   const hasFilteredItems = filteredPendingRequests.length > 0 || filteredConversations.length > 0;
 
   return (
-    <div aria-busy={isLoading} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-4 sm:px-4">
+    <div aria-busy={isLoading} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-20 sm:px-4">
       {isLoading ? (
         <LoadingRows />
       ) : loadError ? (

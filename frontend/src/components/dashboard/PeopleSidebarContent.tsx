@@ -31,10 +31,10 @@ function PeopleSidebarContent({ conversations, isLoading, errorMessage, selected
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="shrink-0 px-5 pb-4 pt-6 sm:px-6 sm:pt-7 md:px-5 lg:px-6"><h1 className="text-2xl font-bold tracking-tight text-heading">People</h1><p className="mt-2 text-sm leading-6 text-body">People from your accepted conversations.</p></header>
+      <header className="shrink-0 px-5 pb-4 pt-6 sm:px-6 sm:pt-7 md:px-5 lg:px-6"><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight text-heading">People</h1><p className="mt-2 text-sm leading-6 text-body">People from your accepted conversations.</p></div></header>
       <div className="shrink-0 px-4 pb-4 sm:px-5"><label htmlFor="people-search" className="sr-only">Search people in your conversations</label><div className="flex min-w-0 items-center gap-3 rounded-2xl border border-border bg-background px-4 focus-within:border-primary focus-within:ring-4 focus-within:ring-accent-hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0 text-muted" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" strokeLinecap="round" /></svg><input id="people-search" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search your people..." disabled={isLoading || Boolean(errorMessage)} className="min-w-0 flex-1 bg-transparent py-3 text-sm text-heading outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60" /></div></div>
 
-      <div aria-busy={isLoading} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-4 sm:px-4">
+      <div aria-busy={isLoading} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-20 sm:px-4">
         {isLoading ? (
           <div role="status" aria-live="polite" aria-label="Loading people" className="space-y-2">{[0, 1, 2].map((item) => <div key={item} className="flex items-center gap-3 rounded-2xl p-3"><div className="h-12 w-12 animate-pulse rounded-full bg-accent" /><div className="min-w-0 flex-1 space-y-2"><div className="h-4 w-2/5 animate-pulse rounded-full bg-accent" /><div className="h-3 w-1/3 animate-pulse rounded-full bg-accent" /></div></div>)}</div>
         ) : errorMessage ? (

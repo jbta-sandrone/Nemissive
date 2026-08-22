@@ -6,6 +6,7 @@ import { getConversationDisplayName } from "./profileUtils";
 type ActivityToastViewportProps = {
   toasts: ActivityToastItem[];
   offsetForPulse: boolean;
+  embedded?: boolean;
   onActivate: (toast: ActivityToastItem) => void;
   onDismiss: (toastId: string) => void;
   onPause: (toastId: string) => void;
@@ -21,11 +22,11 @@ function getToastCopy(toast: ActivityToastItem) {
   return { name, message: `${name} reacted ${toast.emoji} to your message`, detail: "View message", action: `Open ${name}'s reaction to your message` };
 }
 
-function ActivityToastViewport({ toasts, offsetForPulse, onActivate, onDismiss, onPause, onResume }: ActivityToastViewportProps) {
+function ActivityToastViewport({ toasts, offsetForPulse, embedded = false, onActivate, onDismiss, onPause, onResume }: ActivityToastViewportProps) {
   const shouldReduceMotion = useReducedMotion();
 
   return (
-    <section aria-label="Recent activity" aria-live="polite" aria-relevant="additions text" className={`pointer-events-none absolute right-[max(0.75rem,env(safe-area-inset-right))] top-[max(4.75rem,calc(env(safe-area-inset-top)+4rem))] w-[min(calc(100vw-1.5rem),22rem)] md:right-[max(1rem,env(safe-area-inset-right))] ${offsetForPulse ? "xl:right-32" : ""}`}>
+    <section aria-label="Recent activity" aria-live="polite" aria-relevant="additions text" className={embedded ? "pointer-events-none w-full" : `pointer-events-none absolute right-[max(0.75rem,env(safe-area-inset-right))] top-[max(4.75rem,calc(env(safe-area-inset-top)+4rem))] w-[min(calc(100vw-1.5rem),22rem)] md:right-[max(1rem,env(safe-area-inset-right))] ${offsetForPulse ? "xl:right-32" : ""}`}>
       <AnimatePresence initial={false}>
         {toasts.map((toast) => {
           const copy = getToastCopy(toast);

@@ -90,7 +90,7 @@ function RequestsSidebarContent({ requests, updates, pendingCount, isLoading, lo
       {responseError && <div role="alert" className="mx-4 mb-3 rounded-2xl border border-primary/25 bg-accent px-4 py-3 text-sm leading-6 text-body sm:mx-5">{responseError}</div>}
       {statusMessage && <p role="status" aria-live="polite" className="mx-4 mb-3 rounded-2xl border border-online/40 bg-background px-4 py-3 text-sm text-body sm:mx-5">{statusMessage}</p>}
 
-      <div aria-busy={isLoading} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-4 sm:px-4">
+      <div aria-busy={isLoading} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-20 sm:px-4">
         {isLoading ? (
           <div role="status" aria-live="polite" aria-label="Loading conversation requests and updates" className="space-y-3 pt-2">{[0, 1, 2].map((item) => <div key={item} className="rounded-3xl border border-border bg-background p-4"><div className="flex items-center gap-3"><div className="h-11 w-11 shrink-0 animate-pulse rounded-full bg-accent" /><div className="min-w-0 flex-1 space-y-2"><div className="h-4 w-2/5 animate-pulse rounded-full bg-accent" /><div className="h-3 w-2/3 animate-pulse rounded-full bg-accent" /></div></div><div className="mt-4 h-12 animate-pulse rounded-2xl bg-accent" /></div>)}</div>
         ) : loadError ? (

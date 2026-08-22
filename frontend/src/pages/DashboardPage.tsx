@@ -12,6 +12,7 @@ import NewConversationModal from "../components/dashboard/NewConversationModal";
 import PersonalSettingsDialog from "../components/dashboard/PersonalSettingsDialog";
 import Sidebar from "../components/dashboard/Sidebar";
 import UtilityShelf from "../components/dashboard/UtilityShelf";
+import { ReminderToastViewport } from "../components/dashboard/ReminderAwareness";
 import useConversationReceipts from "../components/dashboard/useConversationReceipts";
 import useConversationRealtime from "../components/dashboard/useConversationRealtime";
 import useBrowserNotifications, { isConversationMuted } from "../components/dashboard/useBrowserNotifications";
@@ -19,6 +20,7 @@ import useMessageRequests from "../components/dashboard/useMessageRequests";
 import useMessagesData from "../components/dashboard/useMessagesData";
 import useActivityToasts, { isAppActive, type ActivityToastItem } from "../components/dashboard/useActivityToasts";
 import useUserPresence from "../components/dashboard/useUserPresence";
+import useReminders, { type ReminderRecord } from "../components/dashboard/useReminders";
 import { normalizeQuickReactions } from "../components/dashboard/emojiData";
 import { getConversationDisplayName } from "../components/dashboard/profileUtils";
 import type { PersonalSurface } from "../components/dashboard/AccountMenuPopover";
@@ -28,6 +30,7 @@ import type { DashboardSection, WorkspaceLayoutState } from "../types/dashboard"
 import type { AcceptedConversationItem, ChatMessage, ConversationActivityRealtimeChange, ConversationConnectionRealtimeChange, ConversationNicknameRealtimeChange, ConversationRequestRealtimeChange, ConversationThemeRealtimeChange, DashboardChatState, MessageReactionRealtimeChange, MessageSearchResult, MessageSearchTarget, ParticipantConversationPreferencesState, ParticipantMuteState, PendingOutgoingRequest, PinnedMessageRealtimeChange, ProfileRelationship, ProfileSearchResult, RealtimeChatMessageEvent, RealtimeChatMessageUpdateEvent, RealtimeConversationActivityEvent, RealtimeConversationNicknameEvent, RealtimeMessageReactionEvent, RealtimeNotificationPreferencesEvent, RealtimePinnedMessageEvent, RealtimeProfileIdentityEvent, SelectedConversation } from "../types/conversations";
 
 const NotesWorkspace = lazy(() => import("../components/dashboard/NotesWorkspace"));
+const RemindersWorkspace = lazy(() => import("../components/dashboard/RemindersWorkspace"));
 
 function normalizeActivityMessagePreview(message: ChatMessage) {
   if (message.messageType === "image") return "Sent a photo";
@@ -57,16 +60,20 @@ function DashboardPage() {
   const [activeSection, setActiveSection] = useState<DashboardSection>("messages");
   const [workspaceLayout, setWorkspaceLayout] = useState<WorkspaceLayoutState>({ mode: "workspace" });
   const [isDesktopWorkspace, setIsDesktopWorkspace] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches);
+  const [isPersistentPulseLayout, setIsPersistentPulseLayout] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches);
   const [isNewConversationOpen, setIsNewConversationOpen] = useState(false);
   const [reconnectProfile, setReconnectProfile] = useState<ProfileSearchResult | null>(null);
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
   const [isUtilityShelfOpen, setIsUtilityShelfOpen] = useState(false);
+  const [isMobilePulseOpen, setIsMobilePulseOpen] = useState(false);
   const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [isRemindersOpen, setIsRemindersOpen] = useState(false);
+  const [remindersEntry, setRemindersEntry] = useState<{ reminderId: string | null; conversationId: string | null }>({ reminderId: null, conversationId: null });
   const [messageDeliveryDraft, setMessageDeliveryDraft] = useState<MessageDeliveryDraft | null>(null);
-  const [composerClearance, setComposerClearance] = useState<number | null>(null);
   const [personalSurface, setPersonalSurface] = useState<PersonalSurface | null>(null);
   const [isSignOutDialogOpen, setIsSignOutDialogOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isAwarenessActive, setIsAwarenessActive] = useState(() => typeof document !== "undefined" && isAppActive());
   const [signOutError, setSignOutError] = useState("");
   const [messageSearchTarget, setMessageSearchTarget] = useState<MessageSearchTarget | null>(null);
   const [chatState, setChatState] = useState<DashboardChatState | null>(null);
@@ -94,13 +101,14 @@ function DashboardPage() {
   const signOutReturnFocusRef = useRef<HTMLElement | null>(null);
   const utilityShelfReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const notesReturnFocusRef = useRef<HTMLElement | null>(null);
+  const remindersReturnFocusRef = useRef<HTMLElement | null>(null);
   const messageDeliveryReturnFocusRef = useRef<HTMLElement | null>(null);
   const isSigningOutRef = useRef(false);
   const activityViewRef = useRef({ activeSection, chatState, isCompactChatVisible, isDesktopWorkspace, hasBlockingOverlay: false });
 
   useEffect(() => {
-    activityViewRef.current = { activeSection, chatState, isCompactChatVisible, isDesktopWorkspace, hasBlockingOverlay: Boolean(personalSurface || isGlobalSearchOpen || isNewConversationOpen || messageDeliveryDraft) };
-  }, [activeSection, chatState, isCompactChatVisible, isDesktopWorkspace, isGlobalSearchOpen, isNewConversationOpen, messageDeliveryDraft, personalSurface]);
+    activityViewRef.current = { activeSection, chatState, isCompactChatVisible, isDesktopWorkspace, hasBlockingOverlay: Boolean(personalSurface || isGlobalSearchOpen || isNewConversationOpen || messageDeliveryDraft || isNotesOpen || isRemindersOpen) };
+  }, [activeSection, chatState, isCompactChatVisible, isDesktopWorkspace, isGlobalSearchOpen, isNewConversationOpen, isNotesOpen, isRemindersOpen, messageDeliveryDraft, personalSurface]);
 
   useEffect(() => {
     const query = window.matchMedia("(min-width: 1024px)");
@@ -110,6 +118,15 @@ function DashboardPage() {
     }
     query.addEventListener("change", handleDesktopWorkspaceChange);
     return () => query.removeEventListener("change", handleDesktopWorkspaceChange);
+  }, []);
+
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 768px)");
+    function handlePersistentPulseLayoutChange(event: MediaQueryListEvent) {
+      setIsPersistentPulseLayout(event.matches);
+    }
+    query.addEventListener("change", handlePersistentPulseLayoutChange);
+    return () => query.removeEventListener("change", handlePersistentPulseLayoutChange);
   }, []);
 
   useEffect(() => {
@@ -192,6 +209,24 @@ function DashboardPage() {
     setIsUtilityShelfOpen(false);
   }, []);
 
+  const handleMobilePulseOpenChange = useCallback((isOpen: boolean) => {
+    setIsMobilePulseOpen(isOpen);
+    if (isOpen) setIsUtilityShelfOpen(false);
+  }, []);
+
+  const openReminders = useCallback((trigger: HTMLElement | null, reminderId: string | null = null, conversationId: string | null = null) => {
+    remindersReturnFocusRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setIsUtilityShelfOpen(false);
+    setRemindersEntry({ reminderId, conversationId });
+    setIsRemindersOpen(true);
+  }, []);
+
+  const openReminderNotification = useCallback((reminderId: string) => {
+    openReminders(null, reminderId, null);
+  }, [openReminders]);
+
+  const closeReminders = useCallback(() => setIsRemindersOpen(false), []);
+
   useEffect(() => {
     function handleGlobalSearchShortcut(event: KeyboardEvent) {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLocaleLowerCase() !== "k") return;
@@ -214,11 +249,26 @@ function DashboardPage() {
   const refreshMessagesSilently = messagesController.refreshSilently;
   const deleteConversationForMe = messagesController.deleteConversationForMe;
   const requestsController = useMessageRequests({ currentUserId, isAccountResolved, onConversationReady: handleConversationReady, onRequestsChanged: refreshMessages });
-  const notificationController = useBrowserNotifications({ currentUserId, browserNotificationsEnabled: currentProfile?.browser_notifications_enabled ?? false, notificationSoundEnabled: currentProfile?.notification_sound_enabled ?? true, conversations: messagesController.notificationConversations, onConversationOpen: handleConversationReady });
+  const remindersController = useReminders(currentUserId);
+  const notificationController = useBrowserNotifications({ currentUserId, browserNotificationsEnabled: currentProfile?.browser_notifications_enabled ?? false, notificationSoundEnabled: currentProfile?.notification_sound_enabled ?? true, conversations: messagesController.notificationConversations, onConversationOpen: handleConversationReady, onReminderOpen: openReminderNotification });
   const activityToasts = useActivityToasts();
   const claimActivityEvent = activityToasts.claim;
   const enqueueClaimedActivityToast = activityToasts.enqueueClaimed;
   const activityConversationsRef = useRef(messagesController.notificationConversations);
+
+  useEffect(() => {
+    const refresh = () => setIsAwarenessActive(isAppActive());
+    window.addEventListener("focus", refresh);
+    window.addEventListener("blur", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.removeEventListener("focus", refresh); window.removeEventListener("blur", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, []);
+
+  const dueReminders = useMemo(() => remindersController.reminders.filter((reminder) => !reminder.removedAt && reminder.personalStatus === "due"), [remindersController.reminders]);
+  const handleDueReminderNotification = notificationController.handleDueReminder;
+  useEffect(() => {
+    for (const reminder of dueReminders) handleDueReminderNotification(reminder);
+  }, [dueReminders, handleDueReminderNotification]);
 
   useEffect(() => {
     activityConversationsRef.current = messagesController.notificationConversations;
@@ -235,6 +285,10 @@ function DashboardPage() {
     setIsUtilityShelfOpen(false);
     setIsNotesOpen(true);
   }, []);
+
+  const openRemindersFromUtility = useCallback((trigger: HTMLButtonElement) => {
+    openReminders(trigger);
+  }, [openReminders]);
 
   const openMessageDelivery = useCallback((draft: MessageDeliveryDraft, trigger: HTMLElement) => {
     messageDeliveryReturnFocusRef.current = trigger;
@@ -534,6 +588,38 @@ function DashboardPage() {
   const hasFocusEligibleConversation = resolvedChatState?.kind === "accepted";
   const effectiveLayoutMode = hasFocusEligibleConversation && isDesktopWorkspace ? workspaceLayout.mode : "workspace";
   const isFocusMode = effectiveLayoutMode === "focus";
+  const activeSharedReminders = useMemo(() => {
+    if (resolvedChatState?.kind !== "accepted") return [];
+    return remindersController.reminders.filter((reminder) => reminder.scope === "shared"
+      && reminder.conversationId === resolvedChatState.conversation.id
+      && !reminder.removedAt
+      && ["pending", "due", "snoozed"].includes(reminder.personalStatus)
+      && resolvedChatState.conversation.connectionStatus === "accepted"
+      && resolvedChatState.conversation.interactionAllowed
+      && resolvedChatState.conversation.messagingAvailable
+      && !resolvedChatState.conversation.iBlocked);
+  }, [remindersController.reminders, resolvedChatState]);
+  const openChatReminder = useCallback((reminder: ReminderRecord, trigger: HTMLElement) => {
+    const conversationId = reminder.conversationId;
+    openReminders(trigger, activeSharedReminders.length === 1 ? reminder.id : null, conversationId);
+  }, [activeSharedReminders.length, openReminders]);
+  const reminderItems = remindersController.reminders;
+  const refreshReminders = remindersController.refresh;
+  const openChatReminderEvent = useCallback((reminderId: string, trigger: HTMLElement) => {
+    const conversationId = resolvedChatState?.kind === "accepted" ? resolvedChatState.conversation.id : null;
+    openReminders(trigger, reminderId, conversationId);
+    if (!reminderItems.some((item) => item.id === reminderId)) void refreshReminders();
+  }, [openReminders, refreshReminders, reminderItems, resolvedChatState]);
+  const isMobilePulseAvailable = !isPersistentPulseLayout
+    && !effectiveCompactChatVisible
+    && activeSection !== "menu"
+    && !isGlobalSearchOpen
+    && !isNewConversationOpen
+    && !isNotesOpen
+    && !isRemindersOpen
+    && !messageDeliveryDraft
+    && !personalSurface
+    && !isSignOutDialogOpen;
 
   useEffect(() => {
     if (hasFocusEligibleConversation || workspaceLayout.mode !== "focus") return;
@@ -542,6 +628,7 @@ function DashboardPage() {
   }, [hasFocusEligibleConversation, workspaceLayout.mode]);
 
   function handleSectionChange(section: DashboardSection) {
+    setIsUtilityShelfOpen(false);
     setActiveSection(section);
     setIsCompactChatVisible(false);
     setWorkspaceLayout((current) => current.mode === "workspace" ? current : { ...current, mode: "workspace" });
@@ -736,20 +823,21 @@ function DashboardPage() {
     <>
       <div className="relative flex h-dvh w-full min-w-0 flex-col overflow-hidden bg-background md:flex-row">
         <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{isFocusMode ? "Focus mode" : "Workspace mode"}</p>
-        <NavigationRail activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} unreadMessageCount={messagesController.aggregateUnreadCount} archivedConversationCount={messagesController.archivedConversations.length} isCompactChatVisible={effectiveCompactChatVisible} isFocusMode={isFocusMode} currentProfile={currentProfile} isSigningOut={isSigningOut} pulseConversations={pulseConversations} onPulseConversationSelect={openPulseConversation} onOpenPersonalSurface={openPersonalSurface} onRequestSignOut={requestSignOut} onSectionChange={handleSectionChange} onSearch={openGlobalSearch} />
+        <NavigationRail activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} unreadMessageCount={messagesController.aggregateUnreadCount} archivedConversationCount={messagesController.archivedConversations.length} isCompactChatVisible={effectiveCompactChatVisible} isMobilePulseAvailable={isMobilePulseAvailable} isFocusMode={isFocusMode} currentProfile={currentProfile} isSigningOut={isSigningOut} pulseConversations={pulseConversations} onPulseConversationSelect={openPulseConversation} onMobilePulseOpenChange={handleMobilePulseOpenChange} onOpenPersonalSurface={openPersonalSurface} onRequestSignOut={requestSignOut} onSectionChange={handleSectionChange} onSearch={openGlobalSearch} />
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <Sidebar activeSection={activeSection} currentProfile={currentProfile} isAccountResolved={isAccountResolved} accountError={accountError} isCompactChatVisible={effectiveCompactChatVisible} isDesktopCollapsed={isFocusMode} requestsController={requestsController} messagesController={messagesController} chatState={resolvedChatState} onlineUserIds={visibleOnlineUserIds} quickReactions={quickReactions} onSaveQuickReactions={saveQuickReactions} notificationPermission={notificationController.permission} isNotificationSupported={notificationController.isSupported} onEnableNotifications={enableBrowserNotifications} onSaveNotificationPreferences={saveNotificationPreferences} onProfileIdentityUpdated={handleProfileIdentityUpdated} onRequestSignOut={requestSignOut} onAccountDeleted={handleAccountDeleted} onNewConversation={openNewConversation} onPendingRequestSelected={handlePendingRequestSelected} onConversationReady={handleConversationReady} onPeopleConversationReady={handlePeopleConversationReady} onArchivedConversationReady={handleArchivedConversationReady} onConversationDeleted={handleConversationDeleted} />
-          <ChatPanel chatState={resolvedChatState} currentProfile={currentProfile} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} layoutMode={effectiveLayoutMode} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeConversationNicknameEvents={realtimeConversationNicknameEvents} realtimeReceiptEvents={receiptEvents} onlineUserIds={visibleOnlineUserIds} quickReactions={quickReactions} conversationMutedUntil={activeConversationMutedUntil} conversationArchivedAt={activeConversationArchivedAt} onConversationMuteChange={setConversationMute} onConversationThemeChange={setConversationTheme} onConversationArchiveChange={messagesController.setConversationArchived} onConversationDelete={handleConversationDeleted} onConversationDisconnect={handleConversationDisconnect} onReconnectRequested={handleReconnectRequested} onIncomingMessagesSynchronized={advanceDelivered} onConversationRead={advanceRead} onMessageConfirmed={refreshMessagesSilently} onMessageUpdated={patchMessagePreview} onMessageDeletionRolledBack={handleMessageDeletionRolledBack} onForwardMessage={handleForwardMessage} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} onEnterFocusMode={enterFocusMode} onComposerClearanceChange={setComposerClearance} />
+          <Sidebar activeSection={activeSection} currentProfile={currentProfile} isAccountResolved={isAccountResolved} accountError={accountError} isCompactChatVisible={effectiveCompactChatVisible} isDesktopCollapsed={isFocusMode} requestsController={requestsController} messagesController={messagesController} chatState={resolvedChatState} onlineUserIds={visibleOnlineUserIds} quickReactions={quickReactions} onSaveQuickReactions={saveQuickReactions} notificationPermission={notificationController.permission} isNotificationSupported={notificationController.isSupported} onEnableNotifications={enableBrowserNotifications} onSaveNotificationPreferences={saveNotificationPreferences} onProfileIdentityUpdated={handleProfileIdentityUpdated} onRequestSignOut={requestSignOut} onAccountDeleted={handleAccountDeleted} onNewConversation={openNewConversation} onPendingRequestSelected={handlePendingRequestSelected} onConversationReady={handleConversationReady} onPeopleConversationReady={handlePeopleConversationReady} onArchivedConversationReady={handleArchivedConversationReady} onConversationDeleted={handleConversationDeleted} isUtilityShelfOpen={isUtilityShelfOpen} isUtilityLauncherHidden={isMobilePulseOpen} onUtilityShelfToggle={toggleUtilityShelf} />
+          <ChatPanel chatState={resolvedChatState} currentProfile={currentProfile} currentUserId={currentUserId} isMobileVisible={effectiveCompactChatVisible} layoutMode={effectiveLayoutMode} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={chatRealtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeConversationNicknameEvents={realtimeConversationNicknameEvents} realtimeReceiptEvents={receiptEvents} onlineUserIds={visibleOnlineUserIds} quickReactions={quickReactions} conversationMutedUntil={activeConversationMutedUntil} conversationArchivedAt={activeConversationArchivedAt} onConversationMuteChange={setConversationMute} onConversationThemeChange={setConversationTheme} onConversationArchiveChange={messagesController.setConversationArchived} onConversationDelete={handleConversationDeleted} onConversationDisconnect={handleConversationDisconnect} onReconnectRequested={handleReconnectRequested} onIncomingMessagesSynchronized={advanceDelivered} onConversationRead={advanceRead} onMessageConfirmed={refreshMessagesSilently} onMessageUpdated={patchMessagePreview} onMessageDeletionRolledBack={handleMessageDeletionRolledBack} onForwardMessage={handleForwardMessage} onStartConversation={openNewConversation} onMobileBack={() => setIsCompactChatVisible(false)} onEnterFocusMode={enterFocusMode} sharedReminders={activeSharedReminders} onReminderOpen={openChatReminder} onReminderEventOpen={openChatReminderEvent} />
         </div>
         {isFocusMode && <CommandDock activeSection={activeSection} pendingRequestCount={requestsController.pendingCount} unreadMessageCount={messagesController.aggregateUnreadCount} archivedConversationCount={messagesController.archivedConversations.length} currentProfile={currentProfile} isSigningOut={isSigningOut} isUtilityShelfOpen={isUtilityShelfOpen} onDestinationChange={handleDockDestinationChange} onOpenPersonalSurface={openPersonalSurface} onRequestSignOut={requestSignOut} onExitFocus={exitFocusMode} onSearch={openGlobalSearch} onUtilityShelfToggle={toggleUtilityShelf} />}
-        <UtilityShelf isOpen={isUtilityShelfOpen} showWorkspaceLauncher={!isFocusMode && resolvedChatState?.kind === "accepted" && (isDesktopWorkspace || effectiveCompactChatVisible)} composerClearance={composerClearance} anchorRef={utilityShelfReturnFocusRef} onToggle={toggleUtilityShelf} onClose={closeUtilityShelf} onOpenNotes={openNotes} />
-        <div id="nemissive-activity-layer" className="pointer-events-none fixed inset-0 z-[48]"><ActivityToastViewport toasts={activityToasts.toasts} offsetForPulse={false} onActivate={handleActivityToastActivate} onDismiss={activityToasts.dismiss} onPause={activityToasts.pause} onResume={activityToasts.resume} /></div>
+        <UtilityShelf isOpen={isUtilityShelfOpen} anchorRef={utilityShelfReturnFocusRef} onClose={closeUtilityShelf} onOpenNotes={openNotes} onOpenReminders={openRemindersFromUtility} />
+        <div id="nemissive-activity-layer" className="pointer-events-none fixed inset-0 z-[48]"><div className="pointer-events-none absolute right-[max(0.75rem,env(safe-area-inset-right))] top-[max(4.75rem,calc(env(safe-area-inset-top)+4rem))] w-[min(calc(100vw-1.5rem),22rem)] md:right-[max(1rem,env(safe-area-inset-right))]">{isAwarenessActive && <ReminderToastViewport reminders={dueReminders} onOpen={(reminder, trigger) => openReminders(trigger, reminder.id, reminder.conversationId)} onSnooze={remindersController.snooze} onDismiss={remindersController.dismiss} onComplete={remindersController.complete} />}<ActivityToastViewport embedded toasts={activityToasts.toasts} offsetForPulse={false} onActivate={handleActivityToastActivate} onDismiss={activityToasts.dismiss} onPause={activityToasts.pause} onResume={activityToasts.resume} /></div></div>
       </div>
 
       <NewConversationModal key={reconnectProfile?.id ?? "new-conversation"} isOpen={isNewConversationOpen} currentUserId={currentUserId} isAccountResolved={isAccountResolved} accountError={accountError} initialProfile={reconnectProfile} relationshipsByProfileId={relationshipsByProfileId} isRelationshipsLoading={messagesController.isLoading || requestsController.isLoading} relationshipsError={messagesController.loadError || requestsController.loadError} onClose={closeNewConversation} onConversationSelected={handleConversationReady} onPendingRequestSelected={handlePendingRequestSelected} onRequestCreated={handleRequestCreated} onOpenIncomingRequests={openMessageRequestsSection} onRefreshRelationships={refreshRelationships} />
       <AnimatePresence initial={false}>{isGlobalSearchOpen && <GlobalSearchDialog currentProfile={currentProfile} conversations={messagesController.conversations} outgoingRequests={messagesController.pendingRequests} incomingRequests={requestsController.requests} returnFocusRef={searchReturnFocusRef} onClose={() => setIsGlobalSearchOpen(false)} onConversationSelected={handleConversationReady} onOutgoingRequestSelected={handlePendingRequestSelected} onIncomingRequestSelected={openMessageRequestsSection} onMessageSelected={handleSearchMessageSelected} />}</AnimatePresence>
       <AnimatePresence initial={false}>{personalSurface && currentProfile && <PersonalSettingsDialog key={personalSurface} surface={personalSurface} profile={currentProfile} quickReactions={quickReactions} notificationPermission={notificationController.permission} isNotificationSupported={notificationController.isSupported} returnFocusRef={personalSurfaceReturnFocusRef} onClose={() => setPersonalSurface(null)} onSaveQuickReactions={saveQuickReactions} onEnableNotifications={enableBrowserNotifications} onSaveNotificationPreferences={saveNotificationPreferences} onProfileIdentityUpdated={handleProfileIdentityUpdated} onAccountDeleted={handleAccountDeleted} />}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence initial={false}>{isNotesOpen && currentUserId && <NotesWorkspace currentUserId={currentUserId} conversations={messagesController.relationshipConversations} returnFocusRef={notesReturnFocusRef} onClose={() => setIsNotesOpen(false)} onSend={openMessageDelivery} onMessageSent={refreshMessagesSilently} />}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence initial={false}>{isRemindersOpen && currentUserId && <RemindersWorkspace currentUserId={currentUserId} conversations={messagesController.relationshipConversations} isConversationsLoading={messagesController.isLoading} controller={remindersController} returnFocusRef={remindersReturnFocusRef} initialReminderId={remindersEntry.reminderId} initialConversationId={remindersEntry.conversationId} onClose={closeReminders} />}</AnimatePresence></Suspense>
       <AnimatePresence initial={false}>{messageDeliveryDraft && currentUserId && <MessageDeliveryDialog key={messageDeliveryDraft.kind} conversations={messageDeliveryConversations} currentUserId={currentUserId} draft={messageDeliveryDraft} returnFocusRef={messageDeliveryReturnFocusRef} onClose={() => setMessageDeliveryDraft(null)} onOpenConversation={openDeliveredConversation} onSent={refreshMessagesSilently} />}</AnimatePresence>
       <AnimatePresence initial={false}>{isSignOutDialogOpen && <ConfirmationDialog dialogId="sign-out" title="Sign out of Nemissive?" description="You'll need to sign in again to access your conversations on this device." confirmLabel="Sign out" pendingLabel="Signing out…" pendingAnnouncement="Signing out of Nemissive." icon={<SignOutIcon />} error={signOutError} isPending={isSigningOut} returnFocusRef={signOutReturnFocusRef} onCancel={() => { if (!isSigningOut) { setIsSignOutDialogOpen(false); setSignOutError(""); } }} onConfirm={() => void handleSignOut()} />}</AnimatePresence>
     </>

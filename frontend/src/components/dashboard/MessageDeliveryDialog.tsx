@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
 import type { AcceptedConversationItem, MessageAttachmentKind, MessageType } from "../../types/conversations";
 import { formatFileSize, getFriendlyFileType } from "./fileAttachments";
-import ProfileAvatar from "./ProfileAvatar";
+import { ConversationPickerList } from "./ConversationPicker";
 import { getConversationDisplayName } from "./profileUtils";
 import { formatScheduledInstant, formatScheduledInstantAccessible, getDefaultScheduledLocalTime, parseLocalScheduledTime } from "./scheduledMessageTime";
 import { formatVoiceDuration } from "./voiceUtils";
@@ -95,7 +95,6 @@ function MessageDeliveryDialog({ conversations, currentUserId, draft, returnFocu
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const isSubmittingRef = useRef(false);
-  const [query, setQuery] = useState("");
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [selectedAttachmentIds, setSelectedAttachmentIds] = useState(() => new Set(draft.attachments.map((item) => item.id)));
   const [imageDimensions, setImageDimensions] = useState<Record<string, { width: number; height: number }>>(() => Object.fromEntries(draft.attachments.filter((item) => item.width && item.height).map((item) => [item.id, { width: item.width as number, height: item.height as number }])));
@@ -124,10 +123,6 @@ function MessageDeliveryDialog({ conversations, currentUserId, draft, returnFocu
     return () => { active = false; };
   }, [draft]);
 
-  const filteredConversations = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase();
-    return normalized ? conversations.filter((conversation) => getConversationDisplayName(conversation.otherProfile, conversation.otherNickname).toLocaleLowerCase().includes(normalized) || (conversation.otherProfile.username?.toLocaleLowerCase() ?? "").includes(normalized)) : conversations;
-  }, [conversations, query]);
   const selectedConversation = conversations.find((conversation) => conversation.conversationId === selectedConversationId) ?? null;
   const successConversation = conversations.find((conversation) => conversation.conversationId === success?.conversationId) ?? null;
   const selectedAttachments = draft.attachments.filter((item) => selectedAttachmentIds.has(item.id));
@@ -234,7 +229,7 @@ function MessageDeliveryDialog({ conversations, currentUserId, draft, returnFocu
             {isSubmitting ? (mode === "schedule" ? "Scheduling multimedia message" : selectedAttachments.length ? "Preparing multimedia delivery" : "Sending message") : ""}
           </span>
           <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,.85fr)_minmax(0,1.15fr)]">
-            <section className="flex min-h-0 flex-col border-b border-border md:border-b-0 md:border-r" aria-label="Recipients"><div className="shrink-0 p-4"><label htmlFor="delivery-recipient-search" className="sr-only">Search connected conversations</label><input data-autofocus id="delivery-recipient-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search connected conversations…" disabled={isSubmitting} className="min-h-11 w-full rounded-2xl border border-border bg-background px-4 text-sm text-heading outline-none placeholder:text-muted focus:border-primary/40 focus:ring-4 focus:ring-accent-hover disabled:opacity-60" /></div><div className="min-h-40 flex-1 overflow-y-auto px-3 pb-3">{filteredConversations.length ? <ul className="space-y-1">{filteredConversations.map((conversation) => { const selected = conversation.conversationId === selectedConversationId; const name = getConversationDisplayName(conversation.otherProfile, conversation.otherNickname); return <li key={conversation.conversationId}><button type="button" onClick={() => { setSelectedConversationId(conversation.conversationId); setError(""); }} disabled={isSubmitting} aria-pressed={selected} className={`flex min-h-14 w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:opacity-60 ${selected ? "bg-accent" : "hover:bg-card"}`}><ProfileAvatar profile={conversation.otherProfile} size="sm" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-heading">{name}</span>{conversation.otherProfile.username && <span className="block truncate text-xs text-muted">@{conversation.otherProfile.username}</span>}</span><span className="text-xs font-semibold text-primary">{selected ? "Selected" : "Select"}</span></button></li>; })}</ul> : <p role="status" className="px-3 py-8 text-center text-sm leading-6 text-body">{conversations.length ? "No connected conversations match your search." : "No eligible connected conversations are available."}</p>}</div></section>
+            <section className="flex min-h-0 flex-col border-b border-border md:border-b-0 md:border-r" aria-label="Recipients"><ConversationPickerList conversations={conversations} selectedConversationId={selectedConversationId} searchInputId="delivery-recipient-search" onSelect={(conversation) => { setSelectedConversationId(conversation.conversationId); setError(""); }} disabled={isSubmitting} autoFocus /></section>
             <section className="min-h-0 overflow-y-auto p-5 sm:p-6" aria-label={mode === "schedule" ? "Schedule and message preview" : "Message preview"}>
               <p className="text-xs font-semibold uppercase tracking-[.14em] text-muted">Preview</p>{draft.kind === "forward" && <p className="mt-3 text-xs font-semibold text-primary">Forwarded</p>}{draft.preview && <div className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-2xl border border-border bg-background p-4 text-sm leading-6 text-body">{draft.preview}</div>}{draft.kind === "note" && draft.wasTruncated && <p className="mt-3 text-xs leading-5 text-body">The text message uses the first 2,000 characters of this Note snapshot.</p>}
               {draft.attachments.length > 0 && (

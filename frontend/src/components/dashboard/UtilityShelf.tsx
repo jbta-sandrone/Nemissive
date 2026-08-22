@@ -1,15 +1,13 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 type UtilityShelfProps = {
   isOpen: boolean;
-  showWorkspaceLauncher: boolean;
-  composerClearance: number | null;
   anchorRef: RefObject<HTMLButtonElement | null>;
-  onToggle: (trigger: HTMLButtonElement) => void;
   onClose: () => void;
   onOpenNotes: (trigger: HTMLButtonElement) => void;
+  onOpenReminders: (trigger: HTMLButtonElement) => void;
 };
 
 type UtilityTool = {
@@ -28,7 +26,7 @@ export function UtilityShelfIcon({ className = "h-5 w-5" }: { className?: string
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true"><path d="M4 8.5h16v11H4v-11ZM8.5 8.5V6h7v2.5M4 12h16" strokeLinecap="round" strokeLinejoin="round" /><path d="M10 12v2h4v-2" strokeLinejoin="round" /></svg>;
 }
 
-function UtilityShelfLauncher({ isOpen, composerClearance, onToggle }: { isOpen: boolean; composerClearance: number; onToggle: (trigger: HTMLButtonElement) => void }) {
+export function UtilityShelfLauncher({ isOpen, onToggle, className = "" }: { isOpen: boolean; onToggle: (trigger: HTMLButtonElement) => void; className?: string }) {
   return (
     <button
       type="button"
@@ -39,8 +37,7 @@ function UtilityShelfLauncher({ isOpen, composerClearance, onToggle }: { isOpen:
       aria-controls="nemissive-utility-menu"
       aria-expanded={isOpen}
       title={isOpen ? "Close utilities" : "Open utilities"}
-      style={{ "--utility-launcher-bottom": `${composerClearance}px` } as CSSProperties}
-      className={`fixed bottom-[var(--utility-launcher-bottom)] right-[max(0.75rem,env(safe-area-inset-right))] z-[45] flex h-11 w-11 items-center justify-center rounded-2xl border shadow-soft transition-[bottom,background-color,border-color,color] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover motion-reduce:transition-none sm:right-[max(1.25rem,env(safe-area-inset-right))] lg:right-6 ${isOpen ? "border-primary/25 bg-accent text-primary" : "border-border bg-surface text-primary hover:bg-accent"}`}
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border shadow-soft transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isOpen ? "border-primary/25 bg-accent text-primary" : "border-border bg-background text-muted hover:bg-accent hover:text-heading"} ${className}`}
     >
       <UtilityShelfIcon />
     </button>
@@ -54,7 +51,7 @@ function ToolIcon({ tool }: { tool: UtilityTool["id"] }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2M8 3.5 5.5 6M16 3.5 18.5 6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function UtilityShelf({ isOpen, showWorkspaceLauncher, composerClearance, anchorRef, onToggle, onClose, onOpenNotes }: UtilityShelfProps) {
+function UtilityShelf({ isOpen, anchorRef, onClose, onOpenNotes, onOpenReminders }: UtilityShelfProps) {
   const shouldReduceMotion = useReducedMotion();
   const menuRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -78,7 +75,7 @@ function UtilityShelf({ isOpen, showWorkspaceLauncher, composerClearance, anchor
       const viewportTop = viewport?.offsetTop ?? 0;
       const viewportRight = viewportLeft + (viewport?.width ?? window.innerWidth);
       const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
-      const roomAbove = anchorBounds.top - gap - viewportTop - edge;
+      const roomAbove = anchorBounds.top - viewportTop - gap - edge;
       const preferredTop = roomAbove >= menuBounds.height ? anchorBounds.top - menuBounds.height - gap : anchorBounds.bottom + gap;
       const preferredLeft = anchorBounds.right - menuBounds.width;
       setPosition({
@@ -137,7 +134,6 @@ function UtilityShelf({ isOpen, showWorkspaceLauncher, composerClearance, anchor
   const itemClass = "flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-65";
   return createPortal(
     <>
-      {showWorkspaceLauncher && composerClearance !== null && <UtilityShelfLauncher isOpen={isOpen} composerClearance={composerClearance} onToggle={onToggle} />}
       <AnimatePresence initial={false}>
         {isOpen && <motion.div
           ref={menuRef}
@@ -151,8 +147,8 @@ function UtilityShelf({ isOpen, showWorkspaceLauncher, composerClearance, anchor
           style={position ?? { left: 0, top: 0, visibility: "hidden" }}
           className="fixed z-[70] w-[min(17rem,calc(100vw-1.5rem))] rounded-2xl border border-border bg-surface p-1.5 shadow-soft"
         >
-          {utilityTools.map((tool) => tool.id === "notes" ? (
-            <button key={tool.id} type="button" role="menuitem" onClick={() => { const trigger = anchorRef.current; if (!trigger) return; shouldRestoreFocusRef.current = false; onOpenNotes(trigger); }} className={`${itemClass} hover:bg-accent`}>
+          {utilityTools.map((tool) => tool.id !== "gallery" ? (
+            <button key={tool.id} type="button" role="menuitem" onClick={() => { const trigger = anchorRef.current; if (!trigger) return; shouldRestoreFocusRef.current = false; if (tool.id === "notes") onOpenNotes(trigger); else onOpenReminders(trigger); }} className={`${itemClass} hover:bg-accent`}>
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ToolIcon tool={tool.id} /></span>
               <span className="min-w-0"><span className="block text-sm font-semibold text-heading">{tool.label}</span><span className="block truncate text-xs text-body">{tool.description}</span></span>
             </button>
