@@ -7,6 +7,7 @@ type UtilityShelfProps = {
   anchorRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onOpenNotes: (trigger: HTMLButtonElement) => void;
+  onOpenGallery: (trigger: HTMLButtonElement) => void;
   onOpenReminders: (trigger: HTMLButtonElement) => void;
 };
 
@@ -51,7 +52,7 @@ function ToolIcon({ tool }: { tool: UtilityTool["id"] }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2M8 3.5 5.5 6M16 3.5 18.5 6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function UtilityShelf({ isOpen, anchorRef, onClose, onOpenNotes, onOpenReminders }: UtilityShelfProps) {
+function UtilityShelf({ isOpen, anchorRef, onClose, onOpenNotes, onOpenGallery, onOpenReminders }: UtilityShelfProps) {
   const shouldReduceMotion = useReducedMotion();
   const menuRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -147,15 +148,10 @@ function UtilityShelf({ isOpen, anchorRef, onClose, onOpenNotes, onOpenReminders
           style={position ?? { left: 0, top: 0, visibility: "hidden" }}
           className="fixed z-[70] w-[min(17rem,calc(100vw-1.5rem))] rounded-2xl border border-border bg-surface p-1.5 shadow-soft"
         >
-          {utilityTools.map((tool) => tool.id !== "gallery" ? (
-            <button key={tool.id} type="button" role="menuitem" onClick={() => { const trigger = anchorRef.current; if (!trigger) return; shouldRestoreFocusRef.current = false; if (tool.id === "notes") onOpenNotes(trigger); else onOpenReminders(trigger); }} className={`${itemClass} hover:bg-accent`}>
+          {utilityTools.map((tool) => (
+            <button key={tool.id} type="button" role="menuitem" onClick={() => { const trigger = anchorRef.current; if (!trigger) return; shouldRestoreFocusRef.current = false; if (tool.id === "notes") onOpenNotes(trigger); else if (tool.id === "gallery") onOpenGallery(trigger); else onOpenReminders(trigger); }} className={`${itemClass} hover:bg-accent`}>
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ToolIcon tool={tool.id} /></span>
               <span className="min-w-0"><span className="block text-sm font-semibold text-heading">{tool.label}</span><span className="block truncate text-xs text-body">{tool.description}</span></span>
-            </button>
-          ) : (
-            <button key={tool.id} type="button" role="menuitem" disabled aria-label={`${tool.label}, coming soon`} className={itemClass}>
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ToolIcon tool={tool.id} /></span>
-              <span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><span className="text-sm font-semibold text-heading">{tool.label}</span><span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted">Soon</span></span><span className="block truncate text-xs text-body">{tool.description}</span></span>
             </button>
           ))}
         </motion.div>}
