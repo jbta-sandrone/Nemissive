@@ -7,6 +7,7 @@ type MessageMoreMenuProps = {
   canDelete: boolean;
   canEdit: boolean;
   canForward: boolean;
+  canSave: boolean;
   canPin: boolean;
   disabled: boolean;
   forwardUnavailableReason?: string;
@@ -18,15 +19,17 @@ type MessageMoreMenuProps = {
   onDelete: () => void;
   onEdit: () => void;
   onForward: () => void;
+  onSave: () => void;
   onPin: () => void;
 };
 
-type IconKind = "copy" | "forward" | "pin" | "edit" | "delete";
+type IconKind = "copy" | "forward" | "save" | "pin" | "edit" | "delete";
 
 function ActionIcon({ kind, filled = false }: { kind: IconKind; filled?: boolean }) {
   const paths: Record<IconKind, string> = {
     copy: "M9 8h10v11H9V8Zm-4 8V5h10",
     forward: "m14 7 5 5-5 5M19 12H9a5 5 0 0 0-5 5",
+    save: "M12 4v11m0 0-4-4m4 4 4-4M5 18v2h14v-2",
     pin: "m8 4 8 0-1 5 3 3v2H6v-2l3-3-1-5ZM12 14v6",
     edit: "m5 15.5-.8 4.3 4.3-.8L18 9.5 14.5 6 5 15.5Zm7.8-7.8 3.5 3.5",
     delete: "M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v5m4-5v5",
@@ -34,7 +37,7 @@ function ActionIcon({ kind, filled = false }: { kind: IconKind; filled?: boolean
   return <svg viewBox="0 0 24 24" fill={kind === "pin" && filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true"><path d={paths[kind]} strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function MessageMoreMenu({ anchorRef, canCopy, canDelete, canEdit, canForward, canPin, disabled, forwardUnavailableReason, isPinned, isPinPending, messageLabel, onClose, onCopy, onDelete, onEdit, onForward, onPin }: MessageMoreMenuProps) {
+function MessageMoreMenu({ anchorRef, canCopy, canDelete, canEdit, canForward, canSave, canPin, disabled, forwardUnavailableReason, isPinned, isPinPending, messageLabel, onClose, onCopy, onDelete, onEdit, onForward, onSave, onPin }: MessageMoreMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const shouldRestoreFocusRef = useRef(true);
   const onCloseRef = useRef(onClose);
@@ -111,6 +114,7 @@ function MessageMoreMenu({ anchorRef, canCopy, canDelete, canEdit, canForward, c
     <div ref={menuRef} role="menu" aria-label={`More actions for ${messageLabel}`} className="fixed left-2 top-2 z-[70] min-w-52 rounded-2xl border border-border bg-surface p-1.5 opacity-0 shadow-soft">
       {canCopy && <button type="button" role="menuitem" onClick={() => run(onCopy, true)} className={itemClass}><span className="text-muted"><ActionIcon kind="copy" /></span>Copy</button>}
       <button type="button" role="menuitem" onClick={() => run(onForward)} disabled={!canForward || disabled} aria-describedby={!canForward && forwardUnavailableReason ? "forward-unavailable-reason" : undefined} className={itemClass}><span className="text-muted"><ActionIcon kind="forward" /></span><span><span className="block">Forward</span>{!canForward && forwardUnavailableReason && <span id="forward-unavailable-reason" className="block text-[11px] font-medium text-muted">{forwardUnavailableReason}</span>}</span></button>
+      {canSave && <button type="button" role="menuitem" onClick={() => run(onSave)} disabled={disabled} className={itemClass}><span className="text-muted"><ActionIcon kind="save" /></span>Save</button>}
       {canPin && <button type="button" role="menuitem" onClick={() => run(onPin, true)} disabled={isPinPending} aria-pressed={isPinned} className={itemClass}><span className="text-muted"><ActionIcon kind="pin" filled={isPinned} /></span>{isPinned ? "Unpin message" : "Pin message"}</button>}
       {canEdit && <button type="button" role="menuitem" onClick={() => run(onEdit)} disabled={disabled} className={itemClass}><span className="text-muted"><ActionIcon kind="edit" /></span>Edit</button>}
       {canDelete && <button type="button" role="menuitem" onClick={() => run(onDelete)} disabled={disabled} className={`${itemClass} text-primary`}><span><ActionIcon kind="delete" /></span>Delete</button>}

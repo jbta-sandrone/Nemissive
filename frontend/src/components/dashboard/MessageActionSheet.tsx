@@ -8,6 +8,7 @@ type MessageActionSheetProps = {
   canEdit: boolean;
   canCopy: boolean;
   canForward: boolean;
+  canSave: boolean;
   canPin: boolean;
   canInteract: boolean;
   isPinned: boolean;
@@ -21,6 +22,7 @@ type MessageActionSheetProps = {
   onDelete: () => void;
   onEdit: () => void;
   onForward: () => void;
+  onSave: () => void;
   onOpenEmojiPicker: () => void;
   onPin: () => void;
   onReact: (emoji: string) => void;
@@ -51,7 +53,11 @@ function ForwardIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="m14 7 5 5-5 5M19 12H9a5 5 0 0 0-5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function MessageActionSheet({ canCopy, canDelete, canEdit, canForward, canPin, canInteract, isPinned, isPinPending, messageLabel, quickReactions, returnFocusRef, themeStyle, onClose, onCopy, onDelete, onEdit, onForward, onOpenEmojiPicker, onPin, onReact, onReply }: MessageActionSheetProps) {
+function SaveIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 18v2h14v-2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+
+function MessageActionSheet({ canCopy, canDelete, canEdit, canForward, canSave, canPin, canInteract, isPinned, isPinPending, messageLabel, quickReactions, returnFocusRef, themeStyle, onClose, onCopy, onDelete, onEdit, onForward, onSave, onOpenEmojiPicker, onPin, onReact, onReply }: MessageActionSheetProps) {
   const shouldReduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const shouldRestoreFocusRef = useRef(true);
@@ -115,6 +121,7 @@ function MessageActionSheet({ canCopy, canDelete, canEdit, canForward, canPin, c
           {canInteract && <button type="button" onClick={() => runAction(onReply)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ReplyIcon /></span><span>Reply</span></button>}
           {canCopy && <button type="button" onClick={() => { onClose(); onCopy(); }} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><CopyIcon /></span><span>Copy</span></button>}
           <button type="button" onClick={() => runAction(onForward)} disabled={!canForward} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ForwardIcon /></span><span><span className="block">Forward</span>{!canForward && <span className="block text-xs font-medium text-muted">This message can't be forwarded</span>}</span></button>
+          {canSave && <button type="button" onClick={() => runAction(onSave)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><SaveIcon /></span><span>Save</span></button>}
           {canPin && <button type="button" onClick={() => { onClose(); onPin(); }} disabled={isPinPending} aria-pressed={isPinned} aria-label={isPinned ? "Unpin this message" : "Pin this message"} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-60"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><PinIcon filled={isPinned} /></span><span>{isPinned ? "Unpin message" : "Pin message"}</span></button>}
           {canEdit && <button type="button" onClick={() => runAction(onEdit)} className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><EditIcon /></span><span>Edit</span></button>}
           {canDelete && <button type="button" onClick={() => runAction(onDelete)} aria-label="Delete your message" className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><DeleteIcon /></span><span>Delete</span></button>}

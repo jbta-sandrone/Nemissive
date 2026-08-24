@@ -19,7 +19,9 @@ function getToastCopy(toast: ActivityToastItem) {
   if (toast.kind === "message_received") return { name, message: toast.count > 1 ? `${toast.count} new messages` : `${name} sent you a message`, detail: toast.preview, action: `Open conversation with ${name}` };
   if (toast.kind === "connection_request_received") return { name, message: `${name} wants to connect with you`, detail: "View request", action: `View connection request from ${name}` };
   if (toast.kind === "connection_request_accepted") return { name, message: `${name} accepted your request`, detail: "You're now connected", action: `Open conversation with ${name}` };
-  return { name, message: `${name} reacted ${toast.emoji} to your message`, detail: "View message", action: `Open ${name}'s reaction to your message` };
+  if (toast.kind === "reaction_received") return { name, message: `${name} reacted ${toast.emoji} to your message`, detail: "View message", action: `Open ${name}'s reaction to your message` };
+  if (toast.kind === "gallery_heart_received") return { name, message: `${name} liked your ${toast.mediaType === "image" ? "photo" : "video"}`, detail: "Open Gallery", action: `Open the Gallery activity from ${name}` };
+  return { name, message: `${name} commented on your ${toast.mediaType === "image" ? "photo" : "video"}`, detail: toast.preview, action: `Open ${name}'s Gallery comment` };
 }
 
 function ActivityToastViewport({ toasts, offsetForPulse, embedded = false, onActivate, onDismiss, onPause, onResume }: ActivityToastViewportProps) {

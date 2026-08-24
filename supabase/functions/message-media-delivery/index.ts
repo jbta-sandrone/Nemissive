@@ -23,7 +23,12 @@ type RequestBody = {
   imageDimensions?: unknown;
   scheduledFor?: unknown;
   scheduledMessageId?: unknown;
+  galleryItems?: unknown;
 };
+
+type GallerySaveItem = { attachmentId: string; previewBase64: string };
+
+const galleryMediaBucket = "gallery-media";
 
 function jsonResponse(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -46,11 +51,44 @@ function dimensionsValue(value: unknown) {
   return result;
 }
 
+function galleryItemsValue(value: unknown): GallerySaveItem[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 10) return [];
+  const result: GallerySaveItem[] = [];
+  const ids = new Set<string>();
+  for (const candidate of value) {
+    const item = objectValue(candidate);
+    const attachmentId = item && typeof item.attachmentId === "string" ? item.attachmentId : "";
+    const previewBase64 = item && typeof item.previewBase64 === "string" ? item.previewBase64 : "";
+    if (!attachmentId || ids.has(attachmentId) || !previewBase64 || previewBase64.length > 2_800_000) return [];
+    ids.add(attachmentId);
+    result.push({ attachmentId, previewBase64 });
+  }
+  return result;
+}
+
+function decodeWebpPreview(value: string) {
+  let binary = "";
+  try { binary = atob(value); } catch { throw new Error("gallery-preview"); }
+  if (!binary.length || binary.length > 2 * 1024 * 1024) throw new Error("gallery-preview");
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const header = new TextDecoder().decode(bytes.subarray(0, 12));
+  if (!header.startsWith("RIFF") || header.slice(8, 12) !== "WEBP") throw new Error("gallery-preview");
+  return new Blob([bytes], { type: "image/webp" });
+}
+
+function galleryOriginalFilename(mimeType: string) {
+  if (mimeType === "image/jpeg") return "original.jpg";
+  if (mimeType === "image/png") return "original.png";
+  if (mimeType === "image/webp") return "original.webp";
+  throw new Error("gallery-type");
+}
+
 function normalizeError(error: unknown) {
   const message = error instanceof Error ? error.message : "unknown";
   if (message.includes("limit")) return { status: 400, error: "This selection exceeds Nemissive's messaging attachment limits." };
   if (message.includes("dimensions")) return { status: 400, error: "One selected image is still preparing. Wait a moment and try again." };
   if (message.includes("42501") || message.includes("P0002")) return { status: 403, error: "This source or destination is no longer available." };
+  if (message.includes("gallery")) return { status: 400, error: "One selected image couldn't be prepared safely for Gallery." };
   return { status: 500, error: "Nemissive couldn't prepare this multimedia delivery. Please try again." };
 }
 
@@ -78,6 +116,59 @@ async function handleRequest(request: Request) {
   const conversationId = typeof body.conversationId === "string" ? body.conversationId : "";
 
   try {
+    if (action === "save_to_gallery") {
+      const sourceMessageId = typeof body.sourceMessageId === "string" ? body.sourceMessageId : "";
+      const requestedItems = galleryItemsValue(body.galleryItems);
+      if (!sourceMessageId || !requestedItems.length) return jsonResponse(400, { error: "Choose one to ten Gallery-compatible images." });
+      const attachmentIds = requestedItems.map((item) => item.attachmentId);
+      const authorizationResult = await admin.rpc("authorize_message_gallery_save", {
+        target_actor_id: actorId,
+        target_source_message_id: sourceMessageId,
+        target_attachment_ids: attachmentIds,
+      });
+      if (authorizationResult.error || !authorizationResult.data) throw new Error(`authorize-gallery:${authorizationResult.error?.code ?? "missing"}`);
+      const source = ((authorizationResult.data as Record<string, unknown>).attachments ?? []) as SourceAttachment[];
+      const sourceById = new Map(source.map((item) => [item.id, item]));
+      const copiedPaths: string[] = [];
+      const records: Array<Record<string, unknown>> = [];
+      try {
+        for (const requested of requestedItems) {
+          const attachment = sourceById.get(requested.attachmentId);
+          if (!attachment || !attachment.width || !attachment.height) throw new Error("gallery-source");
+          const mimeType = attachment.mime_type.split(";", 1)[0].toLowerCase();
+          const itemId = crypto.randomUUID();
+          const prefix = `${actorId}/${itemId}`;
+          const originalPath = `${prefix}/${galleryOriginalFilename(mimeType)}`;
+          const previewPath = `${prefix}/preview.webp`;
+          await transferObject(admin, messageMediaBucket, attachment.storage_path, galleryMediaBucket, originalPath, mimeType);
+          copiedPaths.push(originalPath);
+          const uploadedPreview = await admin.storage.from(galleryMediaBucket).upload(previewPath, decodeWebpPreview(requested.previewBase64), {
+            cacheControl: "3600",
+            contentType: "image/webp",
+            upsert: false,
+          });
+          if (uploadedPreview.error) throw new Error(`gallery-preview-upload:${uploadedPreview.error.message}`);
+          copiedPaths.push(previewPath);
+          records.push({
+            source_attachment_id: attachment.id,
+            item_id: itemId,
+            original_path: originalPath,
+            preview_path: previewPath,
+          });
+        }
+        const finalized = await admin.rpc("finalize_message_gallery_save", {
+          target_actor_id: actorId,
+          target_source_message_id: sourceMessageId,
+          gallery_records: records,
+        });
+        if (finalized.error || !finalized.data) throw new Error(`finalize-gallery:${finalized.error?.code ?? "missing"}`);
+        return jsonResponse(200, { saved: true, ...(finalized.data as Record<string, unknown>) });
+      } catch (error) {
+        await removeObjects(admin, galleryMediaBucket, copiedPaths);
+        throw error;
+      }
+    }
+
     if (action === "forward") {
       const sourceMessageId = typeof body.sourceMessageId === "string" ? body.sourceMessageId : "";
       if (!sourceMessageId || !conversationId) return jsonResponse(400, { error: "Choose a message and destination." });

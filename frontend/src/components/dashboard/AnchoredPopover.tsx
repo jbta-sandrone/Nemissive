@@ -8,9 +8,10 @@ type AnchoredPopoverProps = {
   onClose: () => void;
   placement?: "top" | "bottom";
   panelClassName: string;
+  layerClassName?: string;
 };
 
-function AnchoredPopover({ anchorRef, ariaLabel, children, onClose, placement = "bottom", panelClassName }: AnchoredPopoverProps) {
+function AnchoredPopover({ anchorRef, ariaLabel, children, onClose, placement = "bottom", panelClassName, layerClassName = "z-[70]" }: AnchoredPopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const shouldRestoreFocusRef = useRef(true);
 
@@ -90,7 +91,7 @@ function AnchoredPopover({ anchorRef, ariaLabel, children, onClose, placement = 
     };
   }, [anchorRef, onClose]);
 
-  return createPortal(<div ref={panelRef} role="dialog" aria-label={ariaLabel} className={`fixed left-2 top-2 z-[70] opacity-0 ${panelClassName}`}>{children}</div>, document.body);
+  return createPortal(<div ref={panelRef} role="dialog" aria-label={ariaLabel} className={`fixed left-2 top-2 opacity-0 ${layerClassName} ${panelClassName}`}>{children}</div>, document.body);
 }
 
 export default AnchoredPopover;

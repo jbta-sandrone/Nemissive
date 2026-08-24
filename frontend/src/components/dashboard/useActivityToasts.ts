@@ -10,7 +10,9 @@ export type ActivityToastInput =
   | (ActivityToastBase & { kind: "message_received"; conversationId: string; otherNickname: string | null; preview: string })
   | (ActivityToastBase & { kind: "connection_request_received"; requestId: string })
   | (ActivityToastBase & { kind: "connection_request_accepted"; requestId: string; conversationId: string })
-  | (ActivityToastBase & { kind: "reaction_received"; conversationId: string; otherNickname: string | null; messageId: string; emoji: string });
+  | (ActivityToastBase & { kind: "reaction_received"; conversationId: string; otherNickname: string | null; messageId: string; emoji: string })
+  | (ActivityToastBase & { kind: "gallery_heart_received"; galleryNotificationId: string; galleryItemId: string; mediaType: "image" | "video" })
+  | (ActivityToastBase & { kind: "gallery_comment_received"; galleryNotificationId: string; galleryItemId: string; commentId: string | null; mediaType: "image" | "video"; preview: string });
 
 export type ActivityToastItem = ActivityToastInput & {
   id: string;

@@ -16,6 +16,7 @@ import MessageActionSheet from "./MessageActionSheet";
 import MessageActionsToolbar from "./MessageActionsToolbar";
 import MessageDeleteDialog from "./MessageDeleteDialog";
 import MessageMediaGallery, { type GalleryMediaItem } from "./MessageMediaGallery";
+import MessageMediaSaveDialog, { type SaveableMessageImage } from "./MessageMediaSaveDialog";
 import MessageMoreMenu from "./MessageMoreMenu";
 import MessageText from "./MessageText";
 import PinnedMessagesMenu from "./PinnedMessagesMenu";
@@ -564,6 +565,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const mobileLongPressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const mobileLongPressStateRef = useRef<MobileLongPressState | null>(null);
   const mobileActionReturnFocusRef = useRef<HTMLElement | null>(null);
+  const mediaSaveReturnFocusRef = useRef<HTMLElement | null>(null);
   const hasLoadedMessagesRef = useRef(false);
   const isMountedRef = useRef(true);
   const isSubmittingRef = useRef(false);
@@ -661,6 +663,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const [isComposerEmojiPickerOpen, setIsComposerEmojiPickerOpen] = useState(false);
   const [mobileActionMessageId, setMobileActionMessageId] = useState<string | null>(null);
   const [moreActionMessageId, setMoreActionMessageId] = useState<string | null>(null);
+  const [mediaSaveMessageId, setMediaSaveMessageId] = useState<string | null>(null);
   const [mobileEmphasizedMessageId, setMobileEmphasizedMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageReplyPreview | null>(null);
   const [messageEditState, setMessageEditState] = useState<MessageEditState | null>(null);
@@ -2205,6 +2208,13 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     onForwardMessage(message, trigger);
   }
 
+  function saveMessageMedia(message: ChatMessage, trigger: HTMLElement) {
+    setMoreActionMessageId(null);
+    setMobileActionMessageId(null);
+    mediaSaveReturnFocusRef.current = trigger;
+    setMediaSaveMessageId(message.id);
+  }
+
   function handleMessagePointerDown(message: ChatMessage, event: React.PointerEvent<HTMLElement>) {
     if (event.pointerType !== "touch" || !event.isPrimary || event.button !== 0 || window.matchMedia("(min-width: 768px)").matches) return;
     const target = event.target;
@@ -2689,6 +2699,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const loadedConfirmedMessageIds = new Set(messages.flatMap((message) => message.kind === "confirmed" ? [message.id] : []));
   const mobileActionMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === mobileActionMessageId) ?? null;
   const moreActionMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === moreActionMessageId) ?? null;
+  const mediaSaveMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === mediaSaveMessageId && message.messageType === "image") ?? null;
+  const mediaSaveImages: SaveableMessageImage[] = mediaSaveMessage?.attachments
+    .filter((attachment) => attachment.attachmentKind === "image" && ["image/jpeg", "image/png", "image/webp"].includes(attachment.mimeType.split(";", 1)[0].toLowerCase()))
+    .map((attachment) => ({ ...attachment, url: signedMedia.urls.get(attachment.storagePath) ?? null })) ?? [];
   const reactionDetailsMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === reactionDetailsMessageId) ?? null;
   const reactionDetailsReactions = reactionDetailsMessage ? reactions.filter((reaction) => reaction.messageId === reactionDetailsMessage.id) : [];
   const isReactionDetailsMutationPending = reactionDetailsMessage ? [...pendingReactionKeys].some((mutationKey) => mutationKey.startsWith(`${reactionDetailsMessage.id}\u0000`)) : false;
@@ -2818,12 +2832,58 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
           </div>
         </div>}
       </form>}
-      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet key={mobileActionMessage.id} canCopy={Boolean(mobileActionMessage.body)} canForward={!mobileActionMessage.isIntroduction && (mobileActionMessage.messageType === "text" ? Boolean(mobileActionMessage.body) : mobileActionMessage.attachments.length > 0)} canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction} canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction && mobileActionMessage.messageType !== "voice"} canPin={!mobileActionMessage.isIntroduction && interactionStatus.messagingAvailable} canInteract={interactionStatus.messagingAvailable} isPinned={pinnedMessages.some((pin) => pin.messageId === mobileActionMessage.id)} isPinPending={isLoadingPinnedMessages || pendingPinnedMessageIds.has(mobileActionMessage.id)} messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`} quickReactions={quickReactions} returnFocusRef={mobileActionReturnFocusRef} themeStyle={getConversationThemeStyle(currentTheme)} onClose={() => setMobileActionMessageId(null)} onCopy={() => void copyMessage(mobileActionMessage)} onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }} onPin={() => void togglePinnedMessage(mobileActionMessage)} onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)} onReply={() => handleReplyToMessage(mobileActionMessage)} onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }} onForward={() => { const trigger = mobileActionReturnFocusRef.current; if (trigger) forwardMessage(mobileActionMessage, trigger); }} onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)} />}</AnimatePresence>
+      <AnimatePresence initial={false} onExitComplete={() => setMobileEmphasizedMessageId(null)}>{mobileActionMessage && <MessageActionSheet
+        key={mobileActionMessage.id}
+        canCopy={Boolean(mobileActionMessage.body)}
+        canForward={!mobileActionMessage.isIntroduction && (mobileActionMessage.messageType === "text" ? Boolean(mobileActionMessage.body) : mobileActionMessage.attachments.length > 0)}
+        canSave={!mobileActionMessage.isIntroduction && mobileActionMessage.messageType === "image" && mobileActionMessage.attachments.some((attachment) => attachment.attachmentKind === "image" && ["image/jpeg", "image/png", "image/webp"].includes(attachment.mimeType.split(";", 1)[0].toLowerCase()))}
+        canDelete={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction}
+        canEdit={mobileActionMessage.senderId === currentUserId && !mobileActionMessage.isIntroduction && mobileActionMessage.messageType !== "voice"}
+        canPin={!mobileActionMessage.isIntroduction && interactionStatus.messagingAvailable}
+        canInteract={interactionStatus.messagingAvailable}
+        isPinned={pinnedMessages.some((pin) => pin.messageId === mobileActionMessage.id)}
+        isPinPending={isLoadingPinnedMessages || pendingPinnedMessageIds.has(mobileActionMessage.id)}
+        messageLabel={`message from ${mobileActionMessage.senderId === currentUserId ? "yourself" : otherName}`}
+        quickReactions={quickReactions}
+        returnFocusRef={mobileActionReturnFocusRef}
+        themeStyle={getConversationThemeStyle(currentTheme)}
+        onClose={() => setMobileActionMessageId(null)}
+        onCopy={() => void copyMessage(mobileActionMessage)}
+        onDelete={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) openDeleteConfirmation(mobileActionMessage, returnFocusElement); }}
+        onPin={() => void togglePinnedMessage(mobileActionMessage)}
+        onReact={(emoji) => void toggleReaction(mobileActionMessage.id, emoji)}
+        onReply={() => handleReplyToMessage(mobileActionMessage)}
+        onEdit={() => { const returnFocusElement = mobileActionReturnFocusRef.current; if (returnFocusElement) startEditingMessage(mobileActionMessage, returnFocusElement); }}
+        onForward={() => { const trigger = mobileActionReturnFocusRef.current; if (trigger) forwardMessage(mobileActionMessage, trigger); }}
+        onSave={() => { const trigger = mobileActionReturnFocusRef.current; if (trigger) saveMessageMedia(mobileActionMessage, trigger); }}
+        onOpenEmojiPicker={() => setFullReactionPickerMessageId(mobileActionMessage.id)}
+      />}</AnimatePresence>
       <AnimatePresence initial={false} onExitComplete={() => { const anchor = reactionDetailsAnchorRef.current; if (anchor?.isConnected) anchor.focus(); else if (lastReactionDetailsMessageIdRef.current) messageElementsRef.current.get(lastReactionDetailsMessageIdRef.current)?.focus(); }}>{reactionDetailsMessage && (reactionDetailsReactions.length > 0 || isReactionDetailsMutationPending) && <ReactionDetails key={reactionDetailsMessage.id} anchorRef={reactionDetailsAnchorRef} currentUserId={currentUserId} error={reactionProfilesError} isLoading={isReactionProfilesLoading} isMutationPending={isReactionDetailsMutationPending} canMutate={interactionStatus.messagingAvailable} messageLabel={`message from ${reactionDetailsMessage.senderId === currentUserId ? "yourself" : otherName}`} mutationError={reactionDetailsMutationError} pendingReactionKeys={pendingReactionKeys} profilesById={availableReactionProfilesById} reactions={reactionDetailsReactions} onClose={closeReactionDetails} onRemoveOwnReaction={(reaction) => void removeOwnReactionFromDetails(reaction)} onRetry={retryReactionProfiles} />}</AnimatePresence>
       <AnimatePresence initial={false}>{messageDeleteState && <MessageDeleteDialog key={messageDeleteState.messageId} error={messageDeleteState.error} isDeleting={messageDeleteState.isDeleting} returnFocusRef={deleteTriggerRef} onCancel={cancelMessageDeletion} onConfirm={() => void confirmMessageDeletion()} />}</AnimatePresence>
       <AnimatePresence initial={false}>{unblockDialogOpen && <UserBlockDialog blocked={false} displayName={otherName} error={unblockError} isSaving={unblockSaving} returnFocusRef={blockedComposerActionRef} onCancel={() => setUnblockDialogOpen(false)} onConfirm={() => void confirmComposerUnblock()} />}</AnimatePresence>
       <AnimatePresence initial={false}>{imageViewerState && imageViewerImages.length > 0 && <ImageViewer key={imageViewerState.messageId} images={imageViewerImages} initialIndex={imageViewerState.initialIndex} isLoading={signedMedia.isLoading} returnFocusRef={imageViewerReturnFocusRef} onClose={() => setImageViewerState(null)} onRetry={signedMedia.retry} />}</AnimatePresence>
-      {moreActionMessage && <MessageMoreMenu anchorRef={moreActionAnchorRef} canCopy={Boolean(moreActionMessage.body)} canDelete={moreActionMessage.senderId === currentUserId && !moreActionMessage.isIntroduction} canEdit={moreActionMessage.senderId === currentUserId && !moreActionMessage.isIntroduction && moreActionMessage.messageType !== "voice"} canForward={!moreActionMessage.isIntroduction && (moreActionMessage.messageType === "text" ? Boolean(moreActionMessage.body) : moreActionMessage.attachments.length > 0)} canPin={!moreActionMessage.isIntroduction && interactionStatus.messagingAvailable} disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)} forwardUnavailableReason="This message can't be forwarded" isPinned={pinnedMessages.some((pin) => pin.messageId === moreActionMessage.id)} isPinPending={isLoadingPinnedMessages || pendingPinnedMessageIds.has(moreActionMessage.id)} messageLabel={`message from ${moreActionMessage.senderId === currentUserId ? "yourself" : otherName}`} onClose={() => setMoreActionMessageId(null)} onCopy={() => void copyMessage(moreActionMessage)} onDelete={() => { const trigger = moreActionAnchorRef.current; if (trigger) openDeleteConfirmation(moreActionMessage, trigger); }} onEdit={() => { const trigger = moreActionAnchorRef.current; if (trigger) startEditingMessage(moreActionMessage, trigger); }} onForward={() => { const trigger = moreActionAnchorRef.current; if (trigger) forwardMessage(moreActionMessage, trigger); }} onPin={() => void togglePinnedMessage(moreActionMessage)} />}
+      <AnimatePresence initial={false}>{mediaSaveMessage && mediaSaveImages.length > 0 && <MessageMediaSaveDialog key={mediaSaveMessage.id} messageId={mediaSaveMessage.id} images={mediaSaveImages} returnFocusRef={mediaSaveReturnFocusRef} onClose={() => setMediaSaveMessageId(null)} onSavedToGallery={(count) => showPinToast(count === 1 ? "Saved to Gallery" : `${count} images saved to Gallery`)} onSavedToDevice={(count) => showPinToast(count === 1 ? "Image downloaded" : `${count} images downloaded`)} />}</AnimatePresence>
+      {moreActionMessage && <MessageMoreMenu
+        anchorRef={moreActionAnchorRef}
+        canCopy={Boolean(moreActionMessage.body)}
+        canDelete={moreActionMessage.senderId === currentUserId && !moreActionMessage.isIntroduction}
+        canEdit={moreActionMessage.senderId === currentUserId && !moreActionMessage.isIntroduction && moreActionMessage.messageType !== "voice"}
+        canForward={!moreActionMessage.isIntroduction && (moreActionMessage.messageType === "text" ? Boolean(moreActionMessage.body) : moreActionMessage.attachments.length > 0)}
+        canSave={!moreActionMessage.isIntroduction && moreActionMessage.messageType === "image" && moreActionMessage.attachments.some((attachment) => attachment.attachmentKind === "image" && ["image/jpeg", "image/png", "image/webp"].includes(attachment.mimeType.split(";", 1)[0].toLowerCase()))}
+        canPin={!moreActionMessage.isIntroduction && interactionStatus.messagingAvailable}
+        disabled={Boolean(messageEditState?.isSaving || messageDeleteState?.isDeleting)}
+        forwardUnavailableReason="This message can't be forwarded"
+        isPinned={pinnedMessages.some((pin) => pin.messageId === moreActionMessage.id)}
+        isPinPending={isLoadingPinnedMessages || pendingPinnedMessageIds.has(moreActionMessage.id)}
+        messageLabel={`message from ${moreActionMessage.senderId === currentUserId ? "yourself" : otherName}`}
+        onClose={() => setMoreActionMessageId(null)}
+        onCopy={() => void copyMessage(moreActionMessage)}
+        onDelete={() => { const trigger = moreActionAnchorRef.current; if (trigger) openDeleteConfirmation(moreActionMessage, trigger); }}
+        onEdit={() => { const trigger = moreActionAnchorRef.current; if (trigger) startEditingMessage(moreActionMessage, trigger); }}
+        onForward={() => { const trigger = moreActionAnchorRef.current; if (trigger) forwardMessage(moreActionMessage, trigger); }}
+        onSave={() => { const trigger = moreActionAnchorRef.current; if (trigger) saveMessageMedia(moreActionMessage, trigger); }}
+        onPin={() => void togglePinnedMessage(moreActionMessage)}
+      />}
       {quickReactionMessageId && <QuickReactionMenu anchorRef={reactionAnchorRef} quickReactions={quickReactions} messageLabel="this message" onSelect={(emoji) => void toggleReaction(quickReactionMessageId, emoji)} onClose={() => setQuickReactionMessageId(null)} onOpenPicker={() => setFullReactionPickerMessageId(quickReactionMessageId)} />}
       {fullReactionPickerMessageId && <EmojiPicker anchorRef={reactionAnchorRef} ariaLabel="Choose a message reaction" onSelect={(emoji) => void toggleReaction(fullReactionPickerMessageId, emoji)} onClose={() => setFullReactionPickerMessageId(null)} placement="top" />}
       {isComposerEmojiPickerOpen && <EmojiPicker anchorRef={composerEmojiButtonRef} ariaLabel="Insert an emoji into your message" onSelect={insertComposerEmoji} onClose={() => setIsComposerEmojiPickerOpen(false)} placement="top" />}

@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 
 type UtilityShelfProps = {
   isOpen: boolean;
+  hasGalleryUnread: boolean;
   anchorRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onOpenNotes: (trigger: HTMLButtonElement) => void;
@@ -27,13 +28,13 @@ export function UtilityShelfIcon({ className = "h-5 w-5" }: { className?: string
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true"><path d="M4 8.5h16v11H4v-11ZM8.5 8.5V6h7v2.5M4 12h16" strokeLinecap="round" strokeLinejoin="round" /><path d="M10 12v2h4v-2" strokeLinejoin="round" /></svg>;
 }
 
-export function UtilityShelfLauncher({ isOpen, onToggle, className = "" }: { isOpen: boolean; onToggle: (trigger: HTMLButtonElement) => void; className?: string }) {
+export function UtilityShelfLauncher({ isOpen, hasGalleryUnread, onToggle, className = "" }: { isOpen: boolean; hasGalleryUnread: boolean; onToggle: (trigger: HTMLButtonElement) => void; className?: string }) {
   return (
     <button
       type="button"
       data-utility-shelf-trigger="workspace"
       onClick={(event) => onToggle(event.currentTarget)}
-      aria-label={isOpen ? "Close utilities" : "Open utilities"}
+      aria-label={`${isOpen ? "Close utilities" : "Open utilities"}${hasGalleryUnread ? ", new Gallery activity" : ""}`}
       aria-haspopup="menu"
       aria-controls="nemissive-utility-menu"
       aria-expanded={isOpen}
@@ -41,6 +42,8 @@ export function UtilityShelfLauncher({ isOpen, onToggle, className = "" }: { isO
       className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border shadow-soft transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isOpen ? "border-primary/25 bg-accent text-primary" : "border-border bg-background text-muted hover:bg-accent hover:text-heading"} ${className}`}
     >
       <UtilityShelfIcon />
+      {!isOpen && hasGalleryUnread && <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background" aria-hidden="true" />}
+      {!isOpen && hasGalleryUnread && <span className="sr-only">New Gallery activity</span>}
     </button>
   );
 }
@@ -52,7 +55,7 @@ function ToolIcon({ tool }: { tool: UtilityTool["id"] }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2M8 3.5 5.5 6M16 3.5 18.5 6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function UtilityShelf({ isOpen, anchorRef, onClose, onOpenNotes, onOpenGallery, onOpenReminders }: UtilityShelfProps) {
+function UtilityShelf({ isOpen, hasGalleryUnread, anchorRef, onClose, onOpenNotes, onOpenGallery, onOpenReminders }: UtilityShelfProps) {
   const shouldReduceMotion = useReducedMotion();
   const menuRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -149,9 +152,11 @@ function UtilityShelf({ isOpen, anchorRef, onClose, onOpenNotes, onOpenGallery, 
           className="fixed z-[70] w-[min(17rem,calc(100vw-1.5rem))] rounded-2xl border border-border bg-surface p-1.5 shadow-soft"
         >
           {utilityTools.map((tool) => (
-            <button key={tool.id} type="button" role="menuitem" onClick={() => { const trigger = anchorRef.current; if (!trigger) return; shouldRestoreFocusRef.current = false; if (tool.id === "notes") onOpenNotes(trigger); else if (tool.id === "gallery") onOpenGallery(trigger); else onOpenReminders(trigger); }} className={`${itemClass} hover:bg-accent`}>
+            <button key={tool.id} type="button" role="menuitem" aria-label={tool.id === "gallery" && hasGalleryUnread ? "Gallery, new activity" : undefined} onClick={() => { const trigger = anchorRef.current; if (!trigger) return; shouldRestoreFocusRef.current = false; if (tool.id === "notes") onOpenNotes(trigger); else if (tool.id === "gallery") onOpenGallery(trigger); else onOpenReminders(trigger); }} className={`${itemClass} hover:bg-accent`}>
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary"><ToolIcon tool={tool.id} /></span>
-              <span className="min-w-0"><span className="block text-sm font-semibold text-heading">{tool.label}</span><span className="block truncate text-xs text-body">{tool.description}</span></span>
+              <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-heading">{tool.label}</span><span className="block truncate text-xs text-body">{tool.description}</span></span>
+              {tool.id === "gallery" && hasGalleryUnread && <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />}
+              {tool.id === "gallery" && hasGalleryUnread && <span className="sr-only">New activity</span>}
             </button>
           ))}
         </motion.div>}
