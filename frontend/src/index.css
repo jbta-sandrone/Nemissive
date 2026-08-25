@@ -86,6 +86,28 @@ body {
   --chat-boundary: var(--chat-theme-light-boundary);
   --chat-scrollbar: var(--chat-theme-light-scrollbar);
   --chat-scrollbar-track: var(--chat-theme-light-scrollbar-track);
+  --chat-reply-bg: var(--chat-theme-light-reply-bg);
+  --chat-reaction-bg: var(--chat-theme-light-reaction-bg);
+  --chat-activity-bg: var(--chat-theme-light-activity-bg);
+  --chat-media-bg: var(--chat-theme-light-media-bg);
+  --chat-control-bg: var(--chat-theme-light-control-bg);
+  --chat-control-hover: var(--chat-theme-light-control-hover);
+  --chat-focus: var(--chat-theme-light-focus);
+  --chat-outgoing-border: var(--chat-theme-light-outgoing-border);
+  --chat-incoming-border: var(--chat-theme-light-incoming-border);
+  --chat-outgoing-shadow: var(--chat-theme-light-outgoing-shadow);
+  --chat-incoming-shadow: var(--chat-theme-light-incoming-shadow);
+  --chat-composer-shadow: var(--chat-theme-light-composer-shadow);
+  --chat-chrome-backdrop: var(--chat-theme-light-chrome-backdrop);
+  --chat-artwork-image: var(--chat-theme-light-artwork-image);
+  --chat-artwork-mobile-image: var(--chat-theme-light-artwork-mobile-image);
+  --chat-preview-artwork-image: var(--chat-theme-light-preview-artwork-image);
+  --chat-artwork-opacity: var(--chat-theme-light-artwork-opacity);
+  --chat-artwork-position: var(--chat-theme-light-artwork-position);
+  --chat-artwork-tablet-position: var(--chat-theme-light-artwork-tablet-position);
+  --chat-artwork-mobile-position: var(--chat-theme-light-artwork-mobile-position);
+  --chat-artwork-size: var(--chat-theme-light-artwork-size);
+  --chat-artwork-filter: var(--chat-theme-light-artwork-filter);
 }
 
 :root[data-appearance="dark"] .chat-theme,
@@ -112,6 +134,28 @@ body {
   --chat-boundary: var(--chat-theme-dark-boundary);
   --chat-scrollbar: var(--chat-theme-dark-scrollbar);
   --chat-scrollbar-track: var(--chat-theme-dark-scrollbar-track);
+  --chat-reply-bg: var(--chat-theme-dark-reply-bg);
+  --chat-reaction-bg: var(--chat-theme-dark-reaction-bg);
+  --chat-activity-bg: var(--chat-theme-dark-activity-bg);
+  --chat-media-bg: var(--chat-theme-dark-media-bg);
+  --chat-control-bg: var(--chat-theme-dark-control-bg);
+  --chat-control-hover: var(--chat-theme-dark-control-hover);
+  --chat-focus: var(--chat-theme-dark-focus);
+  --chat-outgoing-border: var(--chat-theme-dark-outgoing-border);
+  --chat-incoming-border: var(--chat-theme-dark-incoming-border);
+  --chat-outgoing-shadow: var(--chat-theme-dark-outgoing-shadow);
+  --chat-incoming-shadow: var(--chat-theme-dark-incoming-shadow);
+  --chat-composer-shadow: var(--chat-theme-dark-composer-shadow);
+  --chat-chrome-backdrop: var(--chat-theme-dark-chrome-backdrop);
+  --chat-artwork-image: var(--chat-theme-dark-artwork-image);
+  --chat-artwork-mobile-image: var(--chat-theme-dark-artwork-mobile-image);
+  --chat-preview-artwork-image: var(--chat-theme-dark-preview-artwork-image);
+  --chat-artwork-opacity: var(--chat-theme-dark-artwork-opacity);
+  --chat-artwork-position: var(--chat-theme-dark-artwork-position);
+  --chat-artwork-tablet-position: var(--chat-theme-dark-artwork-tablet-position);
+  --chat-artwork-mobile-position: var(--chat-theme-dark-artwork-mobile-position);
+  --chat-artwork-size: var(--chat-theme-dark-artwork-size);
+  --chat-artwork-filter: var(--chat-theme-dark-artwork-filter);
 }
 
 .chat-theme {
@@ -121,6 +165,37 @@ body {
 
 .chat-theme .chat-panel-root {
   background: var(--chat-canvas-secondary);
+  isolation: isolate;
+}
+
+.chat-theme .chat-theme-artwork {
+  display: none;
+}
+
+.chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork {
+  display: block;
+  z-index: 0;
+  background-image: var(--chat-artwork-image);
+  background-position: var(--chat-artwork-position);
+  background-repeat: no-repeat;
+  background-size: var(--chat-artwork-size);
+  opacity: var(--chat-artwork-opacity);
+  filter: var(--chat-artwork-filter);
+  pointer-events: none;
+  user-select: none;
+}
+
+.chat-theme-preview .chat-theme-preview-artwork {
+  background-image: var(--chat-preview-artwork-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: var(--chat-artwork-opacity);
+  filter: var(--chat-artwork-filter);
+}
+
+.chat-theme .chat-panel-root > :not(.chat-theme-artwork) {
+  z-index: 1;
 }
 
 .chat-theme .chat-timeline {
@@ -147,6 +222,7 @@ body {
 .chat-theme .chat-header {
   background: var(--chat-header);
   border-color: var(--chat-header-border);
+  backdrop-filter: var(--chat-chrome-backdrop);
 }
 
 .chat-theme .chat-header .text-heading,
@@ -228,12 +304,16 @@ body {
 .chat-theme .chat-message-outgoing {
   background: var(--chat-outgoing-bg);
   color: var(--chat-outgoing-text);
+  outline: 1px solid var(--chat-outgoing-border);
+  outline-offset: -1px;
+  box-shadow: var(--chat-outgoing-shadow);
 }
 
 .chat-theme .chat-message-incoming {
   background: var(--chat-incoming-bg);
-  border-color: var(--chat-header-border);
+  border-color: var(--chat-incoming-border);
   color: var(--chat-incoming-text);
+  box-shadow: var(--chat-incoming-shadow);
 }
 
 .chat-theme .chat-message-incoming .text-heading {
@@ -255,7 +335,7 @@ body {
 }
 
 .chat-theme .chat-message-incoming .chat-reply-quote {
-  background: var(--chat-surface-muted);
+  background: var(--chat-reply-bg);
 }
 
 .chat-theme .chat-message-incoming .chat-message-link {
@@ -271,7 +351,7 @@ body {
 }
 
 .chat-theme .chat-reaction-chip {
-  background: var(--chat-surface-elevated);
+  background: var(--chat-reaction-bg);
   border-color: var(--chat-header-border);
   color: var(--chat-body);
 }
@@ -284,7 +364,7 @@ body {
 }
 
 .chat-theme .chat-header-control {
-  background: var(--chat-surface-elevated);
+  background: var(--chat-control-bg);
   border-color: var(--chat-header-border);
   color: var(--chat-muted);
 }
@@ -293,7 +373,7 @@ body {
 .chat-theme .chat-header-control-active,
 .chat-theme .chat-accent-control:hover,
 .chat-theme .chat-accent-control-active {
-  background: var(--chat-accent-soft);
+  background: var(--chat-control-hover);
   border-color: color-mix(in srgb, var(--chat-accent) 38%, var(--chat-header-border));
   color: var(--chat-accent);
 }
@@ -303,10 +383,11 @@ body {
 .chat-theme .chat-primary-action:focus-visible,
 .chat-theme .chat-jump-latest:focus-visible,
 .chat-theme .chat-reaction-chip:focus-visible {
-  --tw-ring-color: color-mix(in srgb, var(--chat-accent) 38%, transparent);
+  --tw-ring-color: var(--chat-focus);
 }
 
 .chat-theme .chat-activity-row {
+  background: var(--chat-activity-bg);
   color: var(--chat-muted);
 }
 
@@ -331,16 +412,18 @@ body {
 .chat-theme .chat-composer-region {
   background: var(--chat-composer-bg);
   border-color: var(--chat-composer-border);
+  backdrop-filter: var(--chat-chrome-backdrop);
 }
 
 .chat-theme .chat-composer-shell {
   background: var(--chat-surface-elevated);
   border: 1px solid var(--chat-composer-border);
   color: var(--chat-body);
+  box-shadow: var(--chat-composer-shadow);
 }
 
 .chat-theme .chat-composer-shell:focus-within {
-  --tw-ring-color: color-mix(in srgb, var(--chat-accent) 38%, transparent);
+  --tw-ring-color: var(--chat-focus);
 }
 
 .chat-theme .chat-composer-input {
@@ -391,7 +474,7 @@ body {
 
 .chat-theme .chat-media-placeholder,
 .chat-theme .chat-media-review-card {
-  background: var(--chat-surface-muted);
+  background: var(--chat-media-bg);
   color: var(--chat-muted);
 }
 
@@ -412,6 +495,35 @@ body {
 .chat-theme .chat-timeline a {
   text-decoration-color: color-mix(in srgb, currentColor 60%, transparent);
   text-underline-offset: 0.16em;
+}
+
+.chat-theme[data-chat-theme="obsidian"] .chat-activity-row {
+  border-radius: 999px;
+}
+
+.chat-theme[data-chat-theme="obsidian"] .chat-message-incoming .chat-file-card,
+.chat-theme[data-chat-theme="obsidian"] .chat-message-incoming .chat-file-card .bg-background {
+  background: var(--chat-media-bg);
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork {
+    background-position: var(--chat-artwork-tablet-position);
+  }
+}
+
+@media (max-width: 767px) {
+  .chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork {
+    background-image: var(--chat-artwork-mobile-image);
+    background-position: var(--chat-artwork-mobile-position);
+  }
+}
+
+@media (forced-colors: active) {
+  .chat-theme .chat-theme-artwork,
+  .chat-theme-preview .chat-theme-preview-artwork {
+    display: none;
+  }
 }
 
 .pulse-list {

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" fill="none">
+  <defs>
+    <linearGradient id="night-left" x1="70" y1="40" x2="480" y2="610" gradientUnits="userSpaceOnUse"><stop stop-color="#7797AD" stop-opacity=".72"/><stop offset=".28" stop-color="#263642" stop-opacity=".92"/><stop offset="1" stop-color="#080B12" stop-opacity=".98"/></linearGradient>
+    <linearGradient id="night-edge" x1="80" y1="80" x2="340" y2="580" gradientUnits="userSpaceOnUse"><stop stop-color="#B4D5E8" stop-opacity=".72"/><stop offset=".42" stop-color="#42657C" stop-opacity=".42"/><stop offset="1" stop-color="#101721" stop-opacity="0"/></linearGradient>
+    <linearGradient id="night-right" x1="1570" y1="920" x2="1110" y2="520" gradientUnits="userSpaceOnUse"><stop stop-color="#06080D"/><stop offset=".48" stop-color="#1D2A36" stop-opacity=".96"/><stop offset="1" stop-color="#7AA6C1" stop-opacity=".55"/></linearGradient>
+    <radialGradient id="night-haze" cx="0" cy="0" r="1" gradientTransform="translate(1510 810) rotate(-145) scale(540 390)" gradientUnits="userSpaceOnUse"><stop stop-color="#5B91B0" stop-opacity=".25"/><stop offset="1" stop-color="#111620" stop-opacity="0"/></radialGradient>
+  </defs>
+  <ellipse cx="1450" cy="820" rx="530" ry="390" fill="url(#night-haze)"/>
+  <g opacity=".96">
+    <path d="M0 0h308L214 184 376 535 166 447 75 660 0 620V0Z" fill="url(#night-left)"/>
+    <path d="M0 0h162l52 184L75 660 0 620V0Z" fill="#070A10" fill-opacity=".9"/>
+    <path d="M162 0h146l-94 184L75 660l91-213 210 88-162-351L162 0Z" stroke="url(#night-edge)" stroke-width="4"/>
+    <path d="M214 184 98 292l68 155 210 88-162-351Z" fill="#355062" fill-opacity=".38"/>
+    <path d="M98 292 0 338v282l75 40 91-213-68-155Z" fill="#141D28" fill-opacity=".92"/>
+    <path d="m214 184 94-184 68 535-162-351Z" fill="#8CB5CA" fill-opacity=".15"/>
+  </g>
+  <g opacity=".98">
+    <path d="m1600 1000-514-8 144-236-54-305 208 142 68-331 148-118v856Z" fill="url(#night-right)"/>
+    <path d="m1600 1000-278-8-92-236 154-163 68-331 148-118v856Z" fill="#080B11" fill-opacity=".78"/>
+    <path d="m1086 992 144-236-54-305 208 142-62 399h-236Z" fill="#31495B" fill-opacity=".42"/>
+    <path d="m1176 451 208 142 68-331-276 189Z" fill="#749BB2" fill-opacity=".3"/>
+    <path d="m1230 756 154-163-62 399-92-236Z" fill="#101720"/>
+    <path d="m1176 451 208 142 68-331M1230 756l154-163-62 399" stroke="#9CC8DE" stroke-opacity=".5" stroke-width="4"/>
+    <path d="m1452 262 148-118v856l-278-8 130-730Z" fill="#05070B" fill-opacity=".68"/>
+  </g>
+  <g stroke="#A9D4E8" stroke-opacity=".24" stroke-width="2">
+    <path d="m52 720 180-96 122 64"/><path d="m1344 420 114-190 86-66"/><path d="m1118 864 112-108 92 236"/>
+  </g>
+</svg>

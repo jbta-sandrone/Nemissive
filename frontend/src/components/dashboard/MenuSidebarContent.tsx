@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { ProfileSearchResult } from "../../types/conversations";
+import AccountPlanBadge from "./AccountPlanBadge";
+import type { AccountPlan } from "./premiumAccess";
 import NotificationSettings from "./NotificationSettings";
 import ProfileAvatar from "./ProfileAvatar";
 import ProfileDetailsSettings from "./ProfileDetailsSettings";
@@ -9,6 +11,7 @@ import { getProfileDisplayName } from "./profileUtils";
 
 type MenuSidebarContentProps = {
   profile: ProfileSearchResult | null;
+  accountPlan: AccountPlan;
   isAccountLoading: boolean;
   accountError: string;
   quickReactions: string[];
@@ -18,13 +21,14 @@ type MenuSidebarContentProps = {
   onEnableNotifications: () => Promise<string | null>;
   onSaveNotificationPreferences: (notificationsEnabled: boolean, soundEnabled: boolean) => Promise<string | null>;
   onProfileIdentityUpdated: (profile: ProfileSearchResult) => void;
+  onOpenElite: (trigger: HTMLButtonElement) => void;
   onRequestSignOut: (trigger: HTMLButtonElement) => void;
   onAccountDeleted: () => void;
 };
 
 type MenuSubsection = "profile" | "notifications" | "quick-reactions" | "settings";
 type MenuView = "landing" | MenuSubsection;
-type MenuIconKind = MenuSubsection | "back" | "chevron" | "signout";
+type MenuIconKind = MenuSubsection | "back" | "chevron" | "elite" | "signout";
 
 const subsectionCopy: Record<MenuSubsection, { title: string; description: string }> = {
   profile: { title: "Profile", description: "Manage your profile and personal details." },
@@ -40,6 +44,7 @@ function MenuIcon({ kind }: { kind: MenuIconKind }) {
   if (kind === "notifications") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><path d="M6.5 9a5.5 5.5 0 0 1 11 0c0 5 2 5.5 2 7H4.5c0-1.5 2-2 2-7Z" strokeLinejoin="round" /><path d="M9.5 19a3 3 0 0 0 5 0" strokeLinecap="round" /></svg>;
   if (kind === "quick-reactions") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M8.5 10h.01M15.5 10h.01M8.5 14.5c1.9 1.7 5.1 1.7 7 0" strokeLinecap="round" /></svg>;
   if (kind === "settings") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M9 4v6M8 14v6" strokeLinecap="round" /></svg>;
+  if (kind === "elite") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className={iconClass} aria-hidden="true"><path d="m12 3.5 7 5-2.7 8.2L12 20.5l-4.3-3.8L5 8.5l7-5Z" strokeLinejoin="round" /><path d="m5 8.5 7 3 7-3M12 11.5v9" strokeLinejoin="round" /></svg>;
   if (kind === "signout") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   if (kind === "back") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={iconClass} aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   if (kind === "chevron") return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
@@ -94,7 +99,7 @@ function SubsectionHeader({ headingRef, title, description, onBack }: { headingR
   );
 }
 
-function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onRequestSignOut, onAccountDeleted }: MenuSidebarContentProps) {
+function MenuSidebarContent({ profile, accountPlan, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onOpenElite, onRequestSignOut, onAccountDeleted }: MenuSidebarContentProps) {
   const subsectionHeadingRef = useRef<HTMLHeadingElement>(null);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
@@ -157,8 +162,10 @@ function MenuSidebarContent({ profile, isAccountLoading, accountError, quickReac
         ) : accountError || !profile ? (
           <div role="alert" className="rounded-3xl border border-border bg-background p-5"><h2 className="font-semibold text-heading">Account unavailable</h2><p className="mt-2 text-sm leading-6 text-body">{accountError || "Your profile could not be loaded."}</p></div>
         ) : (
-          <div className="rounded-3xl border border-border bg-background p-4 shadow-soft"><div className="flex min-w-0 items-center gap-4"><div className="relative"><ProfileAvatar profile={profile} size="lg" /><span className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-background bg-online" aria-hidden="true" /></div><div className="min-w-0 flex-1"><h2 className="truncate text-lg font-bold text-heading">{getProfileDisplayName(profile)}</h2><p className="mt-1 truncate text-sm text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p><p className="mt-2 text-xs font-semibold text-online">Signed in</p></div></div></div>
+          <div className="rounded-3xl border border-border bg-background p-4 shadow-soft"><div className="flex min-w-0 items-center gap-3"><div className="relative shrink-0"><ProfileAvatar profile={profile} size="lg" /><span className="absolute -right-0.5 top-0.5 h-4 w-4 rounded-full border-2 border-background bg-online" aria-hidden="true" /></div><div className="min-w-0 flex-1"><h2 className="truncate text-lg font-bold text-heading">{getProfileDisplayName(profile)}</h2><p className="mt-1 truncate text-sm text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p><p className="mt-2 text-xs font-semibold text-online">Signed in</p></div><AccountPlanBadge plan={accountPlan} size="compact" className="shrink-0" /></div></div>
         )}
+
+        <button type="button" disabled={categoriesDisabled} onClick={(event) => onOpenElite(event.currentTarget)} className="mt-3 flex min-h-16 w-full items-center gap-3 rounded-3xl bg-accent px-4 py-3 text-left transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surface text-primary"><MenuIcon kind="elite" /></span><span className="min-w-0 flex-1"><span className="block font-bold text-heading">Nemissive Elite</span><span className="mt-0.5 block text-xs leading-5 text-body">Explore what&apos;s coming</span></span><span className="shrink-0 text-muted"><MenuIcon kind="chevron" /></span></button>
 
         <nav aria-label="Menu categories" className="mt-5 space-y-3">
           <MenuCategoryButton buttonRef={profileButtonRef} kind="profile" title="Profile" description="Manage your profile and personal details" disabled={categoriesDisabled} onClick={() => openSubsection("profile")} />

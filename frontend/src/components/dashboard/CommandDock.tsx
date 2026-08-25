@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DashboardSection } from "../../types/dashboard";
 import type { ProfileSearchResult } from "../../types/conversations";
 import AccountMenuPopover, { type PersonalSurface } from "./AccountMenuPopover";
+import type { AccountPlan } from "./premiumAccess";
 import { DashboardDestinationButton, SearchNavigationButton } from "./DashboardNavigationControls";
 import { workspaceDestinations } from "./dashboardNavigation";
 import { UtilityShelfIcon } from "./UtilityShelf";
@@ -12,10 +13,13 @@ type CommandDockProps = {
   unreadMessageCount: number;
   archivedConversationCount: number;
   currentProfile: ProfileSearchResult | null;
+  accountPlan: AccountPlan;
+  isAccountMenuAvailable: boolean;
   isSigningOut: boolean;
   isUtilityShelfOpen: boolean;
   hasGalleryUnread: boolean;
   onDestinationChange: (section: DashboardSection) => void;
+  onOpenElite: (trigger: HTMLButtonElement) => void;
   onOpenPersonalSurface: (surface: PersonalSurface, trigger: HTMLButtonElement) => void;
   onRequestSignOut: (trigger: HTMLButtonElement) => void;
   onExitFocus: () => void;
@@ -29,7 +33,7 @@ function WorkspaceIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9 4.5v15" /></svg>;
 }
 
-function CommandDock({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, currentProfile, isSigningOut, isUtilityShelfOpen, hasGalleryUnread, onDestinationChange, onOpenPersonalSurface, onRequestSignOut, onExitFocus, onSearch, onUtilityShelfToggle }: CommandDockProps) {
+function CommandDock({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, currentProfile, accountPlan, isAccountMenuAvailable, isSigningOut, isUtilityShelfOpen, hasGalleryUnread, onDestinationChange, onOpenElite, onOpenPersonalSurface, onRequestSignOut, onExitFocus, onSearch, onUtilityShelfToggle }: CommandDockProps) {
   const [expanded, setExpanded] = useState(true);
   const dockRef = useRef<HTMLDivElement>(null);
   const idleTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
@@ -83,7 +87,7 @@ function CommandDock({ activeSection, pendingRequestCount, unreadMessageCount, a
     <div ref={dockRef} className="command-dock pointer-events-auto fixed left-1/2 z-[46] hidden -translate-x-1/2 lg:flex" onPointerEnter={reveal} onPointerMove={scheduleMinimize} onPointerLeave={scheduleMinimize} onFocusCapture={() => { clearIdleTimer(); setExpanded(true); }} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) scheduleMinimize(); }}>
       {expanded ? (
         <nav aria-label="Focus mode command dock" className="flex items-center gap-1 rounded-[1.4rem] border border-border bg-surface/95 p-1.5 shadow-soft backdrop-blur-md transition motion-reduce:transition-none">
-          <AccountMenuPopover profile={currentProfile} variant="dock" isSigningOut={isSigningOut} onOpenChange={handleAccountMenuOpenChange} onOpenSurface={onOpenPersonalSurface} onRequestSignOut={onRequestSignOut} />
+          <AccountMenuPopover profile={currentProfile} accountPlan={accountPlan} variant="dock" isAvailable={isAccountMenuAvailable} isSigningOut={isSigningOut} onOpenChange={handleAccountMenuOpenChange} onOpenElite={onOpenElite} onOpenSurface={onOpenPersonalSurface} onRequestSignOut={onRequestSignOut} />
           <span className="mx-1 h-7 w-px bg-border" aria-hidden="true" />
           <SearchNavigationButton showLabel={false} onSearch={onSearch} />
           {workspaceDestinations.map((item) => <DashboardDestinationButton key={item.section} {...item} {...sharedDestinationProps} layoutId="focus-dashboard-section" showLabel={false} />)}

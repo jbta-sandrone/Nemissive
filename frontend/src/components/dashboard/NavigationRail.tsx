@@ -1,5 +1,6 @@
 import type { DashboardSection } from "../../types/dashboard";
 import type { AcceptedConversationItem, ProfileSearchResult } from "../../types/conversations";
+import type { AccountPlan } from "./premiumAccess";
 import AccountMenuPopover, { type PersonalSurface } from "./AccountMenuPopover";
 import { DashboardDestinationButton, SearchNavigationButton } from "./DashboardNavigationControls";
 import { mobileDashboardDestinations, workspaceDestinations } from "./dashboardNavigation";
@@ -14,25 +15,28 @@ type NavigationRailProps = {
   isCompactChatVisible: boolean;
   isMobilePulseAvailable: boolean;
   isFocusMode: boolean;
+  isAccountMenuAvailable: boolean;
   currentProfile: ProfileSearchResult | null;
+  accountPlan: AccountPlan;
   isSigningOut: boolean;
   pulseConversations: AcceptedConversationItem[];
   onPulseConversationSelect: (conversation: AcceptedConversationItem) => void;
   onMobilePulseOpenChange: (isOpen: boolean) => void;
+  onOpenElite: (trigger: HTMLButtonElement) => void;
   onOpenPersonalSurface: (surface: PersonalSurface, trigger: HTMLButtonElement) => void;
   onRequestSignOut: (trigger: HTMLButtonElement) => void;
   onSectionChange: (section: DashboardSection) => void;
   onSearch: (trigger: HTMLButtonElement) => void;
 };
 
-function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, isCompactChatVisible, isMobilePulseAvailable, isFocusMode, currentProfile, isSigningOut, pulseConversations, onPulseConversationSelect, onMobilePulseOpenChange, onOpenPersonalSurface, onRequestSignOut, onSectionChange, onSearch }: NavigationRailProps) {
+function NavigationRail({ activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, isCompactChatVisible, isMobilePulseAvailable, isFocusMode, isAccountMenuAvailable, currentProfile, accountPlan, isSigningOut, pulseConversations, onPulseConversationSelect, onMobilePulseOpenChange, onOpenElite, onOpenPersonalSurface, onRequestSignOut, onSectionChange, onSearch }: NavigationRailProps) {
   const sharedDestinationProps = { activeSection, pendingRequestCount, unreadMessageCount, archivedConversationCount, onSectionChange };
 
   return (
     <>
       <aside className={`hidden h-full w-16 shrink-0 flex-col overflow-hidden border-r border-border bg-background md:flex lg:w-20 ${isFocusMode ? "lg:hidden" : ""}`} aria-label="Nemissive command rail">
         <div className="flex shrink-0 flex-col items-center px-2 py-4">
-          <AccountMenuPopover profile={currentProfile} variant="rail" isSigningOut={isSigningOut} onOpenSurface={onOpenPersonalSurface} onRequestSignOut={onRequestSignOut} />
+          <AccountMenuPopover profile={currentProfile} accountPlan={accountPlan} variant="rail" isAvailable={isAccountMenuAvailable} isSigningOut={isSigningOut} onOpenElite={onOpenElite} onOpenSurface={onOpenPersonalSurface} onRequestSignOut={onRequestSignOut} />
           <nav className="mt-7 flex flex-col gap-2" aria-label="Nemissive destinations">
             <SearchNavigationButton showLabel={false} onSearch={onSearch} />
             {workspaceDestinations.map((item) => <DashboardDestinationButton key={item.section} {...item} {...sharedDestinationProps} layoutId="desktop-dashboard-section" showLabel={false} />)}

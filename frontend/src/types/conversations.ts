@@ -397,7 +397,7 @@ export type RealtimeConversationNicknameEvent = ConversationNicknameRealtimeChan
   sequence: number;
 };
 
-export type ConversationThemeRealtimeChange = {
+export type ConversationThemePreferenceChange = {
   conversationId: string;
   themeKey: string;
 };
@@ -405,10 +405,6 @@ export type ConversationThemeRealtimeChange = {
 export type ConversationConnectionRealtimeChange = {
   conversationId: string;
   connectionStatus: ConversationConnectionStatus;
-};
-
-export type RealtimeConversationThemeEvent = ConversationThemeRealtimeChange & {
-  sequence: number;
 };
 
 export type ParticipantReceiptCursor = {

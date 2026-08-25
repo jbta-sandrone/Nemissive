@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" fill="none">
+  <defs>
+    <linearGradient id="stone-left" x1="40" y1="30" x2="430" y2="610" gradientUnits="userSpaceOnUse"><stop stop-color="#1B2631"/><stop offset=".5" stop-color="#445765"/><stop offset="1" stop-color="#95A9B5" stop-opacity=".62"/></linearGradient>
+    <linearGradient id="stone-edge" x1="92" y1="40" x2="360" y2="580" gradientUnits="userSpaceOnUse"><stop stop-color="#D8F0FA" stop-opacity=".85"/><stop offset=".36" stop-color="#7296AB" stop-opacity=".72"/><stop offset="1" stop-color="#253541" stop-opacity=".12"/></linearGradient>
+    <linearGradient id="stone-right" x1="1580" y1="950" x2="1110" y2="480" gradientUnits="userSpaceOnUse"><stop stop-color="#16212B"/><stop offset=".55" stop-color="#3F5362"/><stop offset="1" stop-color="#B6CAD5" stop-opacity=".72"/></linearGradient>
+    <radialGradient id="stone-haze" cx="0" cy="0" r="1" gradientTransform="translate(1460 810) rotate(-145) scale(560 420)" gradientUnits="userSpaceOnUse"><stop stop-color="#769CB3" stop-opacity=".22"/><stop offset="1" stop-color="#DCE8EE" stop-opacity="0"/></radialGradient>
+  </defs>
+  <ellipse cx="1450" cy="810" rx="560" ry="420" fill="url(#stone-haze)"/>
+  <g opacity=".9">
+    <path d="M0 0h306l-96 190 166 346-214-84-86 212L0 623V0Z" fill="url(#stone-left)"/>
+    <path d="M0 0h160l50 190L76 664 0 623V0Z" fill="#101922" fill-opacity=".86"/>
+    <path d="m160 0 50 190L76 664l86-212 214 84-166-346L306 0H160Z" stroke="url(#stone-edge)" stroke-width="5"/>
+    <path d="m210 190-116 106 68 156 214 84-166-346Z" fill="#91ACBC" fill-opacity=".36"/>
+    <path d="M94 296 0 344v279l76 41 86-212-68-156Z" fill="#2A3C49" fill-opacity=".88"/>
+  </g>
+  <g opacity=".92">
+    <path d="m1600 1000-522-8 148-240-52-310 214 148 62-336 150-116v862Z" fill="url(#stone-right)"/>
+    <path d="m1600 1000-282-8-92-240 162-162 62-336 150-116v862Z" fill="#14202A" fill-opacity=".82"/>
+    <path d="m1078 992 148-240-52-310 214 148-70 402h-240Z" fill="#829CAB" fill-opacity=".43"/>
+    <path d="m1174 442 214 148 62-336-276 188Z" fill="#B7D0DC" fill-opacity=".44"/>
+    <path d="m1226 752 162-162-70 402-92-240Z" fill="#263946"/>
+    <path d="m1174 442 214 148 62-336M1226 752l162-162-70 402" stroke="#D1EAF4" stroke-opacity=".72" stroke-width="5"/>
+  </g>
+  <g stroke="#516D7D" stroke-opacity=".3" stroke-width="2"><path d="m48 724 184-98 126 65"/><path d="m1340 414 112-186 94-72"/><path d="m1112 866 114-114 92 240"/></g>
+</svg>
