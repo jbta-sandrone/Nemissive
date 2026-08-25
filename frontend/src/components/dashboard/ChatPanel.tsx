@@ -33,7 +33,7 @@ import VoiceMessagePlayer from "./VoiceMessagePlayer";
 import VoiceRecordingComposer from "./VoiceRecordingComposer";
 import UserBlockDialog from "./UserBlockDialog";
 import { formatVoiceDuration } from "./voiceUtils";
-import { getConversationTheme, getConversationThemeStyle, resolveConversationTheme, type ConversationThemeId } from "./conversationThemes";
+import { canUseConversationTheme, getConversationTheme, getConversationThemeStyle, resolveConversationTheme, type ConversationThemeId } from "./conversationThemes";
 import type { PremiumAccessState } from "./premiumAccess";
 import { acceptedFileInputTypes, fileAttachmentMaxCount, fileAttachmentMaxSize, normalizeAllowedFile, sanitizeAttachmentFilename } from "./fileAttachments";
 import type { WorkspaceLayoutMode } from "../../types/dashboard";
@@ -2641,7 +2641,11 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     if (!interactionStatus.messagingAvailable) return "Messaging is unavailable for this conversation.";
     const error = await onConversationThemeChange(conversation.id, themeId);
     if (error) return error;
-    showPinToast(themeId === "obsidian" ? "Obsidian development preview saved — this is not ownership" : `Theme changed to ${getConversationTheme(themeId).name}`);
+    const theme = getConversationTheme(themeId);
+    const isDevelopmentPreview = theme.access === "premium"
+      && canUseConversationTheme(themeId, premiumAccess)
+      && !canUseConversationTheme(themeId, premiumAccess, false);
+    showPinToast(isDevelopmentPreview ? `${theme.name} development preview saved — this is not ownership` : `Theme changed to ${theme.name}`);
     return null;
   }
 

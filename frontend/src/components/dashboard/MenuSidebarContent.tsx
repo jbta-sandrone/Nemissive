@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { ProfileSearchResult } from "../../types/conversations";
-import AccountPlanBadge from "./AccountPlanBadge";
-import type { AccountPlan } from "./premiumAccess";
+import AccountStatusBadge from "./AccountStatusBadge";
+import type { AccountStatus } from "./premiumAccess";
 import NotificationSettings from "./NotificationSettings";
 import ProfileAvatar from "./ProfileAvatar";
 import ProfileDetailsSettings from "./ProfileDetailsSettings";
@@ -11,7 +11,7 @@ import { getProfileDisplayName } from "./profileUtils";
 
 type MenuSidebarContentProps = {
   profile: ProfileSearchResult | null;
-  accountPlan: AccountPlan;
+  accountStatus: AccountStatus;
   isAccountLoading: boolean;
   accountError: string;
   quickReactions: string[];
@@ -99,7 +99,7 @@ function SubsectionHeader({ headingRef, title, description, onBack }: { headingR
   );
 }
 
-function MenuSidebarContent({ profile, accountPlan, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onOpenElite, onRequestSignOut, onAccountDeleted }: MenuSidebarContentProps) {
+function MenuSidebarContent({ profile, accountStatus, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onOpenElite, onRequestSignOut, onAccountDeleted }: MenuSidebarContentProps) {
   const subsectionHeadingRef = useRef<HTMLHeadingElement>(null);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
@@ -162,7 +162,7 @@ function MenuSidebarContent({ profile, accountPlan, isAccountLoading, accountErr
         ) : accountError || !profile ? (
           <div role="alert" className="rounded-3xl border border-border bg-background p-5"><h2 className="font-semibold text-heading">Account unavailable</h2><p className="mt-2 text-sm leading-6 text-body">{accountError || "Your profile could not be loaded."}</p></div>
         ) : (
-          <div className="rounded-3xl border border-border bg-background p-4 shadow-soft"><div className="flex min-w-0 items-center gap-3"><div className="relative shrink-0"><ProfileAvatar profile={profile} size="lg" /><span className="absolute -right-0.5 top-0.5 h-4 w-4 rounded-full border-2 border-background bg-online" aria-hidden="true" /></div><div className="min-w-0 flex-1"><h2 className="truncate text-lg font-bold text-heading">{getProfileDisplayName(profile)}</h2><p className="mt-1 truncate text-sm text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p><p className="mt-2 text-xs font-semibold text-online">Signed in</p></div><AccountPlanBadge plan={accountPlan} size="compact" className="shrink-0" /></div></div>
+          <div className="rounded-3xl border border-border bg-background p-4 shadow-soft"><div className="flex min-w-0 items-center gap-3"><div className="relative shrink-0"><ProfileAvatar profile={profile} size="lg" /><span className="absolute -right-0.5 top-0.5 h-4 w-4 rounded-full border-2 border-background bg-online" aria-hidden="true" /></div><div className="min-w-0 flex-1"><h2 className="truncate text-lg font-bold text-heading">{getProfileDisplayName(profile)}</h2><p className="mt-1 truncate text-sm text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p><p className="mt-2 text-xs font-semibold text-online">Signed in</p></div><AccountStatusBadge status={accountStatus} size="compact" className="shrink-0" /></div></div>
         )}
 
         <button type="button" disabled={categoriesDisabled} onClick={(event) => onOpenElite(event.currentTarget)} className="mt-3 flex min-h-16 w-full items-center gap-3 rounded-3xl bg-accent px-4 py-3 text-left transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surface text-primary"><MenuIcon kind="elite" /></span><span className="min-w-0 flex-1"><span className="block font-bold text-heading">Nemissive Elite</span><span className="mt-0.5 block text-xs leading-5 text-body">Explore what&apos;s coming</span></span><span className="shrink-0 text-muted"><MenuIcon kind="chevron" /></span></button>

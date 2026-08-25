@@ -60,6 +60,95 @@ body {
   --shadow-soft: 0 8px 30px rgb(0 0 0 / 0.22);
 }
 
+/* Self-facing account identities. Status is always conveyed by icon and text;
+   these palettes only provide the supporting visual hierarchy. */
+.account-status-badge {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.78), 0 3px 10px rgb(47 43 40 / 0.1);
+}
+
+.account-status-emblem {
+  border-width: 2px;
+  border-color: var(--color-background);
+  box-shadow: 0 2px 7px rgb(47 43 40 / 0.2);
+}
+
+.account-status-badge[data-account-status="normal"] {
+  border-color: #cbd1d8;
+  background: linear-gradient(135deg, #dfe3e8 0%, #ffffff 55%, #eef0f3 100%);
+  color: #46505c;
+}
+
+.account-status-emblem[data-account-status="normal"] {
+  background: linear-gradient(135deg, #d8dde3 0%, #ffffff 58%, #aeb6c0 100%);
+  color: #46505c;
+}
+
+.account-status-badge[data-account-status="gold"] {
+  border-color: #d8ad37;
+  background: linear-gradient(135deg, #f2c84b 0%, #fff2bd 42%, #ffffff 72%, #f8dfa0 100%);
+  color: #6d4a00;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.86), 0 3px 12px rgb(169 116 0 / 0.18);
+}
+
+.account-status-emblem[data-account-status="gold"] {
+  background: linear-gradient(135deg, #e7b82f 0%, #fff3bc 52%, #ffffff 74%, #dcae37 100%);
+  color: #624100;
+}
+
+.account-status-badge[data-account-status="elite"] {
+  border-color: #77a9ed;
+  background: linear-gradient(135deg, #4f8fe8 0%, #cde5ff 43%, #ffffff 70%, #b9ccff 100%);
+  color: #173e76;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.86), 0 3px 13px rgb(40 96 180 / 0.2);
+}
+
+.account-status-emblem[data-account-status="elite"] {
+  background: linear-gradient(135deg, #3f80da 0%, #d7ebff 48%, #ffffff 70%, #89aef8 100%);
+  color: #153d76;
+}
+
+:root[data-appearance="dark"] .account-status-badge {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 4px 12px rgb(0 0 0 / 0.3);
+}
+
+:root[data-appearance="dark"] .account-status-emblem {
+  border-color: var(--color-background);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.48);
+}
+
+:root[data-appearance="dark"] .account-status-emblem[data-account-status="normal"] {
+  background: linear-gradient(135deg, #59616a 0%, #f4f6f8 56%, #9ca5af 100%);
+  color: #1f262d;
+}
+
+:root[data-appearance="dark"] .account-status-emblem[data-account-status="gold"] {
+  background: linear-gradient(135deg, #d5a523 0%, #ffedaa 48%, #ffffff 70%, #d8aa35 100%);
+  color: #503400;
+}
+
+:root[data-appearance="dark"] .account-status-emblem[data-account-status="elite"] {
+  background: linear-gradient(135deg, #3974ca 0%, #c8e2ff 46%, #ffffff 69%, #84a9f5 100%);
+  color: #102f5d;
+}
+
+:root[data-appearance="dark"] .account-status-badge[data-account-status="normal"] {
+  border-color: #88919c;
+  background: linear-gradient(135deg, #4e555d 0%, #f5f7f9 55%, #aeb5bd 100%);
+  color: #20262d;
+}
+
+:root[data-appearance="dark"] .account-status-badge[data-account-status="gold"] {
+  border-color: #e4bd4f;
+  background: linear-gradient(135deg, #d9a928 0%, #ffedab 42%, #ffffff 70%, #e4be55 100%);
+  color: #513500;
+}
+
+:root[data-appearance="dark"] .account-status-badge[data-account-status="elite"] {
+  border-color: #89b8fa;
+  background: linear-gradient(135deg, #3f7dd5 0%, #bedcff 42%, #ffffff 70%, #9ebdff 100%);
+  color: #102f5d;
+}
+
 /* Conversation themes follow a strict hierarchy: restrained chrome, expressive
    canvas/content. Both palettes remain scoped to ChatPanel and its local sheets. */
 .chat-theme,
@@ -172,7 +261,8 @@ body {
   display: none;
 }
 
-.chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork {
+.chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork,
+.chat-theme[data-chat-theme="celestia"] .chat-panel-root > .chat-theme-artwork {
   display: block;
   z-index: 0;
   background-image: var(--chat-artwork-image);
@@ -506,20 +596,36 @@ body {
   background: var(--chat-media-bg);
 }
 
+.chat-theme[data-chat-theme="celestia"] .chat-activity-row {
+  border: 1px solid var(--chat-header-border);
+  border-radius: 999px;
+  backdrop-filter: var(--chat-chrome-backdrop);
+}
+
 @media (min-width: 768px) and (max-width: 1023px) {
-  .chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork {
+  .chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork,
+  .chat-theme[data-chat-theme="celestia"] .chat-panel-root > .chat-theme-artwork {
     background-position: var(--chat-artwork-tablet-position);
   }
 }
 
 @media (max-width: 767px) {
-  .chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork {
+  .chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork,
+  .chat-theme[data-chat-theme="celestia"] .chat-panel-root > .chat-theme-artwork {
     background-image: var(--chat-artwork-mobile-image);
     background-position: var(--chat-artwork-mobile-position);
   }
 }
 
 @media (forced-colors: active) {
+  .account-status-badge,
+  .account-status-emblem {
+    border: 1px solid ButtonText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+
   .chat-theme .chat-theme-artwork,
   .chat-theme-preview .chat-theme-preview-artwork {
     display: none;

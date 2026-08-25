@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { ProfileSearchResult } from "../../types/conversations";
-import AccountPlanBadge from "./AccountPlanBadge";
-import type { AccountPlan } from "./premiumAccess";
+import AccountStatusBadge from "./AccountStatusBadge";
+import AccountStatusEmblem from "./AccountStatusEmblem";
+import type { AccountStatus } from "./premiumAccess";
 import ProfileAvatar from "./ProfileAvatar";
 import { getProfileDisplayName } from "./profileUtils";
 
@@ -10,7 +11,7 @@ export type PersonalSurface = "profile" | "notifications" | "quick-reactions" | 
 
 type AccountMenuPopoverProps = {
   profile: ProfileSearchResult | null;
-  accountPlan: AccountPlan;
+  accountStatus: AccountStatus;
   variant: "rail" | "dock";
   isAvailable: boolean;
   isSigningOut: boolean;
@@ -37,7 +38,7 @@ function AccountIcon({ kind }: { kind: PersonalSurface | "elite" | "signout" }) 
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={iconClass} aria-hidden="true"><path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function AccountMenuPopover({ profile, accountPlan, variant, isAvailable, isSigningOut, onOpenChange, onOpenElite, onOpenSurface, onRequestSignOut }: AccountMenuPopoverProps) {
+function AccountMenuPopover({ profile, accountStatus, variant, isAvailable, isSigningOut, onOpenChange, onOpenElite, onOpenSurface, onRequestSignOut }: AccountMenuPopoverProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -132,12 +133,12 @@ function AccountMenuPopover({ profile, accountPlan, variant, isAvailable, isSign
 
   return (
     <>
-      <button ref={triggerRef} type="button" disabled={!profile} aria-label="Open account menu" aria-haspopup="menu" aria-expanded={isOpen} onClick={() => setIsOpen((open) => { const next = !open; onOpenChange?.(next); return next; })} className={`${variant === "rail" ? "h-12 w-12" : "h-11 w-11"} flex items-center justify-center rounded-2xl border border-transparent transition hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60`}>
-        {profile ? <span className="relative inline-flex"><ProfileAvatar profile={profile} size="sm" accessibleLabel="Your profile photo" /><AccountPlanBadge plan={accountPlan} size="compact" className="pointer-events-none absolute -bottom-1 -right-4 z-10" /></span> : <span className="h-10 w-10 animate-pulse rounded-full bg-accent" aria-hidden="true" />}
+      <button ref={triggerRef} type="button" disabled={!profile} aria-label={`Open account menu, Nemissive ${accountStatus} account`} aria-haspopup="menu" aria-expanded={isOpen} onClick={() => setIsOpen((open) => { const next = !open; onOpenChange?.(next); return next; })} className={`${variant === "rail" ? "h-12 w-12" : "h-11 w-11"} flex items-center justify-center rounded-2xl border border-transparent transition hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60`}>
+        {profile ? <span className="relative inline-flex"><ProfileAvatar profile={profile} size="sm" accessibleLabel="Your profile photo" /><AccountStatusEmblem status={accountStatus} className="pointer-events-none absolute -bottom-0.5 -right-0.5 z-10" /></span> : <span className="h-10 w-10 animate-pulse rounded-full bg-accent" aria-hidden="true" />}
       </button>
       {isAvailable && isOpen && profile && createPortal(
         <div ref={menuRef} role="menu" aria-label="Account menu" onKeyDown={handleMenuKeyDown} style={position ?? { left: 0, top: 0, visibility: "hidden" }} className="fixed z-[90] w-[min(18rem,calc(100vw-1.5rem))] rounded-3xl border border-border bg-surface p-2 shadow-soft">
-          <div className="flex min-w-0 items-center gap-3 px-3 py-3"><ProfileAvatar profile={profile} size="sm" accessibleLabel="Your profile photo" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-heading">{getProfileDisplayName(profile)}</p><p className="mt-0.5 truncate text-xs text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p></div><AccountPlanBadge plan={accountPlan} size="compact" className="shrink-0" /></div>
+          <div className="flex min-w-0 items-center gap-3 px-3 py-3"><ProfileAvatar profile={profile} size="sm" accessibleLabel="Your profile photo" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-heading">{getProfileDisplayName(profile)}</p><p className="mt-0.5 truncate text-xs text-body">{profile.username ? `@${profile.username}` : "Nemissive member"}</p></div><AccountStatusBadge status={accountStatus} size="compact" className="shrink-0" /></div>
           <div className="my-1 border-t border-border" aria-hidden="true" />
           <button type="button" role="menuitem" onClick={openElite} className="flex min-h-14 w-full items-center gap-3 rounded-2xl bg-accent/70 px-3 py-2.5 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface text-primary"><AccountIcon kind="elite" /></span><span className="min-w-0 flex-1"><span className="block text-sm font-bold text-heading">Nemissive Elite</span><span className="mt-0.5 block text-xs text-body">Explore what&apos;s coming</span></span></button>
           <div className="my-1 border-t border-border" aria-hidden="true" />

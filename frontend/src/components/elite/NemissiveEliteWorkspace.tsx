@@ -3,8 +3,10 @@ import {
   eliteComparisonPlans,
   type EliteComparisonPlan,
 } from "./eliteFeatures";
+import type { PremiumAccessState } from "../dashboard/premiumAccess";
 
 type NemissiveEliteWorkspaceProps = {
+  premiumAccess: PremiumAccessState;
   onBack: () => void;
 };
 
@@ -70,10 +72,12 @@ function CheckIcon() {
 
 function PlanCard({
   plan,
+  eliteActive,
   billingMessage,
   onUpgrade,
 }: {
   plan: EliteComparisonPlan;
+  eliteActive: boolean;
   billingMessage: string;
   onUpgrade: () => void;
 }) {
@@ -128,13 +132,20 @@ function PlanCard({
 
       <footer className="mt-auto pt-8">
         {isElite ? (
-          <button
-            type="button"
-            onClick={onUpgrade}
-            className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white shadow-soft transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"
-          >
-            Upgrade to Elite
-          </button>
+          eliteActive ? (
+            <div className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 bg-accent px-5 py-3 text-sm font-bold text-heading" role="status">
+              <CheckIcon />
+              Elite active
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onUpgrade}
+              className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white shadow-soft transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"
+            >
+              Upgrade to Elite
+            </button>
+          )
         ) : (
           <div className="flex min-h-12 items-center justify-center rounded-2xl border border-border bg-background px-5 py-3 text-center text-sm font-semibold text-heading">
             Included with Nemissive
@@ -143,18 +154,18 @@ function PlanCard({
 
         <p
           className="mt-3 min-h-1 text-center text-xs font-medium text-body"
-          role={isElite ? "status" : undefined}
-          aria-live={isElite ? "polite" : undefined}
-          aria-hidden={!isElite}
+          role={isElite && !eliteActive ? "status" : undefined}
+          aria-live={isElite && !eliteActive ? "polite" : undefined}
+          aria-hidden={!isElite || eliteActive}
         >
-          {isElite ? billingMessage : ""}
+          {isElite && !eliteActive ? billingMessage : ""}
         </p>
       </footer>
     </article>
   );
 }
 
-function NemissiveEliteWorkspace({ onBack }: NemissiveEliteWorkspaceProps) {
+function NemissiveEliteWorkspace({ premiumAccess, onBack }: NemissiveEliteWorkspaceProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [billingMessage, setBillingMessage] = useState("");
 
@@ -227,6 +238,7 @@ function NemissiveEliteWorkspace({ onBack }: NemissiveEliteWorkspaceProps) {
               <PlanCard
                 key={plan.id}
                 plan={plan}
+                eliteActive={premiumAccess.eliteActive}
                 billingMessage={billingMessage}
                 onUpgrade={handleUpgradeToElite}
               />
