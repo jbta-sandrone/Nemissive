@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.110.7";
 import { corsHeaders } from "npm:@supabase/supabase-js@2.110.7/cors";
+import { cancelLemonSqueezySubscription } from "../_shared/lemonsqueezyBilling.ts";
 
 type RetainedAttachment = {
   attachment_id: string;
@@ -17,6 +18,10 @@ type StorageManifest = {
   account_status: "deleting" | "deleted";
   retained_attachments: RetainedAttachment[];
   removable_objects: RemovableObject[];
+};
+
+type BillingSubscription = {
+  provider_subscription_id: string;
 };
 
 function jsonResponse(status: number, body: Record<string, unknown>) {
@@ -140,6 +145,28 @@ async function handleRequest(request: Request) {
   try {
     const { error: beginError } = await adminClient.rpc("begin_account_deletion", { target_account_id: user.id });
     if (beginError) throw new Error(`begin:${beginError.code ?? "unknown"}`);
+
+    // Stop future provider renewals before removing the Auth identity. A
+    // cancelled subscription keeps any already-paid grace period at Lemon
+    // Squeezy, while the deleted Nemissive account can no longer use it.
+    const billingResult = await adminClient.rpc("list_account_billing_subscriptions_for_deletion", {
+      target_account_id: user.id,
+    });
+    if (billingResult.error) throw new Error(`billing-manifest:${billingResult.error.code ?? "unknown"}`);
+    const billingSubscriptions = Array.isArray(billingResult.data)
+      ? billingResult.data.filter((value): value is BillingSubscription => (
+        Boolean(value)
+        && typeof value === "object"
+        && typeof (value as Record<string, unknown>).provider_subscription_id === "string"
+      ))
+      : [];
+    if (billingSubscriptions.length > 0) {
+      const lemonSqueezyApiKey = Deno.env.get("LEMONSQUEEZY_API_KEY")?.trim() ?? "";
+      if (!lemonSqueezyApiKey) throw new Error("billing-config");
+      for (const subscription of billingSubscriptions) {
+        await cancelLemonSqueezySubscription(subscription.provider_subscription_id, lemonSqueezyApiKey);
+      }
+    }
 
     const { data: manifestData, error: manifestError } = await adminClient.rpc("get_account_deletion_storage_manifest", { target_account_id: user.id });
     if (manifestError || !isStorageManifest(manifestData)) throw new Error(`manifest:${manifestError?.code ?? "invalid"}`);

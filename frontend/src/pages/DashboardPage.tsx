@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import ActivityToastViewport from "../components/dashboard/ActivityToasts";
+import BillingReturnNotice from "../components/dashboard/BillingReturnNotice";
 import ChatPanel from "../components/dashboard/ChatPanel";
 import CommandDock from "../components/dashboard/CommandDock";
 import ConfirmationDialog from "../components/dashboard/ConfirmationDialog";
@@ -25,6 +26,7 @@ import useReminders, { type ReminderRecord } from "../components/dashboard/useRe
 import { normalizeQuickReactions } from "../components/dashboard/emojiData";
 import { getConversationDisplayName } from "../components/dashboard/profileUtils";
 import { noPremiumAccess, normalizePremiumAccess, resolveAccountStatus, type PremiumAccessRpcRow } from "../components/dashboard/premiumAccess";
+import { isBillingProductId, type BillingProductId } from "../components/dashboard/premiumCatalog";
 import type { PersonalSurface } from "../components/dashboard/AccountMenuPopover";
 import { privacyPreferencesChangeEvent } from "../lib/privacyPreferences";
 import { supabase } from "../lib/supabase";
@@ -64,6 +66,10 @@ function DashboardPage() {
   const location = useLocation();
   const shouldReduceMotion = useReducedMotion();
   const dashboardView: DashboardView = new URLSearchParams(location.search).get("view") === "elite" ? "elite" : "dashboard";
+  const billingSearchParams = new URLSearchParams(location.search);
+  const hasBillingReturn = billingSearchParams.get("billing") === "success";
+  const billingProductValue = billingSearchParams.get("product");
+  const billingProductId: BillingProductId | null = isBillingProductId(billingProductValue) ? billingProductValue : null;
   const [activeSection, setActiveSection] = useState<DashboardSection>("messages");
   const [workspaceLayout, setWorkspaceLayout] = useState<WorkspaceLayoutState>({ mode: "workspace" });
   const [isDesktopWorkspace, setIsDesktopWorkspace] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches);
@@ -104,6 +110,8 @@ function DashboardPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentProfile, setCurrentProfile] = useState<ProfileSearchResult | null>(null);
   const [premiumAccess, setPremiumAccess] = useState(noPremiumAccess);
+  const [billingReturnState, setBillingReturnState] = useState<"confirming" | "confirmed" | "pending" | "error" | null>(null);
+  const [billingRetryNonce, setBillingRetryNonce] = useState(0);
   const accountStatus = resolveAccountStatus(premiumAccess);
   const [isAccountResolved, setIsAccountResolved] = useState(false);
   const [accountError, setAccountError] = useState("");
@@ -120,6 +128,19 @@ function DashboardPage() {
   const eliteOpenedInSessionRef = useRef(false);
   const isSigningOutRef = useRef(false);
   const activityViewRef = useRef({ activeSection, chatState, isCompactChatVisible, isDesktopWorkspace, hasBlockingOverlay: false });
+
+  const refreshPremiumAccess = useCallback(async () => {
+    const { data, error } = await supabase.rpc("get_my_premium_access");
+    if (error) {
+      setPremiumAccess(noPremiumAccess);
+      if (import.meta.env.DEV) console.warn("Loading premium access failed; using Normal", { code: error.code });
+      return null;
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as PremiumAccessRpcRow | null | undefined;
+    const normalized = normalizePremiumAccess(row);
+    setPremiumAccess(normalized);
+    return normalized;
+  }, []);
 
   useEffect(() => {
     activityViewRef.current = { activeSection, chatState, isCompactChatVisible, isDesktopWorkspace, hasBlockingOverlay: dashboardView === "elite" || Boolean(personalSurface || isGlobalSearchOpen || isNewConversationOpen || messageDeliveryDraft || isNotesOpen || isGalleryOpen || isRemindersOpen) };
@@ -202,24 +223,11 @@ function DashboardPage() {
   useEffect(() => {
     if (!currentUserId) return;
 
-    let isCancelled = false;
-    let isLoading = false;
     let lastLoadedAt = 0;
 
     async function loadPremiumAccess() {
-      if (isLoading) return;
-      isLoading = true;
-      const { data, error } = await supabase.rpc("get_my_premium_access");
-      isLoading = false;
+      await refreshPremiumAccess();
       lastLoadedAt = Date.now();
-      if (isCancelled) return;
-      if (error) {
-        setPremiumAccess(noPremiumAccess);
-        if (import.meta.env.DEV) console.warn("Loading premium access failed; using Normal", { code: error.code });
-        return;
-      }
-      const row = (Array.isArray(data) ? data[0] : data) as PremiumAccessRpcRow | null | undefined;
-      setPremiumAccess(normalizePremiumAccess(row));
     }
 
     function handleVisibilityChange() {
@@ -230,10 +238,49 @@ function DashboardPage() {
     void loadPremiumAccess();
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
-      isCancelled = true;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [currentUserId]);
+  }, [currentUserId, refreshPremiumAccess]);
+
+  useEffect(() => {
+    if (!hasBillingReturn || !currentUserId) return;
+
+    let cancelled = false;
+    const delays = [0, 1000, 2000, 4000, 8000];
+
+    async function reconcileBillingReturn() {
+      let refreshFailed = false;
+      for (const delay of delays) {
+        if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay));
+        if (cancelled) return;
+        const access = await refreshPremiumAccess();
+        if (cancelled) return;
+        if (!access) {
+          refreshFailed = true;
+          continue;
+        }
+        const confirmed = billingProductId === "elite.monthly"
+          ? access.eliteActive
+          : billingProductId !== null && access.ownedProductIds.includes(billingProductId);
+        if (confirmed) {
+          setBillingReturnState("confirmed");
+          return;
+        }
+      }
+      setBillingReturnState(refreshFailed ? "error" : "pending");
+    }
+
+    void reconcileBillingReturn();
+    return () => { cancelled = true; };
+  }, [billingProductId, billingRetryNonce, currentUserId, hasBillingReturn, refreshPremiumAccess]);
+
+  const dismissBillingReturn = useCallback(() => {
+    const searchParams = new URLSearchParams(location.search);
+    searchParams.delete("billing");
+    searchParams.delete("product");
+    const search = searchParams.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : "", hash: location.hash }, { replace: true, state: location.state });
+  }, [location.hash, location.pathname, location.search, location.state, navigate]);
 
   const handleConversationReady = useCallback((conversation: SelectedConversation) => {
     setMessageSearchTarget(null);
@@ -943,6 +990,7 @@ function DashboardPage() {
 
   return (
     <>
+      {hasBillingReturn && <BillingReturnNotice state={billingReturnState ?? "confirming"} isRetrying={billingReturnState === null || billingReturnState === "confirming"} onDismiss={dismissBillingReturn} onRetry={() => { setBillingReturnState("confirming"); setBillingRetryNonce((nonce) => nonce + 1); }} />}
       <div className="relative h-dvh w-full min-w-0 overflow-hidden bg-background">
         <div aria-hidden={dashboardView === "elite"} className={`${dashboardView === "dashboard" ? "flex" : "hidden"} absolute inset-0 min-w-0 flex-col overflow-hidden bg-background md:flex-row`}>
         <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{isFocusMode ? "Focus mode" : "Workspace mode"}</p>

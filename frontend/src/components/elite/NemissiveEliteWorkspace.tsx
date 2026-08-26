@@ -3,6 +3,8 @@ import {
   eliteComparisonPlans,
   type EliteComparisonPlan,
 } from "./eliteFeatures";
+import { beginBillingCheckout } from "../dashboard/billing";
+import { eliteMonthlyProductId, formatPremiumPrice } from "../dashboard/premiumCatalog";
 import type { PremiumAccessState } from "../dashboard/premiumAccess";
 
 type NemissiveEliteWorkspaceProps = {
@@ -73,12 +75,16 @@ function CheckIcon() {
 function PlanCard({
   plan,
   eliteActive,
+  eliteExpiresAt,
   billingMessage,
+  isCheckoutPreparing,
   onUpgrade,
 }: {
   plan: EliteComparisonPlan;
   eliteActive: boolean;
+  eliteExpiresAt: string | null;
   billingMessage: string;
+  isCheckoutPreparing: boolean;
   onUpgrade: () => void;
 }) {
   const isElite = plan.id === "elite";
@@ -111,6 +117,15 @@ function PlanCard({
 
       <p className="mt-5 text-sm leading-6 text-body">{plan.description}</p>
 
+      {isElite && (
+        <div className="mt-6 rounded-2xl border border-primary/25 bg-accent px-4 py-4 text-center">
+          <p className="text-3xl font-black tracking-tight text-heading sm:text-4xl">
+            {formatPremiumPrice(eliteMonthlyProductId)} <span className="text-sm font-bold text-body">/ month</span>
+          </p>
+          <p className="mt-1 text-xs font-semibold text-body">Recurring monthly · Included Elite content while active</p>
+        </div>
+      )}
+
       <div className="mt-6 border-t border-border pt-5">
         <h3 className="text-xs font-bold uppercase tracking-[0.16em] text-muted">
           {plan.benefitsHeading}
@@ -133,17 +148,16 @@ function PlanCard({
       <footer className="mt-auto pt-8">
         {isElite ? (
           eliteActive ? (
-            <div className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 bg-accent px-5 py-3 text-sm font-bold text-heading" role="status">
-              <CheckIcon />
-              Elite active
-            </div>
+            <div><div className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 bg-accent px-5 py-3 text-sm font-bold text-heading" role="status"><CheckIcon />Elite active</div>{eliteExpiresAt && <p className="mt-3 text-center text-xs font-medium text-body">Active until {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(eliteExpiresAt))}</p>}</div>
           ) : (
             <button
               type="button"
               onClick={onUpgrade}
+              disabled={isCheckoutPreparing}
+              aria-label={`Get Nemissive Elite for ${formatPremiumPrice(eliteMonthlyProductId)} per month`}
               className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white shadow-soft transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"
             >
-              Upgrade to Elite
+              {isCheckoutPreparing ? "Preparing secure checkout…" : "Upgrade to Elite"}
             </button>
           )
         ) : (
@@ -168,6 +182,7 @@ function PlanCard({
 function NemissiveEliteWorkspace({ premiumAccess, onBack }: NemissiveEliteWorkspaceProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [billingMessage, setBillingMessage] = useState("");
+  const [isCheckoutPreparing, setIsCheckoutPreparing] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() =>
@@ -176,8 +191,15 @@ function NemissiveEliteWorkspace({ premiumAccess, onBack }: NemissiveEliteWorksp
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  function handleUpgradeToElite() {
-    setBillingMessage("Elite billing is coming soon.");
+  async function handleUpgradeToElite() {
+    if (isCheckoutPreparing || premiumAccess.eliteActive) return;
+    setBillingMessage("Preparing secure checkout.");
+    setIsCheckoutPreparing(true);
+    const checkoutError = await beginBillingCheckout(eliteMonthlyProductId);
+    if (checkoutError) {
+      setBillingMessage(checkoutError);
+      setIsCheckoutPreparing(false);
+    }
   }
 
   return (
@@ -239,8 +261,10 @@ function NemissiveEliteWorkspace({ premiumAccess, onBack }: NemissiveEliteWorksp
                 key={plan.id}
                 plan={plan}
                 eliteActive={premiumAccess.eliteActive}
+                eliteExpiresAt={premiumAccess.eliteExpiresAt}
                 billingMessage={billingMessage}
-                onUpgrade={handleUpgradeToElite}
+                isCheckoutPreparing={isCheckoutPreparing}
+                onUpgrade={() => void handleUpgradeToElite()}
               />
             ))}
           </section>

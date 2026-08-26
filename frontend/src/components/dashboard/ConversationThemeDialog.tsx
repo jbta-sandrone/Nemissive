@@ -34,7 +34,6 @@ function ConversationThemeDialog({ currentTheme, premiumAccess, returnFocusRef, 
   const [previewThemeId, setPreviewThemeId] = useState<ConversationThemeId | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
-  const [informationMessage, setInformationMessage] = useState("");
   const selectedAvailable = canUseConversationTheme(selectedTheme, premiumAccess);
   const freeThemes = conversationThemes.filter((theme) => theme.access === "free");
   const eliteThemes = conversationThemes.filter((theme) => theme.access === "premium");
@@ -61,7 +60,6 @@ function ConversationThemeDialog({ currentTheme, premiumAccess, returnFocusRef, 
         if (previewThemeIdRef.current) {
           previewThemeIdRef.current = null;
           setPreviewThemeId(null);
-          setInformationMessage("");
           setError("");
         } else onCloseRef.current();
         return;
@@ -105,14 +103,12 @@ function ConversationThemeDialog({ currentTheme, premiumAccess, returnFocusRef, 
     previewReturnThemeIdRef.current = theme.id;
     previewThemeIdRef.current = theme.id;
     setPreviewThemeId(theme.id);
-    setInformationMessage("");
     setError("");
   }
 
   function returnToThemePicker() {
     previewThemeIdRef.current = null;
     setPreviewThemeId(null);
-    setInformationMessage("");
     setError("");
   }
 
@@ -149,7 +145,7 @@ function ConversationThemeDialog({ currentTheme, premiumAccess, returnFocusRef, 
     <motion.div initial={shouldReduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: shouldReduceMotion ? 0 : 0.18 }} className="fixed inset-0 z-[90] flex items-end justify-center overflow-hidden bg-heading/20 md:items-center md:p-4" onPointerDown={(event) => { if (event.target === event.currentTarget && !isSaving) onClose(); }}>
       <motion.div ref={panelRef} initial={shouldReduceMotion ? false : { opacity: 0, y: 18, scale: 0.99 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 12, scale: 0.99 }} transition={{ duration: shouldReduceMotion ? 0 : 0.2, ease: [0.22, 1, 0.36, 1] }} role="dialog" aria-modal="true" aria-labelledby={previewTheme ? "premium-theme-preview-title" : "change-theme-title"} aria-describedby={previewTheme ? undefined : "change-theme-description"} aria-busy={isSaving} className={`${previewTheme ? "h-[100dvh] max-h-[100dvh] md:h-[min(56rem,calc(100dvh-2rem))] md:max-w-6xl md:rounded-3xl md:border" : "max-h-[92dvh] rounded-t-3xl border-t md:max-w-2xl md:rounded-3xl md:border"} w-full overflow-hidden border-border bg-surface shadow-soft`}>
         <AnimatePresence mode="wait" initial={false} onExitComplete={() => { if (previewThemeIdRef.current) { window.requestAnimationFrame(() => previewHeadingRef.current?.focus()); return; } const themeId = previewReturnThemeIdRef.current; if (themeId) window.requestAnimationFrame(() => panelRef.current?.querySelector<HTMLButtonElement>(`[data-theme-option="${themeId}"]`)?.focus()); }}>
-          {previewTheme && previewAccessSource ? <motion.div key={`preview-${previewTheme.id}`} initial={shouldReduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 8 }} transition={{ duration: shouldReduceMotion ? 0 : 0.16 }} className="h-full min-h-0"><PremiumThemePreview theme={previewTheme} accessSource={previewAccessSource} current={currentTheme === previewTheme.id} error={error} informationMessage={informationMessage} isSaving={isSaving} headingRef={previewHeadingRef} onApply={() => void applyTheme(previewTheme.id)} onBack={returnToThemePicker} onClose={onClose} onPurchaseInformation={(kind) => setInformationMessage(kind === "permanent" ? "Permanent theme purchases are coming soon. No purchase or ownership change was made." : "Nemissive Elite billing is coming soon. Your account plan was not changed.")} /></motion.div> : pickerContent}
+          {previewTheme && previewAccessSource ? <motion.div key={`preview-${previewTheme.id}`} initial={shouldReduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 8 }} transition={{ duration: shouldReduceMotion ? 0 : 0.16 }} className="h-full min-h-0"><PremiumThemePreview theme={previewTheme} accessSource={previewAccessSource} current={currentTheme === previewTheme.id} error={error} isSaving={isSaving} headingRef={previewHeadingRef} onApply={() => void applyTheme(previewTheme.id)} onBack={returnToThemePicker} onClose={onClose} /></motion.div> : pickerContent}
         </AnimatePresence>
       </motion.div>
     </motion.div>,

@@ -6,3 +6,9 @@ verify_jwt = true
 
 [functions.scheduled-message-worker]
 verify_jwt = false
+
+[functions.billing-create-checkout]
+verify_jwt = true
+
+[functions.lemonsqueezy-webhook]
+verify_jwt = false
