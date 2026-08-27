@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { canAccessPremiumProduct, type PremiumAccessState, type PremiumProductId } from "./premiumAccess";
 
-export const conversationThemeIds = ["default", "midnight", "ocean", "lavender", "emerald", "rose", "sunset", "obsidian", "celestia"] as const;
+export const conversationThemeIds = ["default", "midnight", "ocean", "lavender", "emerald", "rose", "sunset", "obsidian", "celestial", "sakura"] as const;
 
 export type ConversationThemeId = (typeof conversationThemeIds)[number];
 export type ConversationThemeAccess = "free" | "premium";
@@ -40,7 +40,7 @@ const obsidianDarkTokens = withPresentationTokens({
   canvas: "radial-gradient(ellipse 58% 74% at 50% 43%, oklch(0.055 0.012 262 / 0.82) 0%, oklch(0.075 0.014 260 / 0.62) 54%, oklch(0.05 0.012 265 / 0.28) 100%)", canvasSecondary: "oklch(0.085 0.012 262)", header: "oklch(0.145 0.014 258 / 0.8)", headerBorder: "oklch(0.41 0.038 245 / 0.56)", surface: "oklch(0.19 0.018 255 / 0.92)", surfaceElevated: "oklch(0.225 0.022 253 / 0.94)", surfaceMuted: "oklch(0.285 0.032 250 / 0.76)", outgoingBg: "linear-gradient(145deg, oklch(0.3 0.052 242) 0%, oklch(0.225 0.04 255) 54%, oklch(0.165 0.026 265) 100%)", outgoingText: "oklch(0.98 0.006 245)", incomingBg: "linear-gradient(145deg, oklch(0.405 0.026 248 / 0.97) 0%, oklch(0.335 0.022 258 / 0.97) 100%)", incomingText: "oklch(0.96 0.01 245)", composerBg: "oklch(0.135 0.014 260 / 0.8)", composerBorder: "oklch(0.43 0.042 245 / 0.58)", accent: "oklch(0.78 0.09 235)", accentHover: "oklch(0.86 0.07 232)", accentSoft: "oklch(0.63 0.09 238 / 0.18)", heading: "oklch(0.98 0.006 245)", body: "oklch(0.88 0.014 248)", muted: "oklch(0.75 0.025 248)", boundary: "oklch(0.4 0.035 248 / 0.62)", scrollbar: "oklch(0.57 0.055 240 / 0.68)", scrollbarTrack: "oklch(0.1 0.012 260 / 0.28)",
 }, { replyBg: "oklch(0.31 0.04 247 / 0.7)", reactionBg: "oklch(0.22 0.024 253 / 0.94)", activityBg: "oklch(0.16 0.018 258 / 0.64)", mediaBg: "oklch(0.17 0.016 260 / 0.88)", controlBg: "oklch(0.205 0.022 253 / 0.9)", controlHover: "oklch(0.32 0.045 245 / 0.84)", focus: "oklch(0.78 0.095 235 / 0.42)", outgoingBorder: "oklch(0.58 0.085 238 / 0.58)", incomingBorder: "oklch(0.57 0.035 246 / 0.64)", outgoingShadow: "inset 0 1px 0 oklch(0.8 0.055 235 / 0.16), 0 12px 28px oklch(0.02 0.01 260 / 0.46)", incomingShadow: "inset 0 1px 0 oklch(0.88 0.025 245 / 0.14), 0 10px 24px oklch(0.02 0.01 260 / 0.32)", composerShadow: "inset 0 1px 0 oklch(0.82 0.025 245 / 0.1), 0 14px 34px oklch(0.02 0.01 260 / 0.48)", chromeBackdrop: "blur(10px)", artworkImage: "url('/themes/obsidian_elite_theme_dark.png')", artworkMobileImage: "url('/themes/obsidian_elite_theme_dark.png')", previewArtworkImage: "url('/themes/obsidian-environment-dark.svg')", artworkOpacity: "0.98", artworkPosition: "center bottom", artworkTabletPosition: "22% bottom", artworkMobilePosition: "18% bottom", artworkSize: "cover", artworkFilter: "saturate(0.96) contrast(1.03) brightness(1.08)" });
 
-const celestiaLightTokens = withPresentationTokens({
+const celestialLightTokens = withPresentationTokens({
   canvas: "radial-gradient(ellipse 58% 74% at 50% 46%, oklch(0.99 0.012 275 / 0.42) 0%, oklch(0.94 0.035 275 / 0.22) 56%, oklch(0.9 0.04 250 / 0.08) 100%)",
   canvasSecondary: "oklch(0.93 0.035 260)",
   header: "oklch(0.985 0.012 275 / 0.76)",
@@ -77,9 +77,9 @@ const celestiaLightTokens = withPresentationTokens({
   incomingShadow: "inset 0 1px 0 oklch(1 0 0 / 0.76), 0 10px 24px oklch(0.42 0.07 278 / 0.14)",
   composerShadow: "inset 0 1px 0 oklch(1 0 0 / 0.76), 0 14px 34px oklch(0.36 0.07 275 / 0.18)",
   chromeBackdrop: "blur(14px) saturate(1.12)",
-  artworkImage: "url('/themes/celestia_elite_theme_light.png')",
-  artworkMobileImage: "url('/themes/celestia_elite_theme_light.png')",
-  previewArtworkImage: "url('/themes/celestia_elite_theme_light.png')",
+  artworkImage: "url('/themes/celestial_elite_theme_light.png')",
+  artworkMobileImage: "url('/themes/celestial_elite_theme_light.png')",
+  previewArtworkImage: "url('/themes/celestial_elite_theme_light.png')",
   artworkOpacity: "0.98",
   artworkPosition: "center bottom",
   artworkTabletPosition: "24% bottom",
@@ -88,7 +88,7 @@ const celestiaLightTokens = withPresentationTokens({
   artworkFilter: "saturate(0.98) contrast(1.02)",
 });
 
-const celestiaDarkTokens = withPresentationTokens({
+const celestialDarkTokens = withPresentationTokens({
   canvas: "radial-gradient(ellipse 58% 76% at 50% 45%, oklch(0.12 0.045 275 / 0.42) 0%, oklch(0.095 0.04 278 / 0.28) 56%, oklch(0.06 0.025 270 / 0.12) 100%)",
   canvasSecondary: "oklch(0.075 0.032 275)",
   header: "oklch(0.14 0.048 278 / 0.74)",
@@ -125,15 +125,111 @@ const celestiaDarkTokens = withPresentationTokens({
   incomingShadow: "inset 0 1px 0 oklch(0.9 0.08 270 / 0.14), 0 12px 26px oklch(0.025 0.02 280 / 0.38)",
   composerShadow: "inset 0 1px 0 oklch(0.84 0.08 270 / 0.12), 0 16px 38px oklch(0.02 0.018 280 / 0.5)",
   chromeBackdrop: "blur(14px) saturate(1.18)",
-  artworkImage: "url('/themes/celestia_elite_theme_dark.png')",
-  artworkMobileImage: "url('/themes/celestia_elite_theme_dark.png')",
-  previewArtworkImage: "url('/themes/celestia_elite_theme_dark.png')",
+  artworkImage: "url('/themes/celestial_elite_theme_dark.png')",
+  artworkMobileImage: "url('/themes/celestial_elite_theme_dark.png')",
+  previewArtworkImage: "url('/themes/celestial_elite_theme_dark.png')",
   artworkOpacity: "0.98",
   artworkPosition: "center bottom",
   artworkTabletPosition: "24% bottom",
   artworkMobilePosition: "18% bottom",
   artworkSize: "cover",
   artworkFilter: "saturate(1.04) contrast(1.03)",
+});
+
+const sakuraLightTokens = withPresentationTokens({
+  canvas: "radial-gradient(ellipse 58% 74% at 50% 44%, oklch(0.99 0.014 350 / 0.38) 0%, oklch(0.96 0.035 345 / 0.2) 56%, oklch(0.92 0.045 320 / 0.07) 100%)",
+  canvasSecondary: "oklch(0.96 0.025 345)",
+  header: "oklch(0.99 0.012 350 / 0.78)",
+  headerBorder: "oklch(0.75 0.07 350 / 0.46)",
+  surface: "oklch(0.985 0.017 350 / 0.88)",
+  surfaceElevated: "oklch(0.995 0.008 350 / 0.93)",
+  surfaceMuted: "oklch(0.92 0.05 345 / 0.8)",
+  outgoingBg: "linear-gradient(145deg, oklch(0.79 0.12 355) 0%, oklch(0.73 0.14 345) 55%, oklch(0.67 0.13 330) 100%)",
+  outgoingText: "oklch(0.25 0.07 342)",
+  incomingBg: "linear-gradient(145deg, oklch(0.998 0.006 350 / 0.96) 0%, oklch(0.95 0.035 345 / 0.92) 100%)",
+  incomingText: "oklch(0.29 0.05 338)",
+  composerBg: "oklch(0.99 0.012 350 / 0.8)",
+  composerBorder: "oklch(0.72 0.08 348 / 0.48)",
+  accent: "oklch(0.57 0.18 348)",
+  accentHover: "oklch(0.49 0.18 345)",
+  accentSoft: "oklch(0.72 0.14 350 / 0.18)",
+  heading: "oklch(0.24 0.06 340)",
+  body: "oklch(0.36 0.05 340)",
+  muted: "oklch(0.52 0.045 340)",
+  boundary: "oklch(0.75 0.06 345 / 0.5)",
+  scrollbar: "oklch(0.61 0.11 348 / 0.62)",
+  scrollbarTrack: "oklch(0.88 0.04 345 / 0.2)",
+}, {
+  replyBg: "oklch(0.92 0.055 347 / 0.76)",
+  reactionBg: "oklch(0.99 0.014 350 / 0.92)",
+  activityBg: "oklch(0.99 0.012 350 / 0.68)",
+  mediaBg: "oklch(0.92 0.05 345 / 0.84)",
+  controlBg: "oklch(0.985 0.016 350 / 0.88)",
+  controlHover: "oklch(0.89 0.075 347 / 0.76)",
+  focus: "oklch(0.57 0.18 348 / 0.38)",
+  outgoingBorder: "oklch(0.64 0.15 345 / 0.48)",
+  incomingBorder: "oklch(0.77 0.07 348 / 0.6)",
+  outgoingShadow: "inset 0 1px 0 oklch(0.96 0.06 350 / 0.34), 0 12px 28px oklch(0.42 0.1 345 / 0.2)",
+  incomingShadow: "inset 0 1px 0 oklch(1 0 0 / 0.8), 0 10px 24px oklch(0.48 0.07 345 / 0.14)",
+  composerShadow: "inset 0 1px 0 oklch(1 0 0 / 0.8), 0 14px 34px oklch(0.43 0.08 345 / 0.18)",
+  chromeBackdrop: "blur(14px) saturate(1.12)",
+  artworkImage: "url('/themes/sakura_elite_theme_light.png')",
+  artworkMobileImage: "url('/themes/sakura_elite_theme_light.png')",
+  previewArtworkImage: "url('/themes/sakura_elite_theme_light.png')",
+  artworkOpacity: "0.98",
+  artworkPosition: "center bottom",
+  artworkTabletPosition: "48% bottom",
+  artworkMobilePosition: "50% bottom",
+  artworkSize: "cover",
+  artworkFilter: "saturate(0.98) contrast(1.01)",
+});
+
+const sakuraDarkTokens = withPresentationTokens({
+  canvas: "radial-gradient(ellipse 58% 76% at 50% 44%, oklch(0.11 0.055 335 / 0.4) 0%, oklch(0.085 0.045 330 / 0.28) 56%, oklch(0.045 0.025 320 / 0.12) 100%)",
+  canvasSecondary: "oklch(0.07 0.035 325)",
+  header: "oklch(0.13 0.055 330 / 0.76)",
+  headerBorder: "oklch(0.5 0.14 340 / 0.52)",
+  surface: "oklch(0.17 0.065 330 / 0.88)",
+  surfaceElevated: "oklch(0.2 0.07 332 / 0.92)",
+  surfaceMuted: "oklch(0.26 0.09 338 / 0.8)",
+  outgoingBg: "linear-gradient(145deg, oklch(0.43 0.19 350) 0%, oklch(0.36 0.18 338) 54%, oklch(0.29 0.14 325) 100%)",
+  outgoingText: "oklch(0.99 0.012 350)",
+  incomingBg: "linear-gradient(145deg, oklch(0.31 0.095 330 / 0.95) 0%, oklch(0.25 0.085 320 / 0.95) 100%)",
+  incomingText: "oklch(0.96 0.02 350)",
+  composerBg: "oklch(0.115 0.05 328 / 0.78)",
+  composerBorder: "oklch(0.48 0.14 340 / 0.54)",
+  accent: "oklch(0.75 0.19 350)",
+  accentHover: "oklch(0.82 0.15 355)",
+  accentSoft: "oklch(0.66 0.19 348 / 0.2)",
+  heading: "oklch(0.985 0.014 350)",
+  body: "oklch(0.89 0.03 350)",
+  muted: "oklch(0.74 0.055 345)",
+  boundary: "oklch(0.44 0.11 335 / 0.62)",
+  scrollbar: "oklch(0.61 0.16 345 / 0.72)",
+  scrollbarTrack: "oklch(0.095 0.04 328 / 0.28)",
+}, {
+  replyBg: "oklch(0.26 0.095 335 / 0.78)",
+  reactionBg: "oklch(0.18 0.065 330 / 0.92)",
+  activityBg: "oklch(0.12 0.05 328 / 0.66)",
+  mediaBg: "oklch(0.16 0.06 328 / 0.9)",
+  controlBg: "oklch(0.17 0.065 330 / 0.88)",
+  controlHover: "oklch(0.29 0.12 340 / 0.84)",
+  focus: "oklch(0.75 0.19 350 / 0.46)",
+  outgoingBorder: "oklch(0.65 0.2 350 / 0.58)",
+  incomingBorder: "oklch(0.55 0.14 338 / 0.58)",
+  outgoingShadow: "inset 0 1px 0 oklch(0.88 0.15 355 / 0.18), 0 14px 30px oklch(0.025 0.02 325 / 0.5)",
+  incomingShadow: "inset 0 1px 0 oklch(0.9 0.08 350 / 0.14), 0 12px 26px oklch(0.02 0.018 325 / 0.4)",
+  composerShadow: "inset 0 1px 0 oklch(0.86 0.08 350 / 0.12), 0 16px 38px oklch(0.015 0.015 325 / 0.52)",
+  chromeBackdrop: "blur(14px) saturate(1.18)",
+  artworkImage: "url('/themes/sakura_elite_theme_dark.png')",
+  artworkMobileImage: "url('/themes/sakura_elite_theme_dark.png')",
+  previewArtworkImage: "url('/themes/sakura_elite_theme_dark.png')",
+  artworkOpacity: "0.98",
+  artworkPosition: "center bottom",
+  artworkTabletPosition: "48% bottom",
+  artworkMobilePosition: "50% bottom",
+  artworkSize: "cover",
+  artworkFilter: "saturate(1.02) contrast(1.03)",
 });
 
 export const conversationThemes: readonly ConversationThemeDefinition[] = [
@@ -145,7 +241,8 @@ export const conversationThemes: readonly ConversationThemeDefinition[] = [
   { id: "rose", name: "Rose", description: "Muted rose and berry tones", access: "free", light: withPresentationTokens({ canvas: "linear-gradient(150deg, #faeff1 0%, #f7ebee 100%)", canvasSecondary: "#fbf4f5", header: "#fcf8f7", headerBorder: "#e8d7d9", surface: "#fcfaf9", surfaceElevated: "#fffefe", surfaceMuted: "#f2dfe3", outgoingBg: "#a85168", outgoingText: "#ffffff", incomingBg: "#fcf7f8", incomingText: "#674650", composerBg: "#fcf8f7", composerBorder: "#e6d3d6", accent: "#9c4961", accentHover: "#893b52", accentSoft: "#f0dce1", heading: "#57343f", body: "#765660", muted: "#967983", boundary: "#d9ccca", scrollbar: "#b78692", scrollbarTrack: "rgb(156 73 97 / 0.045)" }), dark: withPresentationTokens({ canvas: "linear-gradient(150deg, #2a1d21 0%, #321f28 100%)", canvasSecondary: "#2d2224", header: "#2d2725", headerBorder: "#4c403f", surface: "#3b2b30", surfaceElevated: "#443138", surfaceMuted: "#523641", outgoingBg: "#a95169", outgoingText: "#ffffff", incomingBg: "#3d2d32", incomingText: "#f1e4e7", composerBg: "#2e2826", composerBorder: "#514442", accent: "#e29aae", accentHover: "#edb0c1", accentSoft: "rgb(226 154 174 / 0.15)", heading: "#f9f0f2", body: "#dfcbd0", muted: "#b7a0a6", boundary: "#4a423e", scrollbar: "#8f6873", scrollbarTrack: "rgb(226 154 174 / 0.035)" }) },
   { id: "sunset", name: "Sunset", description: "Warm dusk-inspired color", access: "free", light: withPresentationTokens({ canvas: "linear-gradient(145deg, #fff1e5 0%, #f6e8ee 62%, #eeebf5 100%)", canvasSecondary: "#faf1eb", header: "#fcf8f3", headerBorder: "#e7d7ce", surface: "#fcfaf7", surfaceElevated: "#fffdfb", surfaceMuted: "#f2dfd9", outgoingBg: "#ad5146", outgoingText: "#ffffff", incomingBg: "#fcf7f3", incomingText: "#674a45", composerBg: "#fcf8f3", composerBorder: "#e4d3ca", accent: "#ae554d", accentHover: "#99463f", accentSoft: "#f1dcd5", heading: "#593a3c", body: "#765754", muted: "#957a75", boundary: "#d8cec8", scrollbar: "#b5857b", scrollbarTrack: "rgb(174 85 77 / 0.04)" }), dark: withPresentationTokens({ canvas: "linear-gradient(145deg, #2b211d 0%, #302127 58%, #292433 100%)", canvasSecondary: "#2c2521", header: "#2d2924", headerBorder: "#4c443c", surface: "#3a302b", surfaceElevated: "#44372f", surfaceMuted: "#513a35", outgoingBg: "#b05247", outgoingText: "#ffffff", incomingBg: "#3c312d", incomingText: "#f0e4df", composerBg: "#2e2924", composerBorder: "#51483f", accent: "#ed9a83", accentHover: "#f3ad98", accentSoft: "rgb(237 154 131 / 0.15)", heading: "#f8f1ed", body: "#ddcec7", muted: "#b5a49c", boundary: "#4a443e", scrollbar: "#8d6e64", scrollbarTrack: "rgb(237 154 131 / 0.035)" }) },
   { id: "obsidian", name: "Obsidian", description: "A volcanic-glass conversation environment", access: "premium", premiumProductId: "theme.obsidian", light: obsidianLightTokens, dark: obsidianDarkTokens },
-  { id: "celestia", name: "Celestia", description: "A luminous celestial conversation environment", access: "premium", premiumProductId: "theme.celestia", light: celestiaLightTokens, dark: celestiaDarkTokens },
+  { id: "celestial", name: "Celestial", description: "A luminous celestial conversation environment", access: "premium", premiumProductId: "theme.celestial", light: celestialLightTokens, dark: celestialDarkTokens },
+  { id: "sakura", name: "Sakura", description: "A cherry-blossom conversation environment", access: "premium", premiumProductId: "theme.sakura", light: sakuraLightTokens, dark: sakuraDarkTokens },
 ] as const;
 
 const conversationThemeById = new Map(conversationThemes.map((theme) => [theme.id, theme]));
@@ -154,6 +251,7 @@ const tokenCssNames: Record<keyof ConversationThemeTokens, string> = {
 };
 
 export function normalizeConversationThemeId(value: string | null | undefined): ConversationThemeId {
+  if (value === "celestia") return "celestial";
   return conversationThemeIds.includes(value as ConversationThemeId) ? value as ConversationThemeId : "default";
 }
 

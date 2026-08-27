@@ -3,6 +3,7 @@ import {
   findBillingProductByVariant,
   getBillingCatalogConfig,
   getWebhookSecret,
+  legacyDatabaseBillingProductId,
 } from "../_shared/lemonsqueezyBilling.ts";
 import { readDefaultNamedKey } from "../_shared/mediaDelivery.ts";
 
@@ -197,7 +198,7 @@ async function handleRequest(request: Request) {
   const admin = createClient(projectUrl, secretKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const result = await admin.rpc("process_lemonsqueezy_webhook", {
+  const webhookArguments = {
     target_event_key: eventKey,
     target_event_name: eventName,
     target_resource_type: resourceType,
@@ -219,7 +220,15 @@ async function handleRequest(request: Request) {
     target_provider_created_at: providerCreatedAt,
     target_provider_updated_at: providerUpdatedAt,
     target_refunded_at: normalizedDates.refundedAt,
-  });
+  };
+  let result = await admin.rpc("process_lemonsqueezy_webhook", webhookArguments);
+  const legacyProductId = legacyDatabaseBillingProductId(billingProduct.productId);
+  if (result.error?.code === "22023" && result.error.message === "The billing product is unavailable." && legacyProductId) {
+    result = await admin.rpc("process_lemonsqueezy_webhook", {
+      ...webhookArguments,
+      target_local_product_id: legacyProductId,
+    });
+  }
   if (result.error) {
     console.error("Lemon Squeezy webhook database processing failed", {
       code: result.error.code,

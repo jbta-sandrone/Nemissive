@@ -3,6 +3,7 @@ import { corsHeaders } from "npm:@supabase/supabase-js@2.110.7/cors";
 import {
   checkoutReturnUrl,
   getCheckoutServerConfig,
+  legacyDatabaseBillingProductId,
   resolveBillingProduct,
 } from "../_shared/lemonsqueezyBilling.ts";
 import { readDefaultNamedKey } from "../_shared/mediaDelivery.ts";
@@ -78,15 +79,23 @@ async function handleRequest(request: Request) {
   if (userError || !user) return jsonResponse(401, { error: "Your session has expired. Sign in and try again." });
   if (!user.email) return jsonResponse(409, { error: "A verified account email is required for checkout." });
 
-  const authorizationResult = await admin.rpc("authorize_billing_checkout", {
+  let authorizationResult = await admin.rpc("authorize_billing_checkout", {
     target_account_id: user.id,
     target_product_id: productId,
   });
+  let checkoutAuthorization = authorizationResult.data as CheckoutAuthorization | null;
+  const legacyProductId = legacyDatabaseBillingProductId(productId);
+  if (!authorizationResult.error && checkoutAuthorization?.reason === "product_unavailable" && legacyProductId) {
+    authorizationResult = await admin.rpc("authorize_billing_checkout", {
+      target_account_id: user.id,
+      target_product_id: legacyProductId,
+    });
+    checkoutAuthorization = authorizationResult.data as CheckoutAuthorization | null;
+  }
   if (authorizationResult.error) {
     console.error("billing checkout authorization failed", { code: authorizationResult.error.code });
     return jsonResponse(500, { error: "Nemissive could not confirm checkout eligibility. Try again." });
   }
-  const checkoutAuthorization = authorizationResult.data as CheckoutAuthorization | null;
   if (checkoutAuthorization?.allowed !== true) {
     return jsonResponse(409, { error: checkoutAuthorizationMessage(checkoutAuthorization?.reason) });
   }

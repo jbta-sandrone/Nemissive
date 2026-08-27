@@ -1,4 +1,4 @@
-export type BillingProductId = "theme.obsidian" | "theme.celestia" | "elite.monthly";
+export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "elite.monthly";
 
 export type BillingCatalogEntry = {
   productId: BillingProductId;
@@ -18,12 +18,23 @@ function requiredEnvironment(name: string) {
   return value;
 }
 
-function positiveIntegerEnvironment(name: string) {
-  const value = requiredEnvironment(name);
+function positiveIntegerValue(name: string, value: string) {
   if (!/^\d+$/.test(value)) throw new Error(`invalid-environment:${name}`);
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`invalid-environment:${name}`);
   return parsed;
+}
+
+function positiveIntegerEnvironment(name: string) {
+  return positiveIntegerValue(name, requiredEnvironment(name));
+}
+
+function positiveIntegerEnvironmentWithLegacyFallback(canonicalName: string, legacyName: string) {
+  const canonicalValue = Deno.env.get(canonicalName)?.trim();
+  if (canonicalValue) return positiveIntegerValue(canonicalName, canonicalValue);
+  const legacyValue = Deno.env.get(legacyName)?.trim();
+  if (legacyValue) return positiveIntegerValue(legacyName, legacyValue);
+  throw new Error(`missing-environment:${canonicalName}`);
 }
 
 export function getBillingCatalogConfig(): BillingCatalogConfig {
@@ -39,8 +50,18 @@ export function getBillingCatalogConfig(): BillingCatalogConfig {
       billingType: "one_time",
     },
     {
-      productId: "theme.celestia",
-      variantId: positiveIntegerEnvironment("LEMONSQUEEZY_CELESTIA_VARIANT_ID"),
+      productId: "theme.celestial",
+      // Temporary secret-name bridge for a zero-downtime deployment. Remove
+      // after the canonical secret is present in every deployed environment.
+      variantId: positiveIntegerEnvironmentWithLegacyFallback(
+        "LEMONSQUEEZY_CELESTIAL_VARIANT_ID",
+        "LEMONSQUEEZY_CELESTIA_VARIANT_ID",
+      ),
+      billingType: "one_time",
+    },
+    {
+      productId: "theme.sakura",
+      variantId: positiveIntegerEnvironment("LEMONSQUEEZY_SAKURA_VARIANT_ID"),
       billingType: "one_time",
     },
     {
@@ -83,8 +104,14 @@ export function getWebhookSecret() {
 }
 
 export function resolveBillingProduct(value: unknown): BillingProductId | null {
-  if (value === "theme.obsidian" || value === "theme.celestia" || value === "elite.monthly") return value;
+  if (value === "theme.celestia") return "theme.celestial";
+  if (value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "elite.monthly") return value;
   return null;
+}
+
+/** Temporary RPC compatibility for deploying canonical Edge code before the database rename. */
+export function legacyDatabaseBillingProductId(productId: BillingProductId) {
+  return productId === "theme.celestial" ? "theme.celestia" : null;
 }
 
 export function findBillingProductByVariant(config: BillingCatalogConfig, variantId: number) {

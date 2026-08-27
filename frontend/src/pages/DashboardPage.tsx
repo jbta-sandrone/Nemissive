@@ -26,7 +26,7 @@ import useReminders, { type ReminderRecord } from "../components/dashboard/useRe
 import { normalizeQuickReactions } from "../components/dashboard/emojiData";
 import { getConversationDisplayName } from "../components/dashboard/profileUtils";
 import { noPremiumAccess, normalizePremiumAccess, resolveAccountStatus, type PremiumAccessRpcRow } from "../components/dashboard/premiumAccess";
-import { isBillingProductId, type BillingProductId } from "../components/dashboard/premiumCatalog";
+import { normalizeBillingProductId, type BillingProductId } from "../components/dashboard/premiumCatalog";
 import type { PersonalSurface } from "../components/dashboard/AccountMenuPopover";
 import { privacyPreferencesChangeEvent } from "../lib/privacyPreferences";
 import { supabase } from "../lib/supabase";
@@ -69,7 +69,7 @@ function DashboardPage() {
   const billingSearchParams = new URLSearchParams(location.search);
   const hasBillingReturn = billingSearchParams.get("billing") === "success";
   const billingProductValue = billingSearchParams.get("product");
-  const billingProductId: BillingProductId | null = isBillingProductId(billingProductValue) ? billingProductValue : null;
+  const billingProductId: BillingProductId | null = normalizeBillingProductId(billingProductValue);
   const [activeSection, setActiveSection] = useState<DashboardSection>("messages");
   const [workspaceLayout, setWorkspaceLayout] = useState<WorkspaceLayoutState>({ mode: "workspace" });
   const [isDesktopWorkspace, setIsDesktopWorkspace] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches);
@@ -910,7 +910,12 @@ function DashboardPage() {
   }
 
   async function setConversationTheme(conversationId: string, themeKey: string) {
-    const { data, error } = await supabase.rpc("set_personal_conversation_theme", { target_conversation_id: conversationId, requested_theme_key: themeKey });
+    let { data, error } = await supabase.rpc("set_personal_conversation_theme", { target_conversation_id: conversationId, requested_theme_key: themeKey });
+    if (error?.code === "22023" && themeKey === "celestial") {
+      const legacyResult = await supabase.rpc("set_personal_conversation_theme", { target_conversation_id: conversationId, requested_theme_key: "celestia" });
+      data = legacyResult.data;
+      error = legacyResult.error;
+    }
     if (error) {
       if (import.meta.env.DEV) console.error("Saving conversation theme failed", { code: error.code, conversationId });
       return "We couldn’t update this conversation’s theme. Please try again.";

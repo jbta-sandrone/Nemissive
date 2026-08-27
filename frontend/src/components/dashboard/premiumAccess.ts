@@ -1,7 +1,7 @@
 export type AccountPlan = "normal" | "elite";
 export type AccountStatus = "normal" | "gold" | "elite";
 
-export const premiumProductIds = ["theme.obsidian", "theme.celestia"] as const;
+export const premiumProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura"] as const;
 export type PremiumProductId = (typeof premiumProductIds)[number];
 
 export type PremiumAccessState = {
@@ -30,7 +30,16 @@ export const noPremiumAccess: PremiumAccessState = Object.freeze({
 });
 
 export const isObsidianDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_OBSIDIAN_THEME_PREVIEW === "true";
-export const isCelestiaDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_CELESTIA_THEME_PREVIEW === "true";
+const celestialDevelopmentPreviewValue = import.meta.env.VITE_ENABLE_CELESTIAL_THEME_PREVIEW;
+export const isCelestialDevelopmentPreviewEnabled = import.meta.env.DEV && (
+  celestialDevelopmentPreviewValue === "true"
+  || (celestialDevelopmentPreviewValue === undefined && import.meta.env.VITE_ENABLE_CELESTIA_THEME_PREVIEW === "true")
+);
+export const isSakuraDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_SAKURA_THEME_PREVIEW === "true";
+
+function normalizeLegacyPremiumProductId(value: unknown) {
+  return value === "theme.celestia" ? "theme.celestial" : value;
+}
 
 export function isPremiumProductId(value: unknown): value is PremiumProductId {
   return typeof value === "string" && premiumProductIds.includes(value as PremiumProductId);
@@ -38,17 +47,18 @@ export function isPremiumProductId(value: unknown): value is PremiumProductId {
 
 export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProductId) {
   if (productId === "theme.obsidian") return isObsidianDevelopmentPreviewEnabled;
-  return isCelestiaDevelopmentPreviewEnabled;
+  if (productId === "theme.celestial") return isCelestialDevelopmentPreviewEnabled;
+  return isSakuraDevelopmentPreviewEnabled;
 }
 
 function normalizeKnownProductIds(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return [...new Set(value.filter(isPremiumProductId))];
+  return [...new Set(value.map(normalizeLegacyPremiumProductId).filter(isPremiumProductId))];
 }
 
 function normalizeOwnedProductIds(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return [...new Set(value.filter((productId): productId is string => (
+  return [...new Set(value.map(normalizeLegacyPremiumProductId).filter((productId): productId is string => (
     typeof productId === "string"
     && productId.length >= 3
     && productId.length <= 100

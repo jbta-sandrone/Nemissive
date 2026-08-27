@@ -1,7 +1,7 @@
 import { useState, type RefObject } from "react";
 import { beginBillingCheckout } from "./billing";
 import { getConversationThemeStyle, type ConversationThemeDefinition } from "./conversationThemes";
-import { eliteMonthlyProductId, formatPremiumPrice, premiumCatalog, type BillingProductId } from "./premiumCatalog";
+import { eliteMonthlyProductId, formatPremiumPrice, premiumCatalog, premiumThemePurchaseCatalog, type BillingProductId } from "./premiumCatalog";
 import type { PremiumProductAccessSource } from "./premiumAccess";
 import { premiumThemeAccessLabels } from "./premiumPresentation";
 
@@ -93,7 +93,8 @@ function PremiumThemePreview({ theme, accessSource, current, error, isSaving, he
   const canApply = accessSource !== "locked";
   const applyLabel = accessSource === "preview" ? "Apply development preview" : "Apply theme";
   const themeProductId = theme.premiumProductId ?? null;
-  const themeProduct = themeProductId ? premiumCatalog[themeProductId] : null;
+  const themeProduct = themeProductId ? premiumThemePurchaseCatalog[themeProductId] : null;
+  const themeCheckoutProductId = themeProduct?.checkoutProductId ?? null;
   const eliteProduct = premiumCatalog[eliteMonthlyProductId];
 
   async function startCheckout(productId: BillingProductId) {
@@ -121,9 +122,42 @@ function PremiumThemePreview({ theme, accessSource, current, error, isSaving, he
 
           <aside aria-label={`${theme.name} access options`} className="rounded-[1.75rem] border border-border bg-background p-4 shadow-soft sm:p-5 lg:sticky lg:top-0">
             <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Your access</p><h3 className="mt-1 text-xl font-bold text-heading">{accessLabel}</h3></div><span className="rounded-full bg-accent px-3 py-1.5 text-xs font-bold text-primary">{theme.name}</span></div>
-            <p className="mt-4 text-sm leading-6 text-body">{accessSource === "owned" ? "You own this theme permanently, independent of your account plan." : accessSource === "elite" ? "This theme is available while your Nemissive Elite plan is active." : accessSource === "preview" ? "Development access lets you test this theme. It is not permanent ownership or Elite." : "Preview the complete visual design, then choose permanent ownership or Nemissive Elite through secure checkout."}</p>
+            <p className="mt-4 text-sm leading-6 text-body">{accessSource === "owned" ? "You own this theme permanently, independent of your account plan." : accessSource === "elite" ? "This theme is available while your Nemissive Elite plan is active." : accessSource === "preview" ? "Development access lets you test this theme. It is not permanent ownership or Elite." : themeCheckoutProductId ? "Preview the complete visual design, then choose permanent ownership or Nemissive Elite through secure checkout." : "Preview the complete visual design. Permanent purchase is coming soon, or access this theme now with Nemissive Elite."}</p>
 
-            {canApply ? <button type="button" onClick={onApply} disabled={isSaving || current} className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50">{isSaving ? "Applying…" : current ? "Current theme" : applyLabel}</button> : themeProduct && themeProductId && <div className="mt-5 space-y-3"><section aria-labelledby={`${theme.id}-permanent-title`} className="rounded-2xl border border-border bg-surface p-4"><p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-muted">Buy once</p><h4 id={`${theme.id}-permanent-title`} className="mt-1 text-sm font-bold text-heading">Own {theme.name} forever</h4><p className="mt-3 text-3xl font-black tracking-tight text-heading">{formatPremiumPrice(themeProductId)}</p><p className="mt-1 text-xs font-semibold text-body">Pay once · Own forever</p><button type="button" onClick={() => void startCheckout(themeProductId)} disabled={Boolean(checkoutProductId)} aria-label={`Buy ${theme.name} for ${formatPremiumPrice(themeProductId)}`} className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60">{checkoutProductId === themeProductId ? "Preparing secure checkout…" : `Buy ${theme.name}`}</button></section><p className="text-center text-[0.65rem] font-bold uppercase tracking-[0.16em] text-muted">or</p><section aria-labelledby={`${theme.id}-elite-title`} className="rounded-2xl border border-primary/25 bg-accent p-4"><p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-primary">Nemissive Elite</p><h4 id={`${theme.id}-elite-title`} className="mt-1 text-sm font-bold text-heading">Premium access while subscribed</h4><p className="mt-3 text-3xl font-black tracking-tight text-heading">{formatPremiumPrice(eliteMonthlyProductId)} <span className="text-sm font-bold text-body">/ month</span></p><p className="mt-1 text-xs leading-5 text-body">Access Obsidian, Celestia, and other included Elite benefits while your plan is active.</p><button type="button" onClick={() => void startCheckout(eliteMonthlyProductId)} disabled={Boolean(checkoutProductId)} aria-label={`Get Nemissive Elite for ${formatPremiumPrice(eliteMonthlyProductId)} per month`} className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-primary/30 bg-surface px-4 py-2.5 text-sm font-bold text-heading transition hover:bg-background focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60">{checkoutProductId === eliteMonthlyProductId ? "Preparing secure checkout…" : "Get Nemissive Elite"}</button></section><p className="sr-only">Displayed prices are {formatPremiumPrice(themeProductId)} for {themeProduct.name} as a one-time purchase and {formatPremiumPrice(eliteMonthlyProductId)} per {eliteProduct.interval} for Nemissive Elite.</p></div>}
+            {canApply ? (
+              <button type="button" onClick={onApply} disabled={isSaving || current} className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50">
+                {isSaving ? "Applying…" : current ? "Current theme" : applyLabel}
+              </button>
+            ) : themeProduct && themeProductId && (
+              <div className="mt-5 space-y-3">
+                <section aria-labelledby={`${theme.id}-permanent-title`} className="rounded-2xl border border-border bg-surface p-4">
+                  <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-muted">Buy once</p>
+                  <h4 id={`${theme.id}-permanent-title`} className="mt-1 text-sm font-bold text-heading">Own {theme.name} forever</h4>
+                  <p className="mt-3 text-3xl font-black tracking-tight text-heading">{formatPremiumPrice(themeProductId)}</p>
+                  <p className="mt-1 text-xs font-semibold text-body">Pay once · Own forever</p>
+                  {themeCheckoutProductId ? (
+                    <button type="button" onClick={() => void startCheckout(themeCheckoutProductId)} disabled={Boolean(checkoutProductId)} aria-label={`Buy ${theme.name} for ${formatPremiumPrice(themeProductId)}`} className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60">
+                      {checkoutProductId === themeCheckoutProductId ? "Preparing secure checkout…" : `Buy ${theme.name}`}
+                    </button>
+                  ) : (
+                    <button type="button" disabled aria-label={`${theme.name} permanent purchase coming soon`} className="mt-4 inline-flex min-h-11 w-full cursor-not-allowed items-center justify-center rounded-2xl border border-border bg-background px-4 py-2.5 text-sm font-bold text-muted opacity-80">
+                      Coming soon
+                    </button>
+                  )}
+                </section>
+                <p className="text-center text-[0.65rem] font-bold uppercase tracking-[0.16em] text-muted">or</p>
+                <section aria-labelledby={`${theme.id}-elite-title`} className="rounded-2xl border border-primary/25 bg-accent p-4">
+                  <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-primary">Nemissive Elite</p>
+                  <h4 id={`${theme.id}-elite-title`} className="mt-1 text-sm font-bold text-heading">Premium access while subscribed</h4>
+                  <p className="mt-3 text-3xl font-black tracking-tight text-heading">{formatPremiumPrice(eliteMonthlyProductId)} <span className="text-sm font-bold text-body">/ month</span></p>
+                  <p className="mt-1 text-xs leading-5 text-body">Access Obsidian, Celestial, Sakura, and other included Elite benefits while your plan is active.</p>
+                  <button type="button" onClick={() => void startCheckout(eliteMonthlyProductId)} disabled={Boolean(checkoutProductId)} aria-label={`Get Nemissive Elite for ${formatPremiumPrice(eliteMonthlyProductId)} per month`} className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-primary/30 bg-surface px-4 py-2.5 text-sm font-bold text-heading transition hover:bg-background focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60">
+                    {checkoutProductId === eliteMonthlyProductId ? "Preparing secure checkout…" : "Get Nemissive Elite"}
+                  </button>
+                </section>
+                <p className="sr-only">Displayed prices are {formatPremiumPrice(themeProductId)} for {themeProduct.name} as an intended one-time purchase and {formatPremiumPrice(eliteMonthlyProductId)} per {eliteProduct.interval} for Nemissive Elite. {themeCheckoutProductId ? "Permanent checkout is available." : "Permanent checkout is coming soon."}</p>
+              </div>
+            )}
 
             {checkoutError && <p role="alert" className="mt-4 rounded-2xl border border-primary/25 bg-accent px-4 py-3 text-sm leading-6 text-body">{checkoutError}</p>}
             {error && <p role="alert" className="mt-4 rounded-2xl border border-primary/25 bg-accent px-4 py-3 text-sm leading-6 text-body">{error}</p>}
