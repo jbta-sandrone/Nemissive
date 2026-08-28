@@ -497,8 +497,8 @@ function formatMessageTimestamp(value: string) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
-function MobileBackButton({ onClick }: { onClick: () => void }) {
-  return <button type="button" onClick={onClick} aria-label="Back to Messages" className="chat-accent-control flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover lg:hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg></button>;
+function MobileBackButton({ onClick, isFocusMode = false }: { onClick: () => void; isFocusMode?: boolean }) {
+  return <button type="button" onClick={onClick} aria-label="Back to Messages" className={`chat-accent-control flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-muted transition hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover ${isFocusMode ? "lg:hidden" : "xl:hidden"}`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg></button>;
 }
 
 function FocusModeButton({ onClick }: { onClick: () => void }) {
@@ -2731,7 +2731,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     <div ref={panelRef} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setIsDragActive(true); } }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragActive(false); }} onDrop={handleAttachmentDrop} className="chat-panel-root relative flex min-h-0 flex-1 flex-col">
       <div className="chat-theme-artwork pointer-events-none absolute inset-0" aria-hidden="true" />
       <header className="chat-header flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-4 sm:gap-3 sm:px-6">
-        <MobileBackButton onClick={onMobileBack} />
+        <MobileBackButton onClick={onMobileBack} isFocusMode={layoutMode === "focus"} />
         <PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={effectiveIsOtherUserOnline} />
         <div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1>{isDeletedAccount ? <p className="truncate text-xs font-medium text-muted">Account deleted</p> : (presenceText || conversation.otherProfile.username) && <p className={`truncate text-xs font-medium ${effectiveIsOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{presenceText && conversation.otherProfile.username && <span aria-hidden="true"> · </span>}{conversation.otherProfile.username && <span className="font-normal text-body">@{conversation.otherProfile.username}</span>}</p>}</div>
         {layoutMode === "workspace" && <FocusModeButton onClick={onEnterFocusMode} />}
@@ -2898,7 +2898,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 }
 
 function ChatPanel({ chatState, currentProfile, currentUserId, premiumAccess, isMobileVisible, layoutMode, messageSearchTarget, realtimeRefreshKey, realtimeMessageEvents, realtimeMessageUpdateEvents, realtimeReactionEvents, realtimePinnedMessageEvents, realtimeConversationActivityEvents, realtimeConversationNicknameEvents, realtimeReceiptEvents, onlineUserIds, quickReactions, conversationMutedUntil, conversationArchivedAt, onConversationMuteChange, onConversationThemeChange, onConversationArchiveChange, onConversationDelete, onConversationDisconnect, onReconnectRequested, onIncomingMessagesSynchronized, onConversationRead, onMessageConfirmed, onMessageUpdated, onMessageDeletionRolledBack, onForwardMessage, onStartConversation, onMobileBack, onEnterFocusMode, sharedReminders, onReminderOpen, onReminderEventOpen }: ChatPanelProps) {
-  const visibilityClasses = isMobileVisible ? "flex" : "hidden md:flex";
+  const visibilityClasses = isMobileVisible ? "flex" : "hidden xl:flex";
 
   if (chatState?.kind === "pending") {
     const recipientName = getProfileDisplayName(chatState.request.otherProfile);
@@ -2917,7 +2917,7 @@ function ChatPanel({ chatState, currentProfile, currentUserId, premiumAccess, is
   }
 
   return (
-    <main className="hidden min-w-0 flex-1 items-center justify-center overflow-hidden bg-background p-6 md:flex lg:p-10">
+    <main className="hidden min-w-0 flex-1 items-center justify-center overflow-hidden bg-background p-6 xl:flex xl:p-10">
       <div className="w-full max-w-md text-center"><div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-accent text-primary shadow-soft lg:h-24 lg:w-24"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-10 w-10 lg:h-12 lg:w-12" aria-hidden="true"><path d="M4 5.5h16v11H8l-4 3v-14Z" strokeLinejoin="round" /><path d="M8 10h8M8 13h5" strokeLinecap="round" /></svg></div><h1 className="mt-6 text-2xl font-bold tracking-tight text-heading lg:mt-8 lg:text-3xl">Welcome to Nemissive</h1><p className="mt-4 text-base leading-7 text-body">Every meaningful conversation starts with a hello.</p><p className="mt-2 text-base leading-7 text-body">Choose someone from the left or start a new conversation.</p><button type="button" onClick={onStartConversation} className="mt-8 inline-flex items-center rounded-2xl bg-primary px-6 py-3 text-sm font-medium text-white shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-lg lg:mt-10">Start Conversation</button></div>
     </main>
   );

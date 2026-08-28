@@ -68,10 +68,10 @@ function ArchivedSidebarContent({ messagesController, chatState, onlineUserIds, 
 
 function Sidebar({ activeSection, currentProfile, accountStatus, isAccountResolved, accountError, isCompactChatVisible, isDesktopCollapsed, requestsController, messagesController, chatState, onlineUserIds, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onOpenElite, onRequestSignOut, onAccountDeleted, onNewConversation, onPendingRequestSelected, onConversationReady, onPeopleConversationReady, onArchivedConversationReady, onConversationDeleted, isUtilityShelfOpen, hasGalleryUnread, isUtilityLauncherHidden, onUtilityShelfToggle }: SidebarProps) {
   const shouldReduceMotion = useReducedMotion();
-  const visibilityClasses = isCompactChatVisible ? "hidden md:flex" : "flex";
+  const visibilityClasses = isCompactChatVisible ? "hidden xl:flex" : "flex";
   const desktopLayoutClasses = isDesktopCollapsed
     ? "lg:pointer-events-none lg:invisible lg:w-0 lg:min-w-0 lg:flex-none lg:border-r-0 lg:opacity-0"
-    : "lg:w-[19rem] lg:min-w-[19rem] lg:flex-none lg:opacity-100 xl:w-80 xl:min-w-80";
+    : "xl:w-80 xl:min-w-80 xl:flex-none xl:opacity-100";
   const transition = shouldReduceMotion ? { duration: 0 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] as const };
   const showsWorkspaceUtility = activeSection !== "menu" && !isDesktopCollapsed && !isUtilityLauncherHidden;
 
