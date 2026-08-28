@@ -1,6 +1,6 @@
 import type { PremiumProductId } from "./premiumAccess";
 
-export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "elite.monthly";
+export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "theme.ember" | "elite.monthly";
 
 export type PremiumCatalogEntry = {
   id: BillingProductId;
@@ -41,6 +41,13 @@ export const premiumThemePurchaseCatalog: Record<PremiumProductId, PremiumThemeP
     currency: "PHP",
     checkoutProductId: "theme.sakura",
   },
+  "theme.ember": {
+    id: "theme.ember",
+    name: "Ember",
+    amountMinor: 29900,
+    currency: "PHP",
+    checkoutProductId: "theme.ember",
+  },
 };
 
 export const premiumCatalog: Record<BillingProductId, PremiumCatalogEntry> = {
@@ -65,6 +72,13 @@ export const premiumCatalog: Record<BillingProductId, PremiumCatalogEntry> = {
     currency: "PHP",
     billingType: "one_time",
   },
+  "theme.ember": {
+    id: "theme.ember",
+    name: "Ember",
+    amountMinor: 29900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
   "elite.monthly": {
     id: "elite.monthly",
     name: "Nemissive Elite",
@@ -76,7 +90,7 @@ export const premiumCatalog: Record<BillingProductId, PremiumCatalogEntry> = {
 };
 
 export function isBillingProductId(value: unknown): value is BillingProductId {
-  return value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "elite.monthly";
+  return value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "theme.ember" || value === "elite.monthly";
 }
 
 export function normalizeBillingProductId(value: unknown): BillingProductId | null {

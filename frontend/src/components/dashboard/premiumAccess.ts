@@ -1,7 +1,7 @@
 export type AccountPlan = "normal" | "elite";
 export type AccountStatus = "normal" | "gold" | "elite";
 
-export const premiumProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura"] as const;
+export const premiumProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura", "theme.ember"] as const;
 export type PremiumProductId = (typeof premiumProductIds)[number];
 
 export type PremiumAccessState = {
@@ -36,6 +36,7 @@ export const isCelestialDevelopmentPreviewEnabled = import.meta.env.DEV && (
   || (celestialDevelopmentPreviewValue === undefined && import.meta.env.VITE_ENABLE_CELESTIA_THEME_PREVIEW === "true")
 );
 export const isSakuraDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_SAKURA_THEME_PREVIEW === "true";
+export const isEmberDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_EMBER_THEME_PREVIEW === "true";
 
 function normalizeLegacyPremiumProductId(value: unknown) {
   return value === "theme.celestia" ? "theme.celestial" : value;
@@ -48,7 +49,8 @@ export function isPremiumProductId(value: unknown): value is PremiumProductId {
 export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProductId) {
   if (productId === "theme.obsidian") return isObsidianDevelopmentPreviewEnabled;
   if (productId === "theme.celestial") return isCelestialDevelopmentPreviewEnabled;
-  return isSakuraDevelopmentPreviewEnabled;
+  if (productId === "theme.sakura") return isSakuraDevelopmentPreviewEnabled;
+  return isEmberDevelopmentPreviewEnabled;
 }
 
 function normalizeKnownProductIds(value: unknown) {

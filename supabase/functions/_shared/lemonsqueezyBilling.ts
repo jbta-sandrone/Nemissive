@@ -1,4 +1,4 @@
-export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "elite.monthly";
+export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "theme.ember" | "elite.monthly";
 
 export type BillingCatalogEntry = {
   productId: BillingProductId;
@@ -65,6 +65,11 @@ export function getBillingCatalogConfig(): BillingCatalogConfig {
       billingType: "one_time",
     },
     {
+      productId: "theme.ember",
+      variantId: positiveIntegerEnvironment("LEMONSQUEEZY_EMBER_VARIANT_ID"),
+      billingType: "one_time",
+    },
+    {
       productId: "elite.monthly",
       variantId: positiveIntegerEnvironment("LEMONSQUEEZY_ELITE_MONTHLY_VARIANT_ID"),
       billingType: "subscription",
@@ -105,7 +110,7 @@ export function getWebhookSecret() {
 
 export function resolveBillingProduct(value: unknown): BillingProductId | null {
   if (value === "theme.celestia") return "theme.celestial";
-  if (value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "elite.monthly") return value;
+  if (value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "theme.ember" || value === "elite.monthly") return value;
   return null;
 }
 
