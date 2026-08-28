@@ -55,6 +55,13 @@ export const premiumThemePurchaseCatalog: Record<PremiumProductId, PremiumThemeP
     currency: "PHP",
     checkoutProductId: "theme.glacier",
   },
+  "theme.verdant": {
+    id: "theme.verdant",
+    name: "Verdant",
+    amountMinor: 29900,
+    currency: "PHP",
+    checkoutProductId: null,
+  },
 };
 
 export const premiumCatalog: Record<BillingProductId, PremiumCatalogEntry> = {
