@@ -1,6 +1,6 @@
 import type { PremiumProductId } from "./premiumAccess";
 
-export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "theme.ember" | "theme.glacier" | "theme.verdant" | "elite.monthly";
+export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "theme.ember" | "theme.glacier" | "theme.verdant" | "theme.abyss" | "elite.monthly";
 
 export type PremiumCatalogEntry = {
   id: BillingProductId;
@@ -62,6 +62,13 @@ export const premiumThemePurchaseCatalog: Record<PremiumProductId, PremiumThemeP
     currency: "PHP",
     checkoutProductId: "theme.verdant",
   },
+  "theme.abyss": {
+    id: "theme.abyss",
+    name: "Abyss",
+    amountMinor: 29900,
+    currency: "PHP",
+    checkoutProductId: "theme.abyss",
+  },
 };
 
 export const premiumCatalog: Record<BillingProductId, PremiumCatalogEntry> = {
@@ -107,6 +114,13 @@ export const premiumCatalog: Record<BillingProductId, PremiumCatalogEntry> = {
     currency: "PHP",
     billingType: "one_time",
   },
+  "theme.abyss": {
+    id: "theme.abyss",
+    name: "Abyss",
+    amountMinor: 29900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
   "elite.monthly": {
     id: "elite.monthly",
     name: "Nemissive Elite",
@@ -118,7 +132,7 @@ export const premiumCatalog: Record<BillingProductId, PremiumCatalogEntry> = {
 };
 
 export function isBillingProductId(value: unknown): value is BillingProductId {
-  return value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "theme.ember" || value === "theme.glacier" || value === "theme.verdant" || value === "elite.monthly";
+  return value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "theme.ember" || value === "theme.glacier" || value === "theme.verdant" || value === "theme.abyss" || value === "elite.monthly";
 }
 
 export function normalizeBillingProductId(value: unknown): BillingProductId | null {

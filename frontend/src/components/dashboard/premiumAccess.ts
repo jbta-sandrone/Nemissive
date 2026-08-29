@@ -1,7 +1,7 @@
 export type AccountPlan = "normal" | "elite";
 export type AccountStatus = "normal" | "gold" | "elite";
 
-export const premiumProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura", "theme.ember", "theme.glacier", "theme.verdant"] as const;
+export const premiumProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura", "theme.ember", "theme.glacier", "theme.verdant", "theme.abyss"] as const;
 export type PremiumProductId = (typeof premiumProductIds)[number];
 
 export type PremiumAccessState = {
@@ -39,6 +39,7 @@ export const isSakuraDevelopmentPreviewEnabled = import.meta.env.DEV && import.m
 export const isEmberDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_EMBER_THEME_PREVIEW === "true";
 export const isGlacierDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_GLACIER_THEME_PREVIEW === "true";
 export const isVerdantDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_VERDANT_THEME_PREVIEW === "true";
+export const isAbyssDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ABYSS_THEME_PREVIEW === "true";
 
 function normalizeLegacyPremiumProductId(value: unknown) {
   return value === "theme.celestia" ? "theme.celestial" : value;
@@ -55,6 +56,7 @@ export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProd
   if (productId === "theme.ember") return isEmberDevelopmentPreviewEnabled;
   if (productId === "theme.glacier") return isGlacierDevelopmentPreviewEnabled;
   if (productId === "theme.verdant") return isVerdantDevelopmentPreviewEnabled;
+  if (productId === "theme.abyss") return isAbyssDevelopmentPreviewEnabled;
   return false;
 }
 
