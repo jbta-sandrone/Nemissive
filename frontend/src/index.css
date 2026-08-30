@@ -268,7 +268,8 @@ body {
 .chat-theme[data-chat-theme="glacier"] .chat-panel-root > .chat-theme-artwork,
 .chat-theme[data-chat-theme="verdant"] .chat-panel-root > .chat-theme-artwork,
 .chat-theme[data-chat-theme="abyss"] .chat-panel-root > .chat-theme-artwork,
-.chat-theme[data-chat-theme="eclipse"] .chat-panel-root > .chat-theme-artwork {
+.chat-theme[data-chat-theme="eclipse"] .chat-panel-root > .chat-theme-artwork,
+.chat-theme[data-chat-theme="dune"] .chat-panel-root > .chat-theme-artwork {
   display: block;
   z-index: 0;
   background-image: var(--chat-artwork-image);
@@ -674,6 +675,17 @@ body {
   background: var(--chat-media-bg);
 }
 
+.chat-theme[data-chat-theme="dune"] .chat-activity-row {
+  border: 1px solid var(--chat-header-border);
+  border-radius: 999px;
+  backdrop-filter: var(--chat-chrome-backdrop);
+}
+
+.chat-theme[data-chat-theme="dune"] .chat-message-incoming .chat-file-card,
+.chat-theme[data-chat-theme="dune"] .chat-message-incoming .chat-file-card .bg-background {
+  background: var(--chat-media-bg);
+}
+
 @media (min-width: 768px) and (max-width: 1279px) {
   .chat-theme[data-chat-theme="obsidian"] .chat-panel-root > .chat-theme-artwork,
   .chat-theme[data-chat-theme="celestial"] .chat-panel-root > .chat-theme-artwork,
@@ -682,7 +694,8 @@ body {
   .chat-theme[data-chat-theme="glacier"] .chat-panel-root > .chat-theme-artwork,
   .chat-theme[data-chat-theme="verdant"] .chat-panel-root > .chat-theme-artwork,
   .chat-theme[data-chat-theme="abyss"] .chat-panel-root > .chat-theme-artwork,
-  .chat-theme[data-chat-theme="eclipse"] .chat-panel-root > .chat-theme-artwork {
+  .chat-theme[data-chat-theme="eclipse"] .chat-panel-root > .chat-theme-artwork,
+  .chat-theme[data-chat-theme="dune"] .chat-panel-root > .chat-theme-artwork {
     background-position: var(--chat-artwork-tablet-position);
   }
 }
@@ -695,7 +708,8 @@ body {
   .chat-theme[data-chat-theme="glacier"] .chat-panel-root > .chat-theme-artwork,
   .chat-theme[data-chat-theme="verdant"] .chat-panel-root > .chat-theme-artwork,
   .chat-theme[data-chat-theme="abyss"] .chat-panel-root > .chat-theme-artwork,
-  .chat-theme[data-chat-theme="eclipse"] .chat-panel-root > .chat-theme-artwork {
+  .chat-theme[data-chat-theme="eclipse"] .chat-panel-root > .chat-theme-artwork,
+  .chat-theme[data-chat-theme="dune"] .chat-panel-root > .chat-theme-artwork {
     background-image: var(--chat-artwork-mobile-image);
     background-position: var(--chat-artwork-mobile-position);
   }

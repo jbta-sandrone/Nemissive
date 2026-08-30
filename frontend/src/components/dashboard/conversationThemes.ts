@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { canAccessPremiumProduct, type PremiumAccessState, type PremiumProductId } from "./premiumAccess";
 
-export const conversationThemeIds = ["default", "midnight", "ocean", "lavender", "emerald", "rose", "sunset", "obsidian", "celestial", "sakura", "ember", "glacier", "verdant", "abyss", "eclipse"] as const;
+export const conversationThemeIds = ["default", "midnight", "ocean", "lavender", "emerald", "rose", "sunset", "obsidian", "celestial", "sakura", "ember", "glacier", "verdant", "abyss", "eclipse", "dune"] as const;
 
 export type ConversationThemeId = (typeof conversationThemeIds)[number];
 export type ConversationThemeAccess = "free" | "premium";
@@ -712,6 +712,102 @@ const eclipseDarkTokens = withPresentationTokens({
   artworkFilter: "saturate(0.98) contrast(1.03)",
 });
 
+const duneLightTokens = withPresentationTokens({
+  canvas: "radial-gradient(ellipse 62% 76% at 42% 42%, oklch(0.985 0.022 82 / 0.34) 0%, oklch(0.94 0.045 78 / 0.17) 58%, oklch(0.86 0.055 70 / 0.06) 100%)",
+  canvasSecondary: "oklch(0.94 0.033 79)",
+  header: "oklch(0.985 0.021 84 / 0.88)",
+  headerBorder: "oklch(0.67 0.07 72 / 0.54)",
+  surface: "oklch(0.975 0.026 83 / 0.92)",
+  surfaceElevated: "oklch(0.994 0.012 86 / 0.96)",
+  surfaceMuted: "oklch(0.88 0.055 76 / 0.84)",
+  outgoingBg: "linear-gradient(145deg, oklch(0.73 0.085 78) 0%, oklch(0.63 0.08 68) 56%, oklch(0.53 0.065 58) 100%)",
+  outgoingText: "oklch(0.2 0.03 54)",
+  incomingBg: "linear-gradient(145deg, oklch(0.995 0.012 88 / 0.97) 0%, oklch(0.93 0.038 82 / 0.95) 100%)",
+  incomingText: "oklch(0.22 0.03 52)",
+  composerBg: "oklch(0.985 0.022 84 / 0.9)",
+  composerBorder: "oklch(0.63 0.08 69 / 0.58)",
+  accent: "oklch(0.48 0.09 68)",
+  accentHover: "oklch(0.4 0.08 60)",
+  accentSoft: "oklch(0.72 0.085 76 / 0.21)",
+  heading: "oklch(0.18 0.025 50)",
+  body: "oklch(0.3 0.03 52)",
+  muted: "oklch(0.48 0.035 58)",
+  boundary: "oklch(0.67 0.06 70 / 0.55)",
+  scrollbar: "oklch(0.52 0.075 65 / 0.7)",
+  scrollbarTrack: "oklch(0.83 0.045 76 / 0.22)",
+}, {
+  replyBg: "oklch(0.87 0.052 78 / 0.81)",
+  reactionBg: "oklch(0.985 0.022 85 / 0.95)",
+  activityBg: "oklch(0.985 0.02 85 / 0.76)",
+  mediaBg: "oklch(0.87 0.05 75 / 0.88)",
+  controlBg: "oklch(0.98 0.024 83 / 0.93)",
+  controlHover: "oklch(0.81 0.07 73 / 0.82)",
+  focus: "oklch(0.49 0.1 68 / 0.44)",
+  outgoingBorder: "oklch(0.6 0.09 64 / 0.66)",
+  incomingBorder: "oklch(0.71 0.065 78 / 0.7)",
+  outgoingShadow: "inset 0 1px 0 oklch(0.93 0.065 88 / 0.3), 0 12px 28px oklch(0.28 0.05 54 / 0.22)",
+  incomingShadow: "inset 0 1px 0 oklch(1 0 0 / 0.86), 0 10px 24px oklch(0.34 0.045 60 / 0.17)",
+  composerShadow: "inset 0 1px 0 oklch(1 0 0 / 0.84), 0 14px 34px oklch(0.29 0.05 56 / 0.21)",
+  chromeBackdrop: "blur(16px) saturate(1.06)",
+  artworkImage: "url('/themes/dune_elite_theme_light.png')",
+  artworkMobileImage: "url('/themes/dune_elite_theme_light.png')",
+  previewArtworkImage: "url('/themes/dune_elite_theme_light.png')",
+  artworkOpacity: "0.99",
+  artworkPosition: "42% bottom",
+  artworkTabletPosition: "34% bottom",
+  artworkMobilePosition: "24% bottom",
+  artworkSize: "cover",
+  artworkFilter: "saturate(0.95) contrast(1.02)",
+});
+
+const duneDarkTokens = withPresentationTokens({
+  canvas: "radial-gradient(ellipse 62% 76% at 42% 42%, oklch(0.07 0.022 55 / 0.43) 0%, oklch(0.04 0.017 48 / 0.29) 58%, oklch(0.018 0.012 40 / 0.13) 100%)",
+  canvasSecondary: "oklch(0.034 0.012 48)",
+  header: "oklch(0.08 0.022 48 / 0.82)",
+  headerBorder: "oklch(0.45 0.075 66 / 0.62)",
+  surface: "oklch(0.13 0.028 48 / 0.9)",
+  surfaceElevated: "oklch(0.165 0.032 50 / 0.94)",
+  surfaceMuted: "oklch(0.22 0.04 55 / 0.84)",
+  outgoingBg: "linear-gradient(145deg, oklch(0.5 0.09 72) 0%, oklch(0.4 0.075 60) 56%, oklch(0.3 0.055 50) 100%)",
+  outgoingText: "oklch(0.98 0.018 86)",
+  incomingBg: "linear-gradient(145deg, oklch(0.22 0.038 50 / 0.97) 0%, oklch(0.15 0.027 44 / 0.97) 100%)",
+  incomingText: "oklch(0.955 0.022 86)",
+  composerBg: "oklch(0.068 0.019 45 / 0.83)",
+  composerBorder: "oklch(0.44 0.085 66 / 0.66)",
+  accent: "oklch(0.75 0.095 78)",
+  accentHover: "oklch(0.82 0.075 84)",
+  accentSoft: "oklch(0.6 0.095 70 / 0.21)",
+  heading: "oklch(0.975 0.018 88)",
+  body: "oklch(0.88 0.026 84)",
+  muted: "oklch(0.72 0.04 76)",
+  boundary: "oklch(0.37 0.06 58 / 0.72)",
+  scrollbar: "oklch(0.57 0.085 70 / 0.78)",
+  scrollbarTrack: "oklch(0.048 0.014 44 / 0.34)",
+}, {
+  replyBg: "oklch(0.19 0.04 54 / 0.84)",
+  reactionBg: "oklch(0.135 0.03 49 / 0.95)",
+  activityBg: "oklch(0.08 0.022 46 / 0.72)",
+  mediaBg: "oklch(0.11 0.025 46 / 0.93)",
+  controlBg: "oklch(0.135 0.032 50 / 0.92)",
+  controlHover: "oklch(0.23 0.055 60 / 0.87)",
+  focus: "oklch(0.75 0.095 78 / 0.5)",
+  outgoingBorder: "oklch(0.64 0.105 76 / 0.7)",
+  incomingBorder: "oklch(0.48 0.075 66 / 0.7)",
+  outgoingShadow: "inset 0 1px 0 oklch(0.88 0.075 88 / 0.22), 0 14px 30px oklch(0.006 0.01 40 / 0.6)",
+  incomingShadow: "inset 0 1px 0 oklch(0.82 0.055 82 / 0.16), 0 12px 26px oklch(0.006 0.009 38 / 0.5)",
+  composerShadow: "inset 0 1px 0 oklch(0.84 0.06 82 / 0.15), 0 16px 38px oklch(0.005 0.009 36 / 0.62)",
+  chromeBackdrop: "blur(14px) saturate(1.08)",
+  artworkImage: "url('/themes/dune_elite_theme_dark.png')",
+  artworkMobileImage: "url('/themes/dune_elite_theme_dark.png')",
+  previewArtworkImage: "url('/themes/dune_elite_theme_dark.png')",
+  artworkOpacity: "0.99",
+  artworkPosition: "42% bottom",
+  artworkTabletPosition: "34% bottom",
+  artworkMobilePosition: "24% bottom",
+  artworkSize: "cover",
+  artworkFilter: "saturate(0.96) contrast(1.04)",
+});
+
 export const conversationThemes: readonly ConversationThemeDefinition[] = [
   { id: "default", name: "Default", description: "Standard Nemissive appearance", access: "free", light: withPresentationTokens(defaultBaseTokens), dark: withPresentationTokens(defaultBaseTokens) },
   { id: "midnight", name: "Midnight", description: "A calm late-night palette", access: "free", light: withPresentationTokens({ canvas: "linear-gradient(145deg, #101420 0%, #15192a 58%, #191c30 100%)", canvasSecondary: "#141827", header: "#252535", headerBorder: "#3d3d50", surface: "#24293b", surfaceElevated: "#292e42", surfaceMuted: "#30364d", outgoingBg: "#5d68cf", outgoingText: "#ffffff", incomingBg: "#252a3c", incomingText: "#eef0f8", composerBg: "#222332", composerBorder: "#424356", accent: "#a5adff", accentHover: "#bcc2ff", accentSoft: "rgb(165 173 255 / 0.16)", heading: "#f7f7fb", body: "#d6d9e7", muted: "#aeb4c8", boundary: "#625d5a", scrollbar: "#69718e", scrollbarTrack: "rgb(255 255 255 / 0.035)" }), dark: withPresentationTokens({ canvas: "linear-gradient(145deg, #0f121c 0%, #131727 58%, #171a2b 100%)", canvasSecondary: "#121624", header: "#1c1e2a", headerBorder: "#343747", surface: "#212638", surfaceElevated: "#272c40", surfaceMuted: "#2d3349", outgoingBg: "#5d68cf", outgoingText: "#ffffff", incomingBg: "#23283a", incomingText: "#eef0f8", composerBg: "#1d202d", composerBorder: "#383b4d", accent: "#a5adff", accentHover: "#bec4ff", accentSoft: "rgb(165 173 255 / 0.16)", heading: "#f7f7fb", body: "#d6d9e7", muted: "#aeb4c8", boundary: "#423e3b", scrollbar: "#68718e", scrollbarTrack: "rgb(255 255 255 / 0.03)" }) },
@@ -728,6 +824,7 @@ export const conversationThemes: readonly ConversationThemeDefinition[] = [
   { id: "verdant", name: "Verdant", description: "An ancient living-sanctuary conversation environment", access: "premium", premiumProductId: "theme.verdant", light: verdantLightTokens, dark: verdantDarkTokens },
   { id: "abyss", name: "Abyss", description: "An ancient submerged-civilization conversation environment", access: "premium", premiumProductId: "theme.abyss", light: abyssLightTokens, dark: abyssDarkTokens },
   { id: "eclipse", name: "Eclipse", description: "A cinematic totality conversation environment", access: "premium", premiumProductId: "theme.eclipse", light: eclipseLightTokens, dark: eclipseDarkTokens },
+  { id: "dune", name: "Dune", description: "A vast wind-sculpted desert conversation environment", access: "premium", premiumProductId: "theme.dune", light: duneLightTokens, dark: duneDarkTokens },
 ] as const;
 
 const conversationThemeById = new Map(conversationThemes.map((theme) => [theme.id, theme]));
