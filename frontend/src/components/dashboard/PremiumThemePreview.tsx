@@ -150,7 +150,7 @@ function PremiumThemePreview({ theme, accessSource, current, error, isSaving, he
                   <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-primary">Nemissive Elite</p>
                   <h4 id={`${theme.id}-elite-title`} className="mt-1 text-sm font-bold text-heading">Premium access while subscribed</h4>
                   <p className="mt-3 text-3xl font-black tracking-tight text-heading">{formatPremiumPrice(eliteMonthlyProductId)} <span className="text-sm font-bold text-body">/ month</span></p>
-                  <p className="mt-1 text-xs leading-5 text-body">Access Obsidian, Celestial, Sakura, Ember, Glacier, Verdant, Abyss, Eclipse, Dune, and other included Elite benefits while your plan is active.</p>
+                  <p className="mt-1 text-xs leading-5 text-body">Access Obsidian, Celestial, Sakura, Ember, Glacier, Verdant, Abyss, Eclipse, Dune, Void, and other included Elite benefits while your plan is active.</p>
                   <button type="button" onClick={() => void startCheckout(eliteMonthlyProductId)} disabled={Boolean(checkoutProductId)} aria-label={`Get Nemissive Elite for ${formatPremiumPrice(eliteMonthlyProductId)} per month`} className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-primary/30 bg-surface px-4 py-2.5 text-sm font-bold text-heading transition hover:bg-background focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60">
                     {checkoutProductId === eliteMonthlyProductId ? "Preparing secure checkout…" : "Get Nemissive Elite"}
                   </button>
