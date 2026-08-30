@@ -1,8 +1,12 @@
+import type { AccountStatus } from "./account";
+import type { AvatarBorderKey } from "./avatarBorders";
+
 export type ProfileSearchResult = {
   id: string;
   username: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  avatar_border?: AvatarBorderKey | null;
   last_seen_at?: string | null;
   active_status_visible?: boolean;
   quick_reactions?: string[] | null;
@@ -39,7 +43,7 @@ export type RealtimeNotificationPreferencesEvent = {
   notificationSoundEnabled: boolean;
 };
 
-export type RealtimeProfileIdentityEvent = Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "account_status" | "deleted_at">;
+export type RealtimeProfileIdentityEvent = Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "avatar_border" | "account_status" | "deleted_at">;
 
 export type ConversationRequestRealtimeChange = {
   action: "insert" | "update";
@@ -83,6 +87,7 @@ export type ConversationConnectionStatus = "accepted" | "disconnected" | "delete
 export type SelectedConversation = {
   id: string;
   otherProfile: ProfileSearchResult;
+  otherAccountStatus?: AccountStatus | null;
   introductoryMessage?: string;
   introductoryMessageCreatedAt?: string;
   historyClearedAt?: string | null;
@@ -110,6 +115,7 @@ export type MessageSidebarItem =
       kind: "conversation";
       conversationId: string;
       otherProfile: ProfileSearchResult;
+      otherAccountStatus: AccountStatus | null;
       latestMessageId: string | null;
       latestMessage: string | null;
       latestMessageAt: string | null;

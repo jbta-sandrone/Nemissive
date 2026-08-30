@@ -1,5 +1,6 @@
-export type AccountPlan = "normal" | "elite";
-export type AccountStatus = "normal" | "gold" | "elite";
+import type { AccountPlan, AccountStatus } from "../../types/account";
+
+export type { AccountPlan, AccountStatus } from "../../types/account";
 
 export const premiumProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura", "theme.ember", "theme.glacier", "theme.verdant", "theme.abyss", "theme.eclipse", "theme.dune", "theme.void", "theme.shinkai"] as const;
 export type PremiumProductId = (typeof premiumProductIds)[number];

@@ -22,6 +22,7 @@ import MessageText from "./MessageText";
 import PinnedMessagesMenu from "./PinnedMessagesMenu";
 import PresenceAvatar from "./PresenceAvatar";
 import ProfileAvatar from "./ProfileAvatar";
+import UserIdentityAvatar from "./UserIdentityAvatar";
 import ReactionDetails from "./ReactionDetails";
 import { getEmojiLabel } from "./emojiData";
 import { formatLastSeen } from "./presenceUtils";
@@ -34,7 +35,7 @@ import VoiceRecordingComposer from "./VoiceRecordingComposer";
 import UserBlockDialog from "./UserBlockDialog";
 import { formatVoiceDuration } from "./voiceUtils";
 import { canUseConversationTheme, getConversationTheme, getConversationThemeStyle, resolveConversationTheme, type ConversationThemeId } from "./conversationThemes";
-import type { PremiumAccessState } from "./premiumAccess";
+import { resolveAccountStatus, type PremiumAccessState } from "./premiumAccess";
 import { acceptedFileInputTypes, fileAttachmentMaxCount, fileAttachmentMaxSize, normalizeAllowedFile, sanitizeAttachmentFilename } from "./fileAttachments";
 import type { WorkspaceLayoutMode } from "../../types/dashboard";
 import { ConversationReminderStatus } from "./ReminderAwareness";
@@ -123,6 +124,10 @@ type ConversationEventRow = {
 type ConversationTimelineItem =
   | { kind: "message"; id: string; createdAt: string; message: DisplayChatMessage }
   | { kind: "event"; id: string; createdAt: string; event: ConversationActivityEvent };
+
+type ConversationTimelineGroup =
+  | { kind: "message-group"; id: string; senderId: string; items: Array<Extract<ConversationTimelineItem, { kind: "message" }>> }
+  | Extract<ConversationTimelineItem, { kind: "event" }>;
 
 type MessageEditState = {
   messageId: string;
@@ -216,6 +221,7 @@ const conversationEventLimit = 50;
 const conversationEventDedupeLimit = 250;
 const mobileLongPressDurationMs = 450;
 const mobileLongPressMovementThreshold = 12;
+const consecutiveMessageGroupWindowMs = 5 * 60 * 1000;
 const imageMaxFileSize = 10 * 1024 * 1024;
 const imageMaxCount = 10;
 const messageMediaBucket = "message-media";
@@ -424,6 +430,37 @@ function sortMessages(messages: DisplayChatMessage[]) {
     if (timestampDifference !== 0) return timestampDifference;
     return getMessageKey(first).localeCompare(getMessageKey(second));
   });
+}
+
+function groupConversationTimeline(items: ConversationTimelineItem[]): ConversationTimelineGroup[] {
+  const groups: ConversationTimelineGroup[] = [];
+
+  items.forEach((item) => {
+    if (item.kind === "event") {
+      groups.push(item);
+      return;
+    }
+
+    const previousGroup = groups.at(-1);
+    const previousItem = previousGroup?.kind === "message-group" ? previousGroup.items.at(-1) : undefined;
+    const previousTime = previousItem ? Date.parse(previousItem.createdAt) : Number.NaN;
+    const currentTime = Date.parse(item.createdAt);
+    const isConsecutive = previousGroup?.kind === "message-group"
+      && previousGroup.senderId === item.message.senderId
+      && !Number.isNaN(previousTime)
+      && !Number.isNaN(currentTime)
+      && currentTime - previousTime >= 0
+      && currentTime - previousTime <= consecutiveMessageGroupWindowMs;
+
+    if (isConsecutive) {
+      previousGroup.items.push(item);
+      return;
+    }
+
+    groups.push({ kind: "message-group", id: `group:${item.id}`, senderId: item.message.senderId, items: [item] });
+  });
+
+  return groups;
 }
 
 function mapReactionRow(row: ReactionRow): MessageReaction {
@@ -2725,6 +2762,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     if (first.kind !== second.kind) return first.kind === "message" ? -1 : 1;
     return first.id.localeCompare(second.id);
   });
+  const timelineGroups = groupConversationTimeline(timelineItems);
+  const selfAccountStatus = resolveAccountStatus(premiumAccess);
   const currentTheme = activeTheme;
 
   return (
@@ -2760,10 +2799,19 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
               {isViewingSearchContext && <div role="status" className="rounded-2xl border border-border bg-surface px-4 py-3 text-center text-xs font-semibold uppercase tracking-[0.14em] text-muted shadow-soft">Viewing search context</div>}
               {shouldShowIntroductoryFallback && <article className="flex justify-start"><div className="max-w-[85%] rounded-3xl rounded-bl-md border border-border bg-surface px-4 py-3 text-body shadow-soft sm:max-w-[75%]"><p className="whitespace-pre-wrap break-words text-sm leading-6">{conversation.introductoryMessage}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">{conversation.introductoryMessageCreatedAt && <time dateTime={conversation.introductoryMessageCreatedAt}>{formatMessageTimestamp(conversation.introductoryMessageCreatedAt)}</time>}<span>Introduction</span></div></div></article>}
               {conversationEventsError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>{conversationEventsError}</p><button type="button" onClick={() => void loadConversationEvents()} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry activity</button></div>}
-              {timelineItems.map((item) => {
-                if (item.kind === "event") return <ConversationActivityRow key={item.id} event={item.event} currentUserId={currentUserId} onActivate={(event, trigger) => { if (event.targetMessageId) openMessageTarget(event.targetMessageId, "event"); else if (event.targetReminderId) onReminderEventOpen(event.targetReminderId, trigger); }} />;
+              {timelineGroups.map((group) => {
+                if (group.kind === "event") return <ConversationActivityRow key={group.id} event={group.event} currentUserId={currentUserId} onActivate={(event, trigger) => { if (event.targetMessageId) openMessageTarget(event.targetMessageId, "event"); else if (event.targetReminderId) onReminderEventOpen(event.targetReminderId, trigger); }} />;
+                const isCurrentUserGroup = group.senderId === currentUserId;
+                const identityProfile = isCurrentUserGroup ? currentProfile : conversation.otherProfile;
+                const identityStatus = isCurrentUserGroup ? selfAccountStatus : conversation.otherAccountStatus ?? null;
+
+                return (
+                  <section key={group.id} aria-label={`${isCurrentUserGroup ? "Your" : `${otherName}'s`} message group`} className={`flex min-w-0 items-start gap-2 sm:gap-2.5 ${isCurrentUserGroup ? "justify-end" : "justify-start"}`}>
+                    {!isCurrentUserGroup && identityProfile && <UserIdentityAvatar profile={identityProfile} accountStatus={identityStatus} size="xs" className="mt-1" />}
+                    <div className={`flex min-w-0 max-w-[calc(100%_-_2.5rem)] flex-col gap-1.5 sm:max-w-[80%] md:max-w-[75%] ${isCurrentUserGroup ? "items-end" : "items-start"}`}>
+                      {group.items.map((item) => {
                 const message = item.message;
-                const isCurrentUser = message.senderId === currentUserId;
+                const isCurrentUser = isCurrentUserGroup;
                 const isFailed = message.kind === "optimistic" && message.deliveryState === "failed";
                 const isSending = message.kind === "optimistic" && message.deliveryState === "sending";
                 const shouldShowStatus = isCurrentUser && statusMessageKey === getMessageKey(message);
@@ -2785,8 +2833,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                 const voiceSource = message.kind === "optimistic" ? message.attachments.find((attachment) => attachment.attachmentKind === "voice")?.previewUrl ?? null : voiceAttachment ? signedMedia.urls.get(voiceAttachment.storagePath) ?? null : null;
 
                 return (
-                  <article ref={(element) => { if (message.kind !== "confirmed") return; if (element) messageElementsRef.current.set(message.id, element); else messageElementsRef.current.delete(message.id); }} key={getMessageKey(message)} tabIndex={message.kind === "confirmed" ? -1 : undefined} onPointerDown={message.kind === "confirmed" && !message.isDeleted ? (event) => handleMessagePointerDown(message, event) : undefined} onPointerMove={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerMove : undefined} onPointerUp={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerCancel={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerLeave={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} className={`group/message relative flex min-w-0 ${isCurrentUser ? "justify-end" : "justify-start"}`}>
-                    <div className={`flex min-w-0 max-w-[92%] flex-col sm:max-w-[80%] md:max-w-[75%] ${isCurrentUser ? "items-end" : "items-start"}`}>
+                  <article ref={(element) => { if (message.kind !== "confirmed") return; if (element) messageElementsRef.current.set(message.id, element); else messageElementsRef.current.delete(message.id); }} key={getMessageKey(message)} tabIndex={message.kind === "confirmed" ? -1 : undefined} onPointerDown={message.kind === "confirmed" && !message.isDeleted ? (event) => handleMessagePointerDown(message, event) : undefined} onPointerMove={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerMove : undefined} onPointerUp={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerCancel={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} onPointerLeave={message.kind === "confirmed" && !message.isDeleted ? handleMessagePointerEnd : undefined} className={`group/message relative flex min-w-0 max-w-full ${isCurrentUser ? "justify-end" : "justify-start"}`}>
+                    <div className={`flex min-w-0 max-w-full flex-col ${isCurrentUser ? "items-end" : "items-start"}`}>
                       <div className="relative max-w-full">
                         <motion.div animate={{ scale: message.kind === "confirmed" && mobileEmphasizedMessageId === message.id && !shouldReduceMotion ? 0.985 : 1 }} transition={{ duration: shouldReduceMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }} className={`max-w-full min-w-0 rounded-3xl px-4 py-3 shadow-soft transition-shadow ${message.kind === "confirmed" && message.isDeleted ? `${isCurrentUser ? "rounded-br-md" : "rounded-bl-md"} border border-border bg-card text-muted` : isCurrentUser ? isFailed ? "rounded-br-md border border-primary/25 bg-accent text-heading" : "chat-message-outgoing rounded-br-md bg-primary text-white" : "chat-message-incoming rounded-bl-md border border-border bg-surface text-body"} ${message.kind === "confirmed" && (highlightedMessageId === message.id || mobileEmphasizedMessageId === message.id) ? "chat-message-highlight ring-2 ring-primary/30 ring-offset-4 ring-offset-background" : ""}`}>
                           {replyPreview && <ReplyQuote preview={replyPreview} isStrongOutgoing={isCurrentUser && !isFailed} canJump={canJumpToReplyTarget} onJump={() => message.replyToMessageId && jumpToOriginalMessage(message.replyToMessageId)} />}
@@ -2804,6 +2852,11 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
                     </div>
                     {message.kind === "confirmed" && !message.isDeleted && <button type="button" onClick={(event) => openMobileActionSheet(message.id, event.currentTarget)} aria-label={`Open actions for message from ${replyActionSenderName}`} aria-haspopup="dialog" aria-expanded={mobileActionMessageId === message.id} className="pointer-events-none absolute right-0 top-0 z-10 flex h-9 w-9 items-center justify-center rounded-xl bg-surface text-muted opacity-0 shadow-soft transition focus:pointer-events-auto focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 md:hidden"><svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg></button>}
                   </article>
+                        );
+                      })}
+                    </div>
+                    {isCurrentUserGroup && identityProfile && <UserIdentityAvatar profile={identityProfile} accountStatus={identityStatus} size="xs" className="mt-1" />}
+                  </section>
                 );
               })}
             </div>

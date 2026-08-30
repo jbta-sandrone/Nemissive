@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "motion/react";
+import type { AccountStatus } from "../../types/account";
 import type { ProfileSearchResult } from "../../types/conversations";
 import type { PersonalSurface } from "./AccountMenuPopover";
 import NotificationSettings from "./NotificationSettings";
@@ -11,6 +12,7 @@ import SettingsSidebarContent from "./SettingsSidebarContent";
 type PersonalSettingsDialogProps = {
   surface: PersonalSurface;
   profile: ProfileSearchResult;
+  accountStatus: AccountStatus;
   quickReactions: string[];
   notificationPermission: NotificationPermission | "unsupported";
   isNotificationSupported: boolean;
@@ -33,7 +35,7 @@ function CloseIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg>;
 }
 
-function PersonalSettingsDialog({ surface, profile, quickReactions, notificationPermission, isNotificationSupported, returnFocusRef, onClose, onSaveQuickReactions, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onAccountDeleted }: PersonalSettingsDialogProps) {
+function PersonalSettingsDialog({ surface, profile, accountStatus, quickReactions, notificationPermission, isNotificationSupported, returnFocusRef, onClose, onSaveQuickReactions, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onAccountDeleted }: PersonalSettingsDialogProps) {
   const shouldReduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -89,7 +91,7 @@ function PersonalSettingsDialog({ surface, profile, quickReactions, notification
           <SettingsSidebarContent profile={profile} rootBackLabel="Workspace" onBackToMenu={onClose} onAccountDeleted={onAccountDeleted} />
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 sm:px-6">
-            {surface === "profile" && <ProfileDetailsSettings profile={profile} onIdentityUpdated={onProfileIdentityUpdated} />}
+            {surface === "profile" && <ProfileDetailsSettings profile={profile} accountStatus={accountStatus} onIdentityUpdated={onProfileIdentityUpdated} />}
             {surface === "notifications" && <NotificationSettings isSupported={isNotificationSupported} permission={notificationPermission} notificationsEnabled={profile.browser_notifications_enabled ?? false} soundEnabled={profile.notification_sound_enabled ?? true} onEnable={onEnableNotifications} onSave={onSaveNotificationPreferences} />}
             {surface === "quick-reactions" && <QuickReactionSettings quickReactions={quickReactions} onSave={onSaveQuickReactions} />}
           </div>

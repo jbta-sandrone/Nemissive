@@ -2,10 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { createPortal } from "react-dom";
 import type { ProfileSearchResult } from "../../types/conversations";
 import AccountStatusBadge from "./AccountStatusBadge";
-import AccountStatusEmblem from "./AccountStatusEmblem";
 import type { AccountStatus } from "./premiumAccess";
 import ProfileAvatar from "./ProfileAvatar";
 import { getProfileDisplayName } from "./profileUtils";
+import UserIdentityAvatar from "./UserIdentityAvatar";
 
 export type PersonalSurface = "profile" | "notifications" | "quick-reactions" | "settings";
 
@@ -134,7 +134,7 @@ function AccountMenuPopover({ profile, accountStatus, variant, isAvailable, isSi
   return (
     <>
       <button ref={triggerRef} type="button" disabled={!profile} aria-label={`Open account menu, Nemissive ${accountStatus} account`} aria-haspopup="menu" aria-expanded={isOpen} onClick={() => setIsOpen((open) => { const next = !open; onOpenChange?.(next); return next; })} className={`${variant === "rail" ? "h-12 w-12" : "h-11 w-11"} flex items-center justify-center rounded-2xl border border-transparent transition hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60`}>
-        {profile ? <span className="relative inline-flex"><ProfileAvatar profile={profile} size="sm" accessibleLabel="Your profile photo" /><AccountStatusEmblem status={accountStatus} className="pointer-events-none absolute -bottom-0.5 -right-0.5 z-10" /></span> : <span className="h-10 w-10 animate-pulse rounded-full bg-accent" aria-hidden="true" />}
+        {profile ? <UserIdentityAvatar profile={profile} accountStatus={accountStatus} size="sm" /> : <span className="h-10 w-10 animate-pulse rounded-full bg-accent" aria-hidden="true" />}
       </button>
       {isAvailable && isOpen && profile && createPortal(
         <div ref={menuRef} role="menu" aria-label="Account menu" onKeyDown={handleMenuKeyDown} style={position ?? { left: 0, top: 0, visibility: "hidden" }} className="fixed z-[90] w-[min(18rem,calc(100vw-1.5rem))] rounded-3xl border border-border bg-surface p-2 shadow-soft">

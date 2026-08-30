@@ -194,7 +194,7 @@ function DashboardPage() {
 
       setCurrentUserId(userData.user.id);
 
-      const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, quick_reactions, browser_notifications_enabled, notification_sound_enabled, account_status, deleted_at").eq("id", userData.user.id).abortSignal(abortController.signal).maybeSingle();
+      const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, avatar_border, quick_reactions, browser_notifications_enabled, notification_sound_enabled, account_status, deleted_at").eq("id", userData.user.id).abortSignal(abortController.signal).maybeSingle();
 
       if (isCancelled) return;
       if (profileError || !profileData) {
@@ -714,7 +714,7 @@ function DashboardPage() {
     const relationships = new Map<string, ProfileRelationship>();
 
     messagesController.relationshipConversations.forEach((conversation) => {
-      const selectedConversation = { id: conversation.conversationId, otherProfile: conversation.otherProfile, otherNickname: conversation.otherNickname, themeKey: conversation.themeKey, historyClearedAt: conversation.historyClearedAt, conversationDeletedAt: conversation.conversationDeletedAt, connectionStatus: conversation.connectionStatus, iBlocked: conversation.iBlocked, interactionAllowed: conversation.interactionAllowed, messagingAvailable: conversation.messagingAvailable, requestAvailable: conversation.requestAvailable };
+      const selectedConversation = { id: conversation.conversationId, otherProfile: conversation.otherProfile, otherAccountStatus: conversation.otherAccountStatus, otherNickname: conversation.otherNickname, themeKey: conversation.themeKey, historyClearedAt: conversation.historyClearedAt, conversationDeletedAt: conversation.conversationDeletedAt, connectionStatus: conversation.connectionStatus, iBlocked: conversation.iBlocked, interactionAllowed: conversation.interactionAllowed, messagingAvailable: conversation.messagingAvailable, requestAvailable: conversation.requestAvailable };
       relationships.set(conversation.otherProfile.id, conversation.connectionStatus === "accepted" ? { state: "accepted", conversation: selectedConversation } : { state: "disconnected", conversation: selectedConversation });
     });
 
@@ -733,7 +733,7 @@ function DashboardPage() {
     if (chatState?.kind === "accepted") {
       const acceptedConversation = messagesController.relationshipConversations.find((conversation) => conversation.conversationId === chatState.conversation.id);
       if (!acceptedConversation) return !messagesController.hasLoaded || messagesController.isLoading || Boolean(messagesController.loadError) ? chatState : null;
-      return { kind: "accepted", conversation: { ...chatState.conversation, otherProfile: acceptedConversation.otherProfile, otherNickname: acceptedConversation.otherNickname, themeKey: acceptedConversation.themeKey, historyClearedAt: acceptedConversation.historyClearedAt, conversationDeletedAt: acceptedConversation.conversationDeletedAt, connectionStatus: acceptedConversation.connectionStatus, iBlocked: acceptedConversation.iBlocked, interactionAllowed: acceptedConversation.interactionAllowed, messagingAvailable: acceptedConversation.messagingAvailable, requestAvailable: acceptedConversation.requestAvailable } };
+      return { kind: "accepted", conversation: { ...chatState.conversation, otherProfile: acceptedConversation.otherProfile, otherAccountStatus: acceptedConversation.otherAccountStatus, otherNickname: acceptedConversation.otherNickname, themeKey: acceptedConversation.themeKey, historyClearedAt: acceptedConversation.historyClearedAt, conversationDeletedAt: acceptedConversation.conversationDeletedAt, connectionStatus: acceptedConversation.connectionStatus, iBlocked: acceptedConversation.iBlocked, interactionAllowed: acceptedConversation.interactionAllowed, messagingAvailable: acceptedConversation.messagingAvailable, requestAvailable: acceptedConversation.requestAvailable } };
     }
 
     if (chatState?.kind !== "pending" || !messagesController.hasLoaded || messagesController.isLoading || messagesController.loadError) return chatState;
@@ -741,7 +741,7 @@ function DashboardPage() {
 
     const acceptedConversation = messagesController.connectedConversations.find((conversation) => conversation.otherProfile.id === chatState.request.otherProfile.id);
     if (!acceptedConversation) return null;
-    return { kind: "accepted", conversation: { id: acceptedConversation.conversationId, otherProfile: acceptedConversation.otherProfile, otherNickname: acceptedConversation.otherNickname, themeKey: acceptedConversation.themeKey, historyClearedAt: acceptedConversation.historyClearedAt, conversationDeletedAt: acceptedConversation.conversationDeletedAt, connectionStatus: acceptedConversation.connectionStatus, iBlocked: acceptedConversation.iBlocked, interactionAllowed: acceptedConversation.interactionAllowed, messagingAvailable: acceptedConversation.messagingAvailable, requestAvailable: acceptedConversation.requestAvailable } };
+    return { kind: "accepted", conversation: { id: acceptedConversation.conversationId, otherProfile: acceptedConversation.otherProfile, otherAccountStatus: acceptedConversation.otherAccountStatus, otherNickname: acceptedConversation.otherNickname, themeKey: acceptedConversation.themeKey, historyClearedAt: acceptedConversation.historyClearedAt, conversationDeletedAt: acceptedConversation.conversationDeletedAt, connectionStatus: acceptedConversation.connectionStatus, iBlocked: acceptedConversation.iBlocked, interactionAllowed: acceptedConversation.interactionAllowed, messagingAvailable: acceptedConversation.messagingAvailable, requestAvailable: acceptedConversation.requestAvailable } };
   }, [chatState, messagesController.connectedConversations, messagesController.hasLoaded, messagesController.isLoading, messagesController.loadError, messagesController.pendingRequests, messagesController.relationshipConversations]);
   const effectiveCompactChatVisible = isCompactChatVisible && Boolean(resolvedChatState);
   const hasFocusEligibleConversation = resolvedChatState?.kind === "accepted";
@@ -945,14 +945,14 @@ function DashboardPage() {
   }, [messagesController.connectedConversations, visibleOnlineUserIds]);
 
   function openPulseConversation(conversation: AcceptedConversationItem) {
-    handleConversationReady({ id: conversation.conversationId, otherProfile: conversation.otherProfile, otherNickname: conversation.otherNickname, themeKey: conversation.themeKey, historyClearedAt: conversation.historyClearedAt, conversationDeletedAt: conversation.conversationDeletedAt, connectionStatus: conversation.connectionStatus, iBlocked: conversation.iBlocked, interactionAllowed: conversation.interactionAllowed, messagingAvailable: conversation.messagingAvailable, requestAvailable: conversation.requestAvailable });
+    handleConversationReady({ id: conversation.conversationId, otherProfile: conversation.otherProfile, otherAccountStatus: conversation.otherAccountStatus, otherNickname: conversation.otherNickname, themeKey: conversation.themeKey, historyClearedAt: conversation.historyClearedAt, conversationDeletedAt: conversation.conversationDeletedAt, connectionStatus: conversation.connectionStatus, iBlocked: conversation.iBlocked, interactionAllowed: conversation.interactionAllowed, messagingAvailable: conversation.messagingAvailable, requestAvailable: conversation.requestAvailable });
   }
 
   function openDeliveredConversation(conversation: AcceptedConversationItem) {
     const wasNoteDelivery = messageDeliveryDraft?.kind === "note";
     setMessageDeliveryDraft(null);
     if (wasNoteDelivery) setIsNotesOpen(false);
-    handleConversationReady({ id: conversation.conversationId, otherProfile: conversation.otherProfile, otherNickname: conversation.otherNickname, themeKey: conversation.themeKey, historyClearedAt: conversation.historyClearedAt, conversationDeletedAt: conversation.conversationDeletedAt, connectionStatus: conversation.connectionStatus, iBlocked: conversation.iBlocked, interactionAllowed: conversation.interactionAllowed, messagingAvailable: conversation.messagingAvailable, requestAvailable: conversation.requestAvailable });
+    handleConversationReady({ id: conversation.conversationId, otherProfile: conversation.otherProfile, otherAccountStatus: conversation.otherAccountStatus, otherNickname: conversation.otherNickname, themeKey: conversation.themeKey, historyClearedAt: conversation.historyClearedAt, conversationDeletedAt: conversation.conversationDeletedAt, connectionStatus: conversation.connectionStatus, iBlocked: conversation.iBlocked, interactionAllowed: conversation.interactionAllowed, messagingAvailable: conversation.messagingAvailable, requestAvailable: conversation.requestAvailable });
   }
 
   function handleActivityToastActivate(toast: ActivityToastItem) {
@@ -977,6 +977,7 @@ function DashboardPage() {
     handleConversationReady(currentConversation ? {
       id: currentConversation.conversationId,
       otherProfile: currentConversation.otherProfile,
+      otherAccountStatus: currentConversation.otherAccountStatus,
       otherNickname: currentConversation.otherNickname,
       themeKey: currentConversation.themeKey,
       historyClearedAt: currentConversation.historyClearedAt,
@@ -1017,7 +1018,7 @@ function DashboardPage() {
       {dashboardView === "dashboard" && <>
       <NewConversationModal key={reconnectProfile?.id ?? "new-conversation"} isOpen={isNewConversationOpen} currentUserId={currentUserId} isAccountResolved={isAccountResolved} accountError={accountError} initialProfile={reconnectProfile} relationshipsByProfileId={relationshipsByProfileId} isRelationshipsLoading={messagesController.isLoading || requestsController.isLoading} relationshipsError={messagesController.loadError || requestsController.loadError} onClose={closeNewConversation} onConversationSelected={handleConversationReady} onPendingRequestSelected={handlePendingRequestSelected} onRequestCreated={handleRequestCreated} onOpenIncomingRequests={openMessageRequestsSection} onRefreshRelationships={refreshRelationships} />
       <AnimatePresence initial={false}>{isGlobalSearchOpen && <GlobalSearchDialog currentProfile={currentProfile} conversations={messagesController.conversations} outgoingRequests={messagesController.pendingRequests} incomingRequests={requestsController.requests} returnFocusRef={searchReturnFocusRef} onClose={() => setIsGlobalSearchOpen(false)} onConversationSelected={handleConversationReady} onOutgoingRequestSelected={handlePendingRequestSelected} onIncomingRequestSelected={openMessageRequestsSection} onMessageSelected={handleSearchMessageSelected} />}</AnimatePresence>
-      <AnimatePresence initial={false}>{personalSurface && currentProfile && <PersonalSettingsDialog key={personalSurface} surface={personalSurface} profile={currentProfile} quickReactions={quickReactions} notificationPermission={notificationController.permission} isNotificationSupported={notificationController.isSupported} returnFocusRef={personalSurfaceReturnFocusRef} onClose={() => setPersonalSurface(null)} onSaveQuickReactions={saveQuickReactions} onEnableNotifications={enableBrowserNotifications} onSaveNotificationPreferences={saveNotificationPreferences} onProfileIdentityUpdated={handleProfileIdentityUpdated} onAccountDeleted={handleAccountDeleted} />}</AnimatePresence>
+      <AnimatePresence initial={false}>{personalSurface && currentProfile && <PersonalSettingsDialog key={personalSurface} surface={personalSurface} profile={currentProfile} accountStatus={accountStatus} quickReactions={quickReactions} notificationPermission={notificationController.permission} isNotificationSupported={notificationController.isSupported} returnFocusRef={personalSurfaceReturnFocusRef} onClose={() => setPersonalSurface(null)} onSaveQuickReactions={saveQuickReactions} onEnableNotifications={enableBrowserNotifications} onSaveNotificationPreferences={saveNotificationPreferences} onProfileIdentityUpdated={handleProfileIdentityUpdated} onAccountDeleted={handleAccountDeleted} />}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence initial={false}>{isNotesOpen && currentUserId && <NotesWorkspace currentUserId={currentUserId} conversations={messagesController.relationshipConversations} returnFocusRef={notesReturnFocusRef} onClose={() => setIsNotesOpen(false)} onSend={openMessageDelivery} onMessageSent={refreshMessagesSilently} />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence initial={false}>{isGalleryOpen && currentUserId && currentProfile && <GalleryWorkspace currentUserId={currentUserId} currentProfile={currentProfile} returnFocusRef={galleryReturnFocusRef} notifications={galleryNotifications.notifications} unreadCount={galleryNotifications.unreadCount} notificationsLoading={galleryNotifications.isLoading} notificationsError={galleryNotifications.error} initialItemId={galleryEntry.itemId} initialCommentId={galleryEntry.commentId} onMarkNotificationsRead={galleryNotifications.markRead} onMarkAllNotificationsRead={galleryNotifications.markAllRead} onRemoveNotification={galleryNotifications.removeNotification} onClearNotifications={galleryNotifications.clearNotifications} onClose={closeGallery} />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence initial={false}>{isRemindersOpen && currentUserId && <RemindersWorkspace currentUserId={currentUserId} conversations={messagesController.relationshipConversations} isConversationsLoading={messagesController.isLoading} controller={remindersController} returnFocusRef={remindersReturnFocusRef} initialReminderId={remindersEntry.reminderId} initialConversationId={remindersEntry.conversationId} onClose={closeReminders} />}</AnimatePresence></Suspense>

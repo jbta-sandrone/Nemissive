@@ -5,12 +5,13 @@ import { getProfileDisplayName, isDeletedProfile } from "./profileUtils";
 
 type ProfileAvatarProps = {
   profile: ProfileSearchResult;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "xs" | "sm" | "md" | "lg" | "xl";
   accessibleLabel?: string;
   avatarOverride?: string | null;
 };
 
 const sizeClasses = {
+  xs: "h-8 w-8 rounded-full text-xs",
   sm: "h-10 w-10 rounded-full text-sm",
   md: "h-12 w-12 rounded-full text-base",
   lg: "h-16 w-16 rounded-full text-xl",

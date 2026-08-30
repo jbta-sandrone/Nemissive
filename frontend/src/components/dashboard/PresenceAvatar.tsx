@@ -1,20 +1,16 @@
+import type { AccountStatus } from "../../types/account";
 import type { ProfileSearchResult } from "../../types/conversations";
-import ProfileAvatar from "./ProfileAvatar";
-import { getProfileDisplayName } from "./profileUtils";
+import UserIdentityAvatar from "./UserIdentityAvatar";
 
 type PresenceAvatarProps = {
   profile: ProfileSearchResult;
   isOnline: boolean;
   size?: "sm" | "md" | "lg";
+  accountStatus?: AccountStatus | null;
 };
 
-function PresenceAvatar({ profile, isOnline, size = "md" }: PresenceAvatarProps) {
-  return (
-    <div className="relative shrink-0">
-      <ProfileAvatar profile={profile} size={size} />
-      {isOnline && <><span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-surface bg-online" aria-hidden="true" /><span className="sr-only">{getProfileDisplayName(profile)} is online</span></>}
-    </div>
-  );
+function PresenceAvatar({ profile, isOnline, size = "md", accountStatus = null }: PresenceAvatarProps) {
+  return <UserIdentityAvatar profile={profile} accountStatus={accountStatus} isOnline={isOnline} size={size} />;
 }
 
 export default PresenceAvatar;

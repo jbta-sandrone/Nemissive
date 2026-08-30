@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import type { AccountStatus } from "../../types/account";
 import type { AcceptedConversationItem, ChatMessage, ConversationConnectionStatus, ConversationNicknameRealtimeChange, ConversationThemePreferenceChange, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileSearchResult } from "../../types/conversations";
 
 type UseMessagesDataOptions = {
@@ -31,6 +32,12 @@ type MembershipRow = {
 type PersonalThemeRow = {
   conversation_id: string;
   theme_key: string;
+};
+
+type ConversationAccountStatusRow = {
+  conversation_id: string;
+  user_id: string;
+  account_status: AccountStatus;
 };
 
 type ArchiveRpcRow = {
@@ -114,12 +121,13 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     let isCancelled = false;
 
     async function loadMessagesData() {
-      const [pendingResult, membershipResult, interactionStatusResult, presenceResult, themeResult] = await Promise.all([
+      const [pendingResult, membershipResult, interactionStatusResult, presenceResult, themeResult, accountStatusResult] = await Promise.all([
         supabase.from("conversation_requests").select("id, recipient_id, introduction, created_at, status, conversation_id").eq("sender_id", userId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
         supabase.rpc("list_my_conversation_preferences").abortSignal(abortController.signal),
         supabase.rpc("list_conversation_interaction_statuses").abortSignal(abortController.signal),
         supabase.rpc("list_conversation_presence").abortSignal(abortController.signal),
         supabase.rpc("list_my_personal_conversation_themes").abortSignal(abortController.signal),
+        supabase.rpc("list_my_conversation_account_statuses").abortSignal(abortController.signal),
       ]);
 
       if (isCancelled || loadId !== latestLoadRef.current) return;
@@ -133,17 +141,20 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       }
 
       if (themeResult.error && import.meta.env.DEV) console.warn("Loading personal conversation themes failed; using Default", { code: themeResult.error.code });
+      if (accountStatusResult.error && import.meta.env.DEV) console.warn("Loading conversation account-status presentation failed; hiding status emblems", { code: accountStatusResult.error.code });
 
       const pendingRows = (pendingResult.data ?? []) as PendingRequestRow[];
       const membershipRows = (membershipResult.data ?? []) as MembershipRow[];
       const themeRows = themeResult.error ? [] : (themeResult.data ?? []) as PersonalThemeRow[];
       const interactionStatusRows = (interactionStatusResult.data ?? []) as ConversationInteractionStatusRow[];
       const presenceRows = (presenceResult.data ?? []) as ConversationPresenceRow[];
+      const accountStatusRows = accountStatusResult.error ? [] : (accountStatusResult.data ?? []) as ConversationAccountStatusRow[];
       const conversationIds = [...new Set(membershipRows.map((row) => row.conversation_id))];
       const membershipByConversationId = new Map(membershipRows.map((row) => [row.conversation_id, row]));
       const themeByConversationId = new Map(themeRows.map((row) => [row.conversation_id, row.theme_key]));
       const interactionStatusByConversationId = new Map(interactionStatusRows.map((row) => [row.conversation_id, row]));
       const presenceByConversationId = new Map(presenceRows.map((row) => [row.conversation_id, row]));
+      const accountStatusByConversationId = new Map(accountStatusRows.map((row) => [row.conversation_id, row]));
       let directConversationRows: DirectConversationRow[] = [];
       let nicknameRows: ConversationNicknameRow[] = [];
 
@@ -211,7 +222,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       let profiles: ProfileSearchResult[] = [];
 
       if (profileIds.length > 0) {
-        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, account_status, deleted_at").in("id", profileIds).abortSignal(abortController.signal);
+        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, avatar_border, account_status, deleted_at").in("id", profileIds).abortSignal(abortController.signal);
 
         if (isCancelled || loadId !== latestLoadRef.current) return;
 
@@ -243,6 +254,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
         if (!otherUserId) return [];
         const latestMessage = conversation.messages[0] ?? null;
         const presence = presenceByConversationId.get(conversation.id);
+        const accountStatus = accountStatusByConversationId.get(conversation.id);
         const baseOtherProfile = profileById.get(otherUserId) ?? fallbackProfile(otherUserId);
         if (latestMessage && latestMessage.sender_id !== userId) onIncomingMessageSynchronized(conversation.id, latestMessage.created_at);
         return [{
@@ -253,6 +265,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
             active_status_visible: presence?.profile_id === otherUserId ? presence.active_status_visible : false,
             last_seen_at: presence?.profile_id === otherUserId ? presence.last_seen_at : null,
           },
+          otherAccountStatus: accountStatus?.user_id === otherUserId ? accountStatus.account_status : null,
           latestMessageId: latestMessage?.id ?? null,
           latestMessage: latestMessage ? latestMessage.is_deleted ? "Message deleted" : latestMessage.message_type === "voice" ? "Voice message" : latestMessage.message_type === "image" ? latestMessage.body || "Photo" : latestMessage.message_type === "file" ? latestMessage.body || ((latestMessage.message_attachments?.length ?? 0) > 1 ? `${latestMessage.message_attachments.length} files` : "File") : latestMessage.body : null,
           latestMessageAt: latestMessage?.created_at ?? null,
@@ -389,7 +402,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === change.conversationId ? { ...conversation, themeKey: change.themeKey } : conversation));
   }, []);
 
-  const patchProfileIdentity = useCallback((identity: Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "account_status" | "deleted_at">) => {
+  const patchProfileIdentity = useCallback((identity: Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "avatar_border" | "account_status" | "deleted_at">) => {
     setPendingRequests((currentRequests) => currentRequests.map((request) => request.otherProfile.id === identity.id ? { ...request, otherProfile: { ...request.otherProfile, ...identity } } : request));
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.otherProfile.id === identity.id ? { ...conversation, otherProfile: { ...conversation.otherProfile, ...identity } } : conversation));
   }, []);

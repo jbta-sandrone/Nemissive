@@ -1,6 +1,6 @@
 import type { AcceptedConversationItem } from "../../types/conversations";
-import ProfileAvatar from "./ProfileAvatar";
 import { getConversationDisplayName } from "./profileUtils";
+import UserIdentityAvatar from "./UserIdentityAvatar";
 
 type PulseProps = {
   conversations: AcceptedConversationItem[];
@@ -36,7 +36,7 @@ function Pulse({ conversations, onConversationSelect, variant = "desktop" }: Pul
             const name = getConversationDisplayName(profile, conversation.otherNickname);
             return (
               <button key={profile.id} type="button" onClick={() => onConversationSelect(conversation)} aria-label={`Open conversation with ${name}, active now`} title={`${name} · Active now`} className="group flex w-full min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover">
-                <span className="relative"><ProfileAvatar profile={profile} size="md" accessibleLabel={`${name}'s profile photo`} /><span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-[2px] border-surface bg-online" aria-hidden="true" /></span>
+                <UserIdentityAvatar profile={profile} accountStatus={conversation.otherAccountStatus} isOnline size="md" />
                 <span className="mt-1 block w-full truncate text-[10px] font-semibold text-heading">{name}</span>
                 <span className="sr-only">Active now</span>
               </button>
