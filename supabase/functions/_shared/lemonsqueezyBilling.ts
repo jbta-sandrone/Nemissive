@@ -1,4 +1,4 @@
-export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "theme.ember" | "theme.glacier" | "theme.verdant" | "theme.abyss" | "theme.eclipse" | "theme.dune" | "theme.void" | "elite.monthly";
+export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "theme.ember" | "theme.glacier" | "theme.verdant" | "theme.abyss" | "theme.eclipse" | "theme.dune" | "theme.void" | "theme.shinkai" | "elite.monthly";
 
 export type BillingCatalogEntry = {
   productId: BillingProductId;
@@ -100,6 +100,11 @@ export function getBillingCatalogConfig(): BillingCatalogConfig {
       billingType: "one_time",
     },
     {
+      productId: "theme.shinkai",
+      variantId: positiveIntegerEnvironment("LEMONSQUEEZY_SHINKAI_VARIANT_ID"),
+      billingType: "one_time",
+    },
+    {
       productId: "elite.monthly",
       variantId: positiveIntegerEnvironment("LEMONSQUEEZY_ELITE_MONTHLY_VARIANT_ID"),
       billingType: "subscription",
@@ -140,7 +145,7 @@ export function getWebhookSecret() {
 
 export function resolveBillingProduct(value: unknown): BillingProductId | null {
   if (value === "theme.celestia") return "theme.celestial";
-  if (value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "theme.ember" || value === "theme.glacier" || value === "theme.verdant" || value === "theme.abyss" || value === "theme.eclipse" || value === "theme.dune" || value === "theme.void" || value === "elite.monthly") return value;
+  if (value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "theme.ember" || value === "theme.glacier" || value === "theme.verdant" || value === "theme.abyss" || value === "theme.eclipse" || value === "theme.dune" || value === "theme.void" || value === "theme.shinkai" || value === "elite.monthly") return value;
   return null;
 }
 

@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { canAccessPremiumProduct, type PremiumAccessState, type PremiumProductId } from "./premiumAccess";
 
-export const conversationThemeIds = ["default", "midnight", "ocean", "lavender", "emerald", "rose", "sunset", "obsidian", "celestial", "sakura", "ember", "glacier", "verdant", "abyss", "eclipse", "dune", "void"] as const;
+export const conversationThemeIds = ["default", "midnight", "ocean", "lavender", "emerald", "rose", "sunset", "obsidian", "celestial", "sakura", "ember", "glacier", "verdant", "abyss", "eclipse", "dune", "void", "shinkai"] as const;
 
 export type ConversationThemeId = (typeof conversationThemeIds)[number];
 export type ConversationThemeAccess = "free" | "premium";
@@ -904,6 +904,102 @@ const voidDarkTokens = withPresentationTokens({
   artworkFilter: "contrast(1.04)",
 });
 
+const shinkaiLightTokens = withPresentationTokens({
+  canvas: "radial-gradient(ellipse 62% 78% at 52% 43%, oklch(0.98 0.022 195 / 0.34) 0%, oklch(0.92 0.04 195 / 0.18) 58%, oklch(0.84 0.045 200 / 0.07) 100%)",
+  canvasSecondary: "oklch(0.94 0.025 195)",
+  header: "oklch(0.985 0.018 195 / 0.9)",
+  headerBorder: "oklch(0.68 0.065 198 / 0.56)",
+  surface: "oklch(0.975 0.02 195 / 0.93)",
+  surfaceElevated: "oklch(0.994 0.01 192 / 0.97)",
+  surfaceMuted: "oklch(0.87 0.055 196 / 0.86)",
+  outgoingBg: "linear-gradient(145deg, oklch(0.72 0.09 190) 0%, oklch(0.63 0.09 197) 56%, oklch(0.54 0.075 204) 100%)",
+  outgoingText: "oklch(0.18 0.035 205)",
+  incomingBg: "linear-gradient(145deg, oklch(0.995 0.009 190 / 0.98) 0%, oklch(0.92 0.038 195 / 0.96) 100%)",
+  incomingText: "oklch(0.2 0.035 205)",
+  composerBg: "oklch(0.98 0.02 194 / 0.92)",
+  composerBorder: "oklch(0.64 0.075 198 / 0.6)",
+  accent: "oklch(0.44 0.105 198)",
+  accentHover: "oklch(0.36 0.095 202)",
+  accentSoft: "oklch(0.68 0.095 195 / 0.2)",
+  heading: "oklch(0.17 0.035 207)",
+  body: "oklch(0.29 0.038 205)",
+  muted: "oklch(0.47 0.04 202)",
+  boundary: "oklch(0.67 0.06 198 / 0.58)",
+  scrollbar: "oklch(0.5 0.085 198 / 0.72)",
+  scrollbarTrack: "oklch(0.82 0.045 195 / 0.24)",
+}, {
+  replyBg: "oklch(0.86 0.055 195 / 0.84)",
+  reactionBg: "oklch(0.975 0.02 194 / 0.96)",
+  activityBg: "oklch(0.97 0.018 194 / 0.8)",
+  mediaBg: "oklch(0.85 0.05 196 / 0.9)",
+  controlBg: "oklch(0.97 0.02 194 / 0.94)",
+  controlHover: "oklch(0.78 0.075 196 / 0.84)",
+  focus: "oklch(0.45 0.11 198 / 0.45)",
+  outgoingBorder: "oklch(0.56 0.105 200 / 0.68)",
+  incomingBorder: "oklch(0.71 0.065 194 / 0.72)",
+  outgoingShadow: "inset 0 1px 0 oklch(0.92 0.06 188 / 0.28), 0 12px 28px oklch(0.24 0.055 205 / 0.24)",
+  incomingShadow: "inset 0 1px 0 oklch(1 0 0 / 0.88), 0 10px 24px oklch(0.3 0.05 202 / 0.18)",
+  composerShadow: "inset 0 1px 0 oklch(1 0 0 / 0.86), 0 14px 34px oklch(0.25 0.05 202 / 0.22)",
+  chromeBackdrop: "blur(16px) saturate(1.05)",
+  artworkImage: "url('/themes/shinkai_elite_theme_light.png')",
+  artworkMobileImage: "url('/themes/shinkai_elite_theme_light.png')",
+  previewArtworkImage: "url('/themes/shinkai_elite_theme_light.png')",
+  artworkOpacity: "0.99",
+  artworkPosition: "54% center",
+  artworkTabletPosition: "52% center",
+  artworkMobilePosition: "50% center",
+  artworkSize: "cover",
+  artworkFilter: "saturate(0.92) contrast(1.01)",
+});
+
+const shinkaiDarkTokens = withPresentationTokens({
+  canvas: "radial-gradient(ellipse 62% 78% at 52% 43%, oklch(0.085 0.035 200 / 0.46) 0%, oklch(0.048 0.025 205 / 0.32) 58%, oklch(0.018 0.012 210 / 0.16) 100%)",
+  canvasSecondary: "oklch(0.035 0.014 205)",
+  header: "oklch(0.085 0.027 203 / 0.86)",
+  headerBorder: "oklch(0.43 0.07 195 / 0.64)",
+  surface: "oklch(0.14 0.035 202 / 0.92)",
+  surfaceElevated: "oklch(0.175 0.04 200 / 0.95)",
+  surfaceMuted: "oklch(0.225 0.05 198 / 0.86)",
+  outgoingBg: "linear-gradient(145deg, oklch(0.39 0.08 190) 0%, oklch(0.31 0.07 198) 56%, oklch(0.235 0.055 205) 100%)",
+  outgoingText: "oklch(0.975 0.012 190)",
+  incomingBg: "linear-gradient(145deg, oklch(0.205 0.04 202 / 0.97) 0%, oklch(0.13 0.027 207 / 0.97) 100%)",
+  incomingText: "oklch(0.955 0.014 190)",
+  composerBg: "oklch(0.065 0.022 205 / 0.88)",
+  composerBorder: "oklch(0.43 0.075 195 / 0.68)",
+  accent: "oklch(0.76 0.1 190)",
+  accentHover: "oklch(0.84 0.08 188)",
+  accentSoft: "oklch(0.62 0.1 192 / 0.21)",
+  heading: "oklch(0.975 0.012 190)",
+  body: "oklch(0.875 0.022 194)",
+  muted: "oklch(0.71 0.035 196)",
+  boundary: "oklch(0.36 0.06 198 / 0.74)",
+  scrollbar: "oklch(0.57 0.095 193 / 0.8)",
+  scrollbarTrack: "oklch(0.045 0.018 205 / 0.36)",
+}, {
+  replyBg: "oklch(0.19 0.045 200 / 0.86)",
+  reactionBg: "oklch(0.125 0.032 202 / 0.96)",
+  activityBg: "oklch(0.075 0.024 204 / 0.77)",
+  mediaBg: "oklch(0.1 0.026 204 / 0.94)",
+  controlBg: "oklch(0.135 0.035 201 / 0.94)",
+  controlHover: "oklch(0.235 0.06 197 / 0.89)",
+  focus: "oklch(0.76 0.105 190 / 0.5)",
+  outgoingBorder: "oklch(0.59 0.11 190 / 0.72)",
+  incomingBorder: "oklch(0.43 0.075 198 / 0.72)",
+  outgoingShadow: "inset 0 1px 0 oklch(0.82 0.08 188 / 0.2), 0 14px 30px oklch(0.008 0.018 210 / 0.64)",
+  incomingShadow: "inset 0 1px 0 oklch(0.72 0.05 190 / 0.14), 0 12px 26px oklch(0.006 0.016 210 / 0.56)",
+  composerShadow: "inset 0 1px 0 oklch(0.76 0.055 190 / 0.13), 0 16px 38px oklch(0.005 0.014 210 / 0.66)",
+  chromeBackdrop: "blur(15px) saturate(0.94)",
+  artworkImage: "url('/themes/shinkai_elite_theme_dark.png')",
+  artworkMobileImage: "url('/themes/shinkai_elite_theme_dark.png')",
+  previewArtworkImage: "url('/themes/shinkai_elite_theme_dark.png')",
+  artworkOpacity: "0.99",
+  artworkPosition: "54% center",
+  artworkTabletPosition: "52% center",
+  artworkMobilePosition: "50% center",
+  artworkSize: "cover",
+  artworkFilter: "saturate(0.88) contrast(1.03)",
+});
+
 export const conversationThemes: readonly ConversationThemeDefinition[] = [
   { id: "default", name: "Default", description: "Standard Nemissive appearance", access: "free", light: withPresentationTokens(defaultBaseTokens), dark: withPresentationTokens(defaultBaseTokens) },
   { id: "midnight", name: "Midnight", description: "A calm late-night palette", access: "free", light: withPresentationTokens({ canvas: "linear-gradient(145deg, #101420 0%, #15192a 58%, #191c30 100%)", canvasSecondary: "#141827", header: "#252535", headerBorder: "#3d3d50", surface: "#24293b", surfaceElevated: "#292e42", surfaceMuted: "#30364d", outgoingBg: "#5d68cf", outgoingText: "#ffffff", incomingBg: "#252a3c", incomingText: "#eef0f8", composerBg: "#222332", composerBorder: "#424356", accent: "#a5adff", accentHover: "#bcc2ff", accentSoft: "rgb(165 173 255 / 0.16)", heading: "#f7f7fb", body: "#d6d9e7", muted: "#aeb4c8", boundary: "#625d5a", scrollbar: "#69718e", scrollbarTrack: "rgb(255 255 255 / 0.035)" }), dark: withPresentationTokens({ canvas: "linear-gradient(145deg, #0f121c 0%, #131727 58%, #171a2b 100%)", canvasSecondary: "#121624", header: "#1c1e2a", headerBorder: "#343747", surface: "#212638", surfaceElevated: "#272c40", surfaceMuted: "#2d3349", outgoingBg: "#5d68cf", outgoingText: "#ffffff", incomingBg: "#23283a", incomingText: "#eef0f8", composerBg: "#1d202d", composerBorder: "#383b4d", accent: "#a5adff", accentHover: "#bec4ff", accentSoft: "rgb(165 173 255 / 0.16)", heading: "#f7f7fb", body: "#d6d9e7", muted: "#aeb4c8", boundary: "#423e3b", scrollbar: "#68718e", scrollbarTrack: "rgb(255 255 255 / 0.03)" }) },
@@ -922,6 +1018,7 @@ export const conversationThemes: readonly ConversationThemeDefinition[] = [
   { id: "eclipse", name: "Eclipse", description: "A cinematic totality conversation environment", access: "premium", premiumProductId: "theme.eclipse", light: eclipseLightTokens, dark: eclipseDarkTokens },
   { id: "dune", name: "Dune", description: "A vast wind-sculpted desert conversation environment", access: "premium", premiumProductId: "theme.dune", light: duneLightTokens, dark: duneDarkTokens },
   { id: "void", name: "Void", description: "A colossal subterranean-depth conversation environment", access: "premium", premiumProductId: "theme.void", light: voidLightTokens, dark: voidDarkTokens },
+  { id: "shinkai", name: "Shinkai", description: "An anime-inspired Japanese fantasy landscape", access: "premium", premiumProductId: "theme.shinkai", light: shinkaiLightTokens, dark: shinkaiDarkTokens },
 ] as const;
 
 const conversationThemeById = new Map(conversationThemes.map((theme) => [theme.id, theme]));

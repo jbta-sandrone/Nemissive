@@ -1,7 +1,7 @@
 export type AccountPlan = "normal" | "elite";
 export type AccountStatus = "normal" | "gold" | "elite";
 
-export const premiumProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura", "theme.ember", "theme.glacier", "theme.verdant", "theme.abyss", "theme.eclipse", "theme.dune", "theme.void"] as const;
+export const premiumProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura", "theme.ember", "theme.glacier", "theme.verdant", "theme.abyss", "theme.eclipse", "theme.dune", "theme.void", "theme.shinkai"] as const;
 export type PremiumProductId = (typeof premiumProductIds)[number];
 
 export type PremiumAccessState = {
@@ -43,6 +43,7 @@ export const isAbyssDevelopmentPreviewEnabled = import.meta.env.DEV && import.me
 export const isEclipseDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ECLIPSE_THEME_PREVIEW === "true";
 export const isDuneDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_DUNE_THEME_PREVIEW === "true";
 export const isVoidDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_VOID_THEME_PREVIEW === "true";
+export const isShinkaiDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_SHINKAI_THEME_PREVIEW === "true";
 
 function normalizeLegacyPremiumProductId(value: unknown) {
   return value === "theme.celestia" ? "theme.celestial" : value;
@@ -63,6 +64,7 @@ export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProd
   if (productId === "theme.eclipse") return isEclipseDevelopmentPreviewEnabled;
   if (productId === "theme.dune") return isDuneDevelopmentPreviewEnabled;
   if (productId === "theme.void") return isVoidDevelopmentPreviewEnabled;
+  if (productId === "theme.shinkai") return isShinkaiDevelopmentPreviewEnabled;
   return false;
 }
 
