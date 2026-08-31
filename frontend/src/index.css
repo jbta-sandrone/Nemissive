@@ -149,6 +149,54 @@ body {
   color: #102f5d;
 }
 
+/* The application shell owns this frame; conversation themes begin inside the
+   clipped canvas and cannot color the surrounding dashboard breathing room. */
+.conversation-workspace-shell {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0%;
+  background: var(--color-background);
+}
+
+.conversation-workspace-canvas {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+@media (min-width: 768px) {
+  .conversation-workspace-shell {
+    padding: 0.5rem;
+  }
+
+  .conversation-workspace-canvas {
+    border: 1px solid var(--color-border);
+    border-radius: 1rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .conversation-workspace-shell {
+    padding: 1rem;
+  }
+
+  .conversation-workspace-canvas {
+    border-radius: 1.5rem;
+    box-shadow: var(--shadow-soft);
+  }
+
+  .conversation-workspace-shell-focus {
+    padding: 0.5rem;
+  }
+
+  .conversation-workspace-shell-focus .conversation-workspace-canvas {
+    border-radius: 1.25rem;
+  }
+}
+
 /* Conversation themes follow a strict hierarchy: restrained chrome, expressive
    canvas/content. Both palettes remain scoped to ChatPanel and its local sheets. */
 .chat-theme,

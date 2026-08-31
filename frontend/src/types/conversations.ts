@@ -403,7 +403,7 @@ export type RealtimeConversationNicknameEvent = ConversationNicknameRealtimeChan
   sequence: number;
 };
 
-export type ConversationThemePreferenceChange = {
+export type ConversationThemeChange = {
   conversationId: string;
   themeKey: string;
 };

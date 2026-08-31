@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import type { AccountStatus } from "../../types/account";
-import type { AcceptedConversationItem, ChatMessage, ConversationConnectionStatus, ConversationNicknameRealtimeChange, ConversationThemePreferenceChange, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileSearchResult } from "../../types/conversations";
+import type { AcceptedConversationItem, ChatMessage, ConversationConnectionStatus, ConversationNicknameRealtimeChange, ConversationThemeChange, ParticipantReceiptCursor, PendingOutgoingRequest, ProfileSearchResult } from "../../types/conversations";
 
 type UseMessagesDataOptions = {
   currentUserId: string | null;
@@ -29,11 +29,6 @@ type MembershipRow = {
   deleted_at: string | null;
 };
 
-type PersonalThemeRow = {
-  conversation_id: string;
-  theme_key: string;
-};
-
 type ConversationAccountStatusRow = {
   conversation_id: string;
   user_id: string;
@@ -56,6 +51,7 @@ type DirectConversationRow = {
   id: string;
   created_at: string;
   updated_at: string;
+  theme_key: string;
   connection_status: ConversationConnectionStatus;
   conversation_participants: Array<{ user_id: string }>;
   messages: Array<{ id: string; body: string; message_type: "text" | "image" | "voice" | "file"; created_at: string; edited_at: string | null; is_deleted: boolean; deleted_at: string | null; sender_id: string; message_attachments: Array<{ id: string }> }>;
@@ -121,12 +117,11 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     let isCancelled = false;
 
     async function loadMessagesData() {
-      const [pendingResult, membershipResult, interactionStatusResult, presenceResult, themeResult, accountStatusResult] = await Promise.all([
+      const [pendingResult, membershipResult, interactionStatusResult, presenceResult, accountStatusResult] = await Promise.all([
         supabase.from("conversation_requests").select("id, recipient_id, introduction, created_at, status, conversation_id").eq("sender_id", userId).eq("status", "pending").order("created_at", { ascending: false }).abortSignal(abortController.signal),
         supabase.rpc("list_my_conversation_preferences").abortSignal(abortController.signal),
         supabase.rpc("list_conversation_interaction_statuses").abortSignal(abortController.signal),
         supabase.rpc("list_conversation_presence").abortSignal(abortController.signal),
-        supabase.rpc("list_my_personal_conversation_themes").abortSignal(abortController.signal),
         supabase.rpc("list_my_conversation_account_statuses").abortSignal(abortController.signal),
       ]);
 
@@ -140,18 +135,15 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
         return;
       }
 
-      if (themeResult.error && import.meta.env.DEV) console.warn("Loading personal conversation themes failed; using Default", { code: themeResult.error.code });
       if (accountStatusResult.error && import.meta.env.DEV) console.warn("Loading conversation account-status presentation failed; hiding status emblems", { code: accountStatusResult.error.code });
 
       const pendingRows = (pendingResult.data ?? []) as PendingRequestRow[];
       const membershipRows = (membershipResult.data ?? []) as MembershipRow[];
-      const themeRows = themeResult.error ? [] : (themeResult.data ?? []) as PersonalThemeRow[];
       const interactionStatusRows = (interactionStatusResult.data ?? []) as ConversationInteractionStatusRow[];
       const presenceRows = (presenceResult.data ?? []) as ConversationPresenceRow[];
       const accountStatusRows = accountStatusResult.error ? [] : (accountStatusResult.data ?? []) as ConversationAccountStatusRow[];
       const conversationIds = [...new Set(membershipRows.map((row) => row.conversation_id))];
       const membershipByConversationId = new Map(membershipRows.map((row) => [row.conversation_id, row]));
-      const themeByConversationId = new Map(themeRows.map((row) => [row.conversation_id, row.theme_key]));
       const interactionStatusByConversationId = new Map(interactionStatusRows.map((row) => [row.conversation_id, row]));
       const presenceByConversationId = new Map(presenceRows.map((row) => [row.conversation_id, row]));
       const accountStatusByConversationId = new Map(accountStatusRows.map((row) => [row.conversation_id, row]));
@@ -161,7 +153,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       if (conversationIds.length > 0) {
         const { data: conversationData, error: conversationError } = await supabase
           .from("conversations")
-          .select("id, created_at, updated_at, connection_status, conversation_participants(user_id), messages(id, body, message_type, created_at, edited_at, is_deleted, deleted_at, sender_id, message_attachments(id))")
+          .select("id, created_at, updated_at, theme_key, connection_status, conversation_participants(user_id), messages(id, body, message_type, created_at, edited_at, is_deleted, deleted_at, sender_id, message_attachments(id))")
           .in("id", conversationIds)
           .eq("conversation_type", "direct")
           .order("created_at", { referencedTable: "messages", ascending: false })
@@ -283,7 +275,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
           historyClearedAt: membershipByConversationId.get(conversation.id)?.history_cleared_at ?? null,
           conversationDeletedAt: membershipByConversationId.get(conversation.id)?.deleted_at ?? null,
           otherNickname: nicknameByConversationAndUser.get(`${conversation.id}:${otherUserId}`) ?? null,
-          themeKey: themeByConversationId.get(conversation.id) || "default",
+          themeKey: conversation.theme_key || "default",
           connectionStatus: interactionStatusByConversationId.get(conversation.id)?.connection_status ?? conversation.connection_status ?? "accepted",
           iBlocked: interactionStatusByConversationId.get(conversation.id)?.i_blocked ?? false,
           interactionAllowed: interactionStatusByConversationId.get(conversation.id)?.interaction_allowed ?? true,
@@ -398,7 +390,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     }));
   }, []);
 
-  const patchConversationTheme = useCallback((change: ConversationThemePreferenceChange) => {
+  const patchConversationTheme = useCallback((change: ConversationThemeChange) => {
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === change.conversationId ? { ...conversation, themeKey: change.themeKey } : conversation));
   }, []);
 

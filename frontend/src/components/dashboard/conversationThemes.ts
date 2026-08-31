@@ -1041,9 +1041,10 @@ export function canUseConversationTheme(themeId: ConversationThemeId, access: Pr
   return theme.premiumProductId ? canAccessPremiumProduct(access, theme.premiumProductId, includeDevelopmentPreview) : false;
 }
 
-export function resolveConversationTheme(value: string | null | undefined, access: PremiumAccessState) {
-  const themeId = normalizeConversationThemeId(value);
-  return canUseConversationTheme(themeId, access) ? themeId : "default";
+export function resolveConversationTheme(value: string | null | undefined) {
+  // Rendering a conversation-owned theme is presentation, not entitlement.
+  // Apply permission is still enforced separately in the picker and secure RPC.
+  return normalizeConversationThemeId(value);
 }
 
 export function getConversationThemeStyle(value: string | null | undefined): CSSProperties {

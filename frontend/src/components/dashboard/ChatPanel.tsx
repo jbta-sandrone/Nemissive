@@ -6,7 +6,7 @@ import AnchoredPopover from "./AnchoredPopover";
 import AttachmentMenu from "./AttachmentMenu";
 import ComposerFilePreview from "./ComposerFilePreview";
 import ComposerMediaPreview from "./ComposerMediaPreview";
-import ConversationActivityRow from "./ConversationActivityRow";
+import ConversationActivityMenu from "./ConversationActivityMenu";
 import ConversationMuteMenu from "./ConversationMuteMenu";
 import ConversationOptionsMenu from "./ConversationOptionsMenu";
 import EmojiPicker from "./EmojiPicker";
@@ -119,6 +119,7 @@ type ConversationEventRow = {
   reminder_title: string | null;
   reminder_due_at: string | null;
   created_at: string;
+  unseen_count: number;
 };
 
 type ConversationTimelineItem =
@@ -227,6 +228,10 @@ const imageMaxCount = 10;
 const messageMediaBucket = "message-media";
 const acceptedImageMimeTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const acceptedImageInputTypes = "image/png,image/jpeg,image/webp,image/gif,.jpg,.jpeg";
+
+function VoiceCallIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="M7.2 3.8 10 8l-2.1 2.1a14.2 14.2 0 0 0 6 6L16 14l4.2 2.8-.8 3.4c-.2.8-1 1.4-1.8 1.3C9.7 20.5 3.5 14.3 2.5 6.4c-.1-.8.5-1.6 1.3-1.8l3.4-.8Z" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
+function VideoCallIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2.5" /><path d="m16 10 5-3v10l-5-3" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
+function ComingSoonHeaderAction({ kind, onActivate }: { kind: "Voice" | "Video"; onActivate: () => void }) { return <button type="button" aria-disabled="true" aria-label={`${kind} call, coming soon`} title={`${kind} call — Coming soon`} onClick={onActivate} className="chat-header-control hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-border bg-background text-muted opacity-70 transition hover:bg-accent hover:opacity-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover xl:flex">{kind === "Voice" ? <VoiceCallIcon /> : <VideoCallIcon />}</button>; }
 
 function createUuid() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -628,6 +633,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const pendingPinnedMessageIdsRef = useRef(new Set<string>());
   const pinnedMessagesLoadIdRef = useRef(0);
   const conversationEventsLoadIdRef = useRef(0);
+  const activityCenterOpenRef = useRef(false);
   const seenConversationEventIdsRef = useRef(new Set<string>());
   const seenConversationEventOrderRef = useRef<string[]>([]);
   const deletedConversationEventIdsRef = useRef(new Set<string>());
@@ -661,6 +667,9 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const [pendingPinnedMessageIds, setPendingPinnedMessageIds] = useState<Set<string>>(() => new Set());
   const [pinnedJumpTarget, setPinnedJumpTarget] = useState<MessageSearchTarget | null>(null);
   const [conversationEvents, setConversationEvents] = useState<ConversationActivityEvent[]>([]);
+  const [isLoadingConversationEvents, setIsLoadingConversationEvents] = useState(true);
+  const [hasLoadedConversationEvents, setHasLoadedConversationEvents] = useState(false);
+  const [unseenConversationActivityCount, setUnseenConversationActivityCount] = useState(0);
   const [nicknamesByUserId, setNicknamesByUserId] = useState<Map<string, string>>(() => {
     const initial = new Map<string, string>();
     if (conversation.otherNickname) initial.set(conversation.otherProfile.id, conversation.otherNickname);
@@ -1006,24 +1015,42 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     setNicknamesByUserId(new Map((data ?? []).map((row) => [String(row.user_id), String(row.nickname)])));
   }, [conversation.id]);
 
+  const markConversationActivitySeen = useCallback(async () => {
+    const { error } = await supabase.rpc("mark_conversation_activity_seen", { target_conversation_id: conversation.id });
+    if (!isMountedRef.current) return;
+    if (error) {
+      setConversationEventsError("Conversation activity was loaded, but its unseen state couldn’t be updated. Please try again.");
+      if (import.meta.env.DEV) console.warn("Marking conversation activity seen failed", { conversationId: conversation.id, code: error.code });
+      return;
+    }
+    setUnseenConversationActivityCount(0);
+  }, [conversation.id]);
+
   const loadConversationEvents = useCallback(async () => {
     const loadId = ++conversationEventsLoadIdRef.current;
+    setIsLoadingConversationEvents(true);
+    setHasLoadedConversationEvents(false);
     setConversationEventsError("");
     const { data, error } = await supabase.rpc("list_conversation_events", { target_conversation_id: conversation.id, page_size: conversationEventLimit });
     if (!isMountedRef.current || loadId !== conversationEventsLoadIdRef.current) return;
+    setIsLoadingConversationEvents(false);
     if (error) {
       setConversationEventsError("Conversation activity couldn’t be loaded. Please try again.");
       if (import.meta.env.DEV) console.warn("Loading conversation activity failed", { conversationId: conversation.id, code: error.code });
       return;
     }
 
-    const loadedEvents = ((data ?? []) as ConversationEventRow[]).map((row) => mapConversationEventRow(row, currentUserId, currentName, otherName, otherAccountName)).filter((event) => !deletedConversationEventIdsRef.current.has(event.id));
+    const rows = (data ?? []) as ConversationEventRow[];
+    setHasLoadedConversationEvents(true);
+    const loadedEvents = rows.map((row) => mapConversationEventRow(row, currentUserId, currentName, otherName, otherAccountName)).filter((event) => !deletedConversationEventIdsRef.current.has(event.id));
+    setUnseenConversationActivityCount(rows[0]?.unseen_count ?? 0);
     loadedEvents.forEach((event) => rememberConversationEvent(event.id));
     setConversationEvents((currentEvents) => {
       const currentVisibleEvents = currentEvents.filter((event) => !deletedConversationEventIdsRef.current.has(event.id));
       return loadedEvents.reduce((nextEvents, event) => mergeConversationEvent(nextEvents, event), currentVisibleEvents).slice(-conversationEventLimit);
     });
-  }, [conversation.id, currentName, currentUserId, otherAccountName, otherName, rememberConversationEvent]);
+    if (activityCenterOpenRef.current) void markConversationActivitySeen();
+  }, [conversation.id, currentName, currentUserId, markConversationActivitySeen, otherAccountName, otherName, rememberConversationEvent]);
   const sharedReminderActivityKey = useMemo(() => sharedReminders.map((item) => `${item.id}:${item.personalStatus}:${item.updatedAt}`).join("|"), [sharedReminders]);
   const previousSharedReminderActivityKeyRef = useRef(sharedReminderActivityKey);
 
@@ -1491,6 +1518,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (change.action === "delete") {
         rememberDeletedConversationEvent(change.event.id);
         setConversationEvents((currentEvents) => currentEvents.filter((event) => event.id !== change.event.id && (!change.event.targetMessageId || event.targetMessageId !== change.event.targetMessageId) && (!change.event.targetReminderId || event.targetReminderId !== change.event.targetReminderId)));
+        void loadConversationEvents();
         return;
       }
 
@@ -1507,10 +1535,14 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
         isOptimistic: false,
       };
       setConversationEvents((currentEvents) => mergeConversationEvent(currentEvents, event));
+      if (change.event.actorId !== currentUserId) {
+        if (activityCenterOpenRef.current) void markConversationActivitySeen();
+        else setUnseenConversationActivityCount((count) => count + 1);
+      }
       if (change.event.eventType === "message_pinned" && change.event.actorId !== currentUserId) showPinToast(`${otherName} pinned a message`);
       if (change.event.eventType === "theme_changed" && change.event.actorId !== currentUserId) showPinToast(`${otherName} changed the theme to ${getConversationTheme(change.event.themeKey).name}`);
     });
-  }, [conversation.id, currentName, currentUserId, loadConversationEvents, otherAccountName, otherName, realtimeConversationActivityEvents, rememberConversationEvent, rememberDeletedConversationEvent, showPinToast]);
+  }, [conversation.id, currentName, currentUserId, loadConversationEvents, markConversationActivitySeen, otherAccountName, otherName, realtimeConversationActivityEvents, rememberConversationEvent, rememberDeletedConversationEvent, showPinToast]);
 
   useEffect(() => {
     const newEvents = realtimeReceiptEvents.filter((event) => event.sequence > processedReceiptSequenceRef.current);
@@ -2764,6 +2796,11 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   });
   const timelineGroups = groupConversationTimeline(timelineItems);
   const selfAccountStatus = resolveAccountStatus(premiumAccess);
+  const activityProfilesById = new Map<string, ProfileSearchResult>();
+  const activityStatusesById = new Map<string, ReturnType<typeof resolveAccountStatus> | null>();
+  activityProfilesById.set(conversation.otherProfile.id, conversation.otherProfile);
+  activityStatusesById.set(conversation.otherProfile.id, conversation.otherAccountStatus ?? null);
+  if (currentProfile) { activityProfilesById.set(currentProfile.id, currentProfile); activityStatusesById.set(currentProfile.id, selfAccountStatus); }
   const currentTheme = activeTheme;
 
   return (
@@ -2773,6 +2810,9 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
         <MobileBackButton onClick={onMobileBack} isFocusMode={layoutMode === "focus"} />
         <PresenceAvatar profile={conversation.otherProfile} size="sm" isOnline={effectiveIsOtherUserOnline} />
         <div className="min-w-0 flex-1"><h1 className="truncate font-semibold text-heading">{otherName}</h1>{isDeletedAccount ? <p className="truncate text-xs font-medium text-muted">Account deleted</p> : (presenceText || conversation.otherProfile.username) && <p className={`truncate text-xs font-medium ${effectiveIsOtherUserOnline ? "text-online" : "text-muted"}`}>{presenceText}{presenceText && conversation.otherProfile.username && <span aria-hidden="true"> · </span>}{conversation.otherProfile.username && <span className="font-normal text-body">@{conversation.otherProfile.username}</span>}</p>}</div>
+        <ComingSoonHeaderAction kind="Voice" onActivate={() => showPinToast("Voice calling is coming soon")} />
+        <ComingSoonHeaderAction kind="Video" onActivate={() => showPinToast("Video calling is coming soon")} />
+        <ConversationActivityMenu error={conversationEventsError} events={conversationEvents} isLoading={isLoadingConversationEvents} unseenCount={unseenConversationActivityCount} currentUserId={currentUserId} profilesById={activityProfilesById} statusesById={activityStatusesById} onOpenChange={(open) => { activityCenterOpenRef.current = open; if (open && hasLoadedConversationEvents) void markConversationActivitySeen(); }} onRetry={() => void loadConversationEvents()} onSelect={(event, trigger) => { if (event.targetMessageId) openMessageTarget(event.targetMessageId, "event"); else if (event.targetReminderId) onReminderEventOpen(event.targetReminderId, trigger); }} />
         {layoutMode === "workspace" && <FocusModeButton onClick={onEnterFocusMode} />}
         <PinnedMessagesMenu error={pinnedMessagesError} isLoading={isLoadingPinnedMessages} pins={pinnedMessages} onRetry={() => void loadPinnedMessages()} onSelect={handlePinnedMessageSelected} />
         {!isDeletedAccount && <ConversationMuteMenu conversationName={otherName} mutedUntil={conversationMutedUntil} onChange={(mutedUntil) => onConversationMuteChange(conversation.id, mutedUntil)} />}
@@ -2798,9 +2838,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
               {searchContextError && <div role="alert" className="rounded-2xl border border-primary/25 bg-accent px-4 py-3 text-sm text-body shadow-soft"><p>{searchContextError}</p><button type="button" onClick={() => { processedSearchTargetTokenRef.current = null; setSearchContextRetryKey((key) => key + 1); }} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-surface focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry</button></div>}
               {isViewingSearchContext && <div role="status" className="rounded-2xl border border-border bg-surface px-4 py-3 text-center text-xs font-semibold uppercase tracking-[0.14em] text-muted shadow-soft">Viewing search context</div>}
               {shouldShowIntroductoryFallback && <article className="flex justify-start"><div className="max-w-[85%] rounded-3xl rounded-bl-md border border-border bg-surface px-4 py-3 text-body shadow-soft sm:max-w-[75%]"><p className="whitespace-pre-wrap break-words text-sm leading-6">{conversation.introductoryMessage}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">{conversation.introductoryMessageCreatedAt && <time dateTime={conversation.introductoryMessageCreatedAt}>{formatMessageTimestamp(conversation.introductoryMessageCreatedAt)}</time>}<span>Introduction</span></div></div></article>}
-              {conversationEventsError && <div role="alert" className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-body shadow-soft"><p>{conversationEventsError}</p><button type="button" onClick={() => void loadConversationEvents()} className="mt-2 min-h-10 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover">Retry activity</button></div>}
               {timelineGroups.map((group) => {
-                if (group.kind === "event") return <ConversationActivityRow key={group.id} event={group.event} currentUserId={currentUserId} onActivate={(event, trigger) => { if (event.targetMessageId) openMessageTarget(event.targetMessageId, "event"); else if (event.targetReminderId) onReminderEventOpen(event.targetReminderId, trigger); }} />;
+                if (group.kind === "event") return null;
                 const isCurrentUserGroup = group.senderId === currentUserId;
                 const identityProfile = isCurrentUserGroup ? currentProfile : conversation.otherProfile;
                 const identityStatus = isCurrentUserGroup ? selfAccountStatus : conversation.otherAccountStatus ?? null;
@@ -2965,7 +3004,7 @@ function ChatPanel({ chatState, currentProfile, currentUserId, premiumAccess, is
   }
 
   if (chatState?.kind === "accepted") {
-    const activeTheme = resolveConversationTheme(chatState.conversation.themeKey, premiumAccess);
+    const activeTheme = resolveConversationTheme(chatState.conversation.themeKey);
     return <main className={`${visibilityClasses} chat-theme min-w-0 flex-1 flex-col overflow-hidden bg-background`} style={getConversationThemeStyle(activeTheme)} data-chat-theme={activeTheme}><AcceptedConversationPanel key={chatState.conversation.id} conversation={chatState.conversation} currentProfile={currentProfile} currentUserId={currentUserId} premiumAccess={premiumAccess} activeTheme={activeTheme} compactVisibilitySignal={isMobileVisible} layoutMode={layoutMode} messageSearchTarget={messageSearchTarget} realtimeRefreshKey={realtimeRefreshKey} realtimeMessageEvents={realtimeMessageEvents} realtimeMessageUpdateEvents={realtimeMessageUpdateEvents} realtimeReactionEvents={realtimeReactionEvents} realtimePinnedMessageEvents={realtimePinnedMessageEvents} realtimeConversationActivityEvents={realtimeConversationActivityEvents} realtimeConversationNicknameEvents={realtimeConversationNicknameEvents} realtimeReceiptEvents={realtimeReceiptEvents} isOtherUserOnline={onlineUserIds.has(chatState.conversation.otherProfile.id)} quickReactions={quickReactions} conversationMutedUntil={conversationMutedUntil} conversationArchivedAt={conversationArchivedAt} onConversationMuteChange={onConversationMuteChange} onConversationThemeChange={onConversationThemeChange} onConversationArchiveChange={onConversationArchiveChange} onConversationDelete={onConversationDelete} onConversationDisconnect={onConversationDisconnect} onReconnectRequested={onReconnectRequested} onIncomingMessagesSynchronized={onIncomingMessagesSynchronized} onConversationRead={onConversationRead} onMessageConfirmed={onMessageConfirmed} onMessageUpdated={onMessageUpdated} onMessageDeletionRolledBack={onMessageDeletionRolledBack} onForwardMessage={onForwardMessage} onMobileBack={onMobileBack} onEnterFocusMode={onEnterFocusMode} sharedReminders={sharedReminders} onReminderOpen={onReminderOpen} onReminderEventOpen={onReminderEventOpen} /></main>;
   }
 

@@ -15,6 +15,7 @@ type UserIdentityAvatarProps = {
   isOnline?: boolean;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   avatarBorder?: AvatarBorderKey;
+  avatarOverride?: string | null;
   className?: string;
 };
 
@@ -22,7 +23,7 @@ type UserIdentityAvatarProps = {
  * Shared avatar stack. The image uses z-0; z-10 is intentionally available
  * for the future avatar-border layer; status and presence stay above it.
  */
-function UserIdentityAvatar({ profile, accountStatus = null, isOnline = false, size = "md", avatarBorder, className = "" }: UserIdentityAvatarProps) {
+function UserIdentityAvatar({ profile, accountStatus = null, isOnline = false, size = "md", avatarBorder, avatarOverride, className = "" }: UserIdentityAvatarProps) {
   const displayName = getProfileDisplayName(profile);
   const statusDescription = accountStatus ? `, Nemissive ${accountStatusLabels[accountStatus]} account` : "";
   const onlineDescription = isOnline ? ", online" : "";
@@ -32,7 +33,7 @@ function UserIdentityAvatar({ profile, accountStatus = null, isOnline = false, s
   return (
     <span data-avatar-identity className={`relative isolate inline-flex shrink-0 overflow-visible ${className}`}>
       <span data-avatar-layer="image" className="relative z-0 inline-flex">
-        <ProfileAvatar profile={profile} size={size} accessibleLabel={`${displayName}${statusDescription}${onlineDescription}`} />
+        <ProfileAvatar profile={profile} size={size} avatarOverride={avatarOverride} accessibleLabel={`${displayName}${statusDescription}${onlineDescription}`} />
       </span>
       <AvatarBorderFrame borderKey={resolvedBorder} size={size} />
       {accountStatus && <AccountStatusEmblem status={accountStatus} size={compactEmblem ? "compact" : "default"} decorative className="pointer-events-none absolute -bottom-0.5 -left-0.5 z-20 shadow-sm" />}
