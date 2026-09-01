@@ -191,7 +191,7 @@ function ProfileDetailsSettings({ profile, accountStatus, premiumAccess, onIdent
     if (isAvatarBorderSaving) return;
     const border = avatarBorderSelection;
     if (!canUseAvatarBorder(border, premiumAccess)) {
-      setAvatarBorderError("Aurelia requires permanent ownership or active Nemissive Elite.");
+      setAvatarBorderError("This Elite avatar border requires permanent ownership or active Nemissive Elite.");
       return;
     }
     setIsAvatarBorderSaving(true);

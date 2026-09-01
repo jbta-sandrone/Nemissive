@@ -70,9 +70,9 @@ function AvatarBorderPicker({ profile, accountStatus, premiumAccess, selection, 
 
       {selectedDefinition.access === "premium" && selectedAccessSource && (
         <div className="mt-4 rounded-2xl border border-border bg-surface px-4 py-3">
-          <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-bold text-heading">Aurelia</p><p className="mt-1 text-xs text-body">Elite Avatar Border · 1 of 8</p></div><span className="rounded-full bg-accent px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-wide text-primary">{premiumThemeAccessLabels[selectedAccessSource]}</span></div>
-          {selectedDefinition.amountMinor !== null && selectedDefinition.currency && <p className="mt-3 text-sm font-semibold text-heading">{formatPrice(selectedDefinition.amountMinor, selectedDefinition.currency)} <span className="font-normal text-body">· Pay once · Own forever</span></p>}
-          {selectedAccessSource === "locked" && <p className="mt-2 text-xs leading-5 text-body">Permanent purchase is coming soon. Aurelia is available now with active Nemissive Elite or authoritative permanent ownership.</p>}
+          <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-bold text-heading">{selectedDefinition.name}</p><p className="mt-1 text-xs text-body">Elite Avatar Border · {selectedDefinition.collectionPosition} of 11</p></div><span className="rounded-full bg-accent px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-wide text-primary">{premiumThemeAccessLabels[selectedAccessSource]}</span></div>
+          {selectedDefinition.amountMinor !== null && selectedDefinition.currency && <p className="mt-3 text-sm font-semibold text-heading">{formatPrice(selectedDefinition.amountMinor, selectedDefinition.currency)} <span className="font-normal text-body">one-time · Own forever</span></p>}
+          {selectedAccessSource === "locked" && <p className="mt-2 text-xs leading-5 text-body">Permanent purchase is coming soon. {selectedDefinition.name} is available now with active Nemissive Elite or authoritative permanent ownership.</p>}
         </div>
       )}
 

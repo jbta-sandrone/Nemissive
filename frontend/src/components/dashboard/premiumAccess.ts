@@ -5,7 +5,7 @@ export type { AccountPlan, AccountStatus } from "../../types/account";
 export const premiumThemeProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura", "theme.ember", "theme.glacier", "theme.verdant", "theme.abyss", "theme.eclipse", "theme.dune", "theme.void", "theme.shinkai"] as const;
 export type PremiumThemeProductId = (typeof premiumThemeProductIds)[number];
 
-export const premiumAvatarBorderProductIds = ["border.aurelia"] as const;
+export const premiumAvatarBorderProductIds = ["border.aurelia", "border.moonveil", "border.prismara", "border.solstice", "border.scarlet", "border.tidal", "border.inferno", "border.frost", "border.orbit", "border.chrono", "border.zenith"] as const;
 export type PremiumAvatarBorderProductId = (typeof premiumAvatarBorderProductIds)[number];
 
 export const premiumProductIds = [...premiumThemeProductIds, ...premiumAvatarBorderProductIds] as const;
@@ -52,6 +52,30 @@ export const isDuneDevelopmentPreviewEnabled = import.meta.env.DEV && import.met
 export const isVoidDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_VOID_THEME_PREVIEW === "true";
 export const isShinkaiDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_SHINKAI_THEME_PREVIEW === "true";
 export const isAureliaDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_AURELIA_BORDER_PREVIEW === "true";
+export const isMoonveilDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOONVEIL_BORDER_PREVIEW === "true";
+export const isPrismaraDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_PRISMARA_BORDER_PREVIEW === "true";
+export const isSolsticeDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_SOLSTICE_BORDER_PREVIEW === "true";
+export const isScarletDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_SCARLET_BORDER_PREVIEW === "true";
+export const isTidalDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_TIDAL_BORDER_PREVIEW === "true";
+export const isInfernoDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_INFERNO_BORDER_PREVIEW === "true";
+export const isFrostDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_FROST_BORDER_PREVIEW === "true";
+export const isOrbitDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ORBIT_BORDER_PREVIEW === "true";
+export const isChronoDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_CHRONO_BORDER_PREVIEW === "true";
+export const isZenithDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ZENITH_BORDER_PREVIEW === "true";
+
+const premiumAvatarBorderDevelopmentPreviewEnabled: Record<PremiumAvatarBorderProductId, boolean> = {
+  "border.aurelia": isAureliaDevelopmentPreviewEnabled,
+  "border.moonveil": isMoonveilDevelopmentPreviewEnabled,
+  "border.prismara": isPrismaraDevelopmentPreviewEnabled,
+  "border.solstice": isSolsticeDevelopmentPreviewEnabled,
+  "border.scarlet": isScarletDevelopmentPreviewEnabled,
+  "border.tidal": isTidalDevelopmentPreviewEnabled,
+  "border.inferno": isInfernoDevelopmentPreviewEnabled,
+  "border.frost": isFrostDevelopmentPreviewEnabled,
+  "border.orbit": isOrbitDevelopmentPreviewEnabled,
+  "border.chrono": isChronoDevelopmentPreviewEnabled,
+  "border.zenith": isZenithDevelopmentPreviewEnabled,
+};
 
 function normalizeLegacyPremiumProductId(value: unknown) {
   return value === "theme.celestia" ? "theme.celestial" : value;
@@ -59,6 +83,10 @@ function normalizeLegacyPremiumProductId(value: unknown) {
 
 export function isPremiumProductId(value: unknown): value is PremiumProductId {
   return typeof value === "string" && premiumProductIds.includes(value as PremiumProductId);
+}
+
+export function isPremiumAvatarBorderProductId(value: unknown): value is PremiumAvatarBorderProductId {
+  return typeof value === "string" && premiumAvatarBorderProductIds.includes(value as PremiumAvatarBorderProductId);
 }
 
 export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProductId) {
@@ -73,7 +101,7 @@ export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProd
   if (productId === "theme.dune") return isDuneDevelopmentPreviewEnabled;
   if (productId === "theme.void") return isVoidDevelopmentPreviewEnabled;
   if (productId === "theme.shinkai") return isShinkaiDevelopmentPreviewEnabled;
-  if (productId === "border.aurelia") return isAureliaDevelopmentPreviewEnabled;
+  if (isPremiumAvatarBorderProductId(productId)) return premiumAvatarBorderDevelopmentPreviewEnabled[productId];
   return false;
 }
 

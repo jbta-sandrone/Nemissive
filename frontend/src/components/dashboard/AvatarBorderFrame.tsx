@@ -1,10 +1,10 @@
 import type { CSSProperties } from "react";
 import type { AvatarBorderKey } from "../../types/avatarBorders";
-import { getAvatarBorderDefinition } from "./avatarBorders";
+import { getAvatarBorderDefinition, type AvatarBorderSize } from "./avatarBorders";
 
 type AvatarBorderFrameProps = {
   borderKey: AvatarBorderKey;
-  size: "xs" | "sm" | "md" | "lg" | "xl";
+  size: AvatarBorderSize;
 };
 
 const geometry = {
@@ -19,13 +19,15 @@ function AvatarBorderFrame({ borderKey, size }: AvatarBorderFrameProps) {
   if (borderKey === "none") return null;
   const border = getAvatarBorderDefinition(borderKey);
 
-  if (border.assetPath && border.overlayScale) {
+  if (border.kind === "image" && border.assetPath && border.imageScale) {
+    const imageScale = border.imageScaleBySize?.[size] ?? border.imageScale;
     const imageStyle = {
-      height: `${border.overlayScale * 100}%`,
-      width: `${border.overlayScale * 100}%`,
+      left: `calc(50% + ${border.imageOffsetX}%)`,
+      top: `calc(50% + ${border.imageOffsetY}%)`,
+      width: `${imageScale * 100}%`,
     } satisfies CSSProperties;
 
-    return <img src={border.assetPath} alt="" draggable={false} data-avatar-layer="border" data-avatar-border={borderKey} aria-hidden="true" className="pointer-events-none absolute left-1/2 top-1/2 z-10 max-w-none -translate-x-1/2 -translate-y-1/2 select-none object-contain" style={imageStyle} />;
+    return <img src={border.assetPath} alt="" draggable={false} data-avatar-layer="border" data-avatar-border={borderKey} aria-hidden="true" className="pointer-events-none absolute z-10 h-auto max-w-none -translate-x-1/2 -translate-y-1/2 select-none" style={imageStyle} />;
   }
 
   const frameGeometry = geometry[size];
