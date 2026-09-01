@@ -212,7 +212,9 @@ type ChatPanelProps = {
 const initialMessageLimit = 50;
 const messageMaxLength = 2000;
 const characterCountThreshold = 200;
-const nearBottomThreshold = 140;
+const presentShowThreshold = 180;
+const presentHideThreshold = 72;
+const maximumDisplayedNewMessageCount = 9;
 const comingSoonMessageDurationMs = 3000;
 const readAcknowledgementDebounceMs = 280;
 const replyPreviewMaxLength = 120;
@@ -429,6 +431,10 @@ function getMessageKey(message: DisplayChatMessage) {
   return message.kind === "confirmed" ? `confirmed:${message.id}` : `optimistic:${message.optimisticId}`;
 }
 
+function getDistanceFromPresent(viewport: HTMLElement) {
+  return Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight);
+}
+
 function sortMessages(messages: DisplayChatMessage[]) {
   return [...messages].sort((first, second) => {
     const timestampDifference = Date.parse(first.createdAt) - Date.parse(second.createdAt);
@@ -596,6 +602,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const latestLoadRef = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
+  const presentSentinelRef = useRef<HTMLDivElement>(null);
+  const presentStateFrameRef = useRef<number | null>(null);
+  const hasSettledInitialPresentRef = useRef(false);
+  const isAtPresentRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -633,6 +643,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const pendingPinnedMessageIdsRef = useRef(new Set<string>());
   const pinnedMessagesLoadIdRef = useRef(0);
   const conversationEventsLoadIdRef = useRef(0);
+  const conversationActivityReloadTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const activityCenterOpenRef = useRef(false);
   const seenConversationEventIdsRef = useRef(new Set<string>());
   const seenConversationEventOrderRef = useRef<string[]>([]);
@@ -691,7 +702,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [retryKey, setRetryKey] = useState(0);
-  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [showJumpToPresent, setShowJumpToPresent] = useState(false);
+  const [newMessagesWhileBackreading, setNewMessagesWhileBackreading] = useState(0);
   const [isViewingSearchContext, setIsViewingSearchContext] = useState(false);
   const [isLoadingSearchContext, setIsLoadingSearchContext] = useState(false);
   const [searchContextError, setSearchContextError] = useState("");
@@ -758,6 +770,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (replyHighlightTimerRef.current !== null) window.clearTimeout(replyHighlightTimerRef.current);
       if (mobileLongPressTimerRef.current !== null) window.clearTimeout(mobileLongPressTimerRef.current);
       if (pinToastTimerRef.current !== null) window.clearTimeout(pinToastTimerRef.current);
+      if (conversationActivityReloadTimerRef.current !== null) window.clearTimeout(conversationActivityReloadTimerRef.current);
+      if (presentStateFrameRef.current !== null) window.cancelAnimationFrame(presentStateFrameRef.current);
       selectedImagesRef.current.forEach((image) => URL.revokeObjectURL(image.objectUrl));
       optimisticPreviewUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
       optimisticPreviewUrls.clear();
@@ -855,19 +869,78 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     return () => window.cancelAnimationFrame(frame);
   }, [messageEditState?.isSaving, messageEditState?.messageId]);
 
-  const isNearBottom = useCallback(() => {
-    const viewport = scrollViewportRef.current;
-    return Boolean(viewport && viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < nearBottomThreshold);
+  const markAtPresent = useCallback(() => {
+    hasSettledInitialPresentRef.current = true;
+    isAtPresentRef.current = true;
+    setShowJumpToPresent(false);
+    setNewMessagesWhileBackreading(0);
   }, []);
 
-  const scrollToLatest = useCallback((behavior: ScrollBehavior = "auto") => {
+  const markBackreading = useCallback(() => {
+    if (!hasSettledInitialPresentRef.current) return;
+    isAtPresentRef.current = false;
+    setShowJumpToPresent(true);
+  }, []);
+
+  const updatePresentState = useCallback(() => {
+    if (!hasSettledInitialPresentRef.current) return;
+    if (isViewingSearchContext) {
+      markBackreading();
+      return;
+    }
+
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return;
+    const distanceFromPresent = getDistanceFromPresent(viewport);
+    if (isAtPresentRef.current) {
+      if (distanceFromPresent > presentShowThreshold) markBackreading();
+      return;
+    }
+    if (distanceFromPresent <= presentHideThreshold) markAtPresent();
+  }, [isViewingSearchContext, markAtPresent, markBackreading]);
+
+  const schedulePresentStateUpdate = useCallback(() => {
+    if (presentStateFrameRef.current !== null) return;
+    presentStateFrameRef.current = window.requestAnimationFrame(() => {
+      presentStateFrameRef.current = null;
+      updatePresentState();
+    });
+  }, [updatePresentState]);
+
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = "auto", clearImmediately = behavior === "auto") => {
     window.requestAnimationFrame(() => {
       const viewport = scrollViewportRef.current;
       if (!viewport) return;
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior: shouldReduceMotion ? "auto" : behavior });
-      setShowJumpToLatest(false);
+      const resolvedBehavior = shouldReduceMotion ? "auto" : behavior;
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: resolvedBehavior });
+      if (clearImmediately || resolvedBehavior === "auto") markAtPresent();
     });
-  }, [shouldReduceMotion]);
+  }, [markAtPresent, shouldReduceMotion]);
+
+  useEffect(() => {
+    const viewport = scrollViewportRef.current;
+    const sentinel = presentSentinelRef.current;
+    if (!viewport || !sentinel || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(schedulePresentStateUpdate, {
+      root: viewport,
+      rootMargin: `0px 0px ${presentShowThreshold}px 0px`,
+      threshold: 0,
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [schedulePresentStateUpdate]);
+
+  useEffect(() => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (!hasSettledInitialPresentRef.current) return;
+      if (isAtPresentRef.current && !isViewingSearchContext) scrollToLatest("auto");
+      else schedulePresentStateUpdate();
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [isViewingSearchContext, schedulePresentStateUpdate, scrollToLatest]);
 
   const showPinToast = useCallback((message: string) => {
     if (pinToastTimerRef.current !== null) window.clearTimeout(pinToastTimerRef.current);
@@ -1051,6 +1124,13 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     });
     if (activityCenterOpenRef.current) void markConversationActivitySeen();
   }, [conversation.id, currentName, currentUserId, markConversationActivitySeen, otherAccountName, otherName, rememberConversationEvent]);
+  const scheduleConversationActivityReload = useCallback(() => {
+    if (conversationActivityReloadTimerRef.current !== null) window.clearTimeout(conversationActivityReloadTimerRef.current);
+    conversationActivityReloadTimerRef.current = window.setTimeout(() => {
+      conversationActivityReloadTimerRef.current = null;
+      void loadConversationEvents();
+    }, 250);
+  }, [loadConversationEvents]);
   const sharedReminderActivityKey = useMemo(() => sharedReminders.map((item) => `${item.id}:${item.personalStatus}:${item.updatedAt}`).join("|"), [sharedReminders]);
   const previousSharedReminderActivityKeyRef = useRef(sharedReminderActivityKey);
 
@@ -1078,7 +1158,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     let isCancelled = false;
 
     async function loadMessages() {
-      const shouldScrollAfterLoad = !hasLoadedMessagesRef.current || isNearBottom();
+      const shouldScrollAfterLoad = !hasLoadedMessagesRef.current || isAtPresentRef.current;
       const [historyResult, introductionResult, participantResult] = await Promise.all([
         supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id, is_forwarded").eq("conversation_id", conversation.id).order("created_at", { ascending: false }).limit(initialMessageLimit).abortSignal(abortController.signal),
         supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id, is_forwarded").eq("conversation_id", conversation.id).not("source_request_id", "is", null).order("created_at", { ascending: true }).limit(1).abortSignal(abortController.signal),
@@ -1203,7 +1283,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       isCancelled = true;
       abortController.abort();
     };
-  }, [conversation.id, currentUserId, isNearBottom, onIncomingMessagesSynchronized, otherName, realtimeRefreshKey, retryKey, scrollToLatest]);
+  }, [conversation.id, currentUserId, onIncomingMessagesSynchronized, otherName, realtimeRefreshKey, retryKey, scrollToLatest]);
 
   const activeMessageTarget = pinnedJumpTarget ?? messageSearchTarget;
 
@@ -1220,6 +1300,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     let isCancelled = false;
 
     function revealTarget() {
+      markBackreading();
       window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
         if (isCancelled) return;
         const element = messageElementsRef.current.get(searchTarget.messageId);
@@ -1334,7 +1415,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
         return [...authoritative, ...pending].reduce((merged, reaction) => mergeReaction(merged, reaction), [] as MessageReaction[]);
       });
       setIsViewingSearchContext(true);
-      setShowJumpToLatest(true);
+      markBackreading();
       setIsLoadingSearchContext(false);
       revealTarget();
     }
@@ -1344,7 +1425,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       isCancelled = true;
       abortController.abort();
     };
-  }, [activeMessageTarget, conversation.id, currentUserId, isLoading, loadConversationEvents, loadPinnedMessages, onMessageUpdated, otherName, searchContextRetryKey, shouldReduceMotion]);
+  }, [activeMessageTarget, conversation.id, currentUserId, isLoading, loadConversationEvents, loadPinnedMessages, markBackreading, onMessageUpdated, otherName, searchContextRetryKey, shouldReduceMotion]);
 
   useEffect(() => {
     const newEvents = realtimeMessageEvents.filter((event) => event.sequence > processedRealtimeSequenceRef.current);
@@ -1354,8 +1435,8 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     const relevantEvents = newEvents.filter((event) => event.message.conversationId === conversation.id);
     if (relevantEvents.length === 0) return;
 
-    const shouldAutoScroll = !isViewingSearchContext && isNearBottom();
-    const receivedIncomingMessage = relevantEvents.some((event) => event.message.senderId !== currentUserId);
+    const shouldAutoScroll = !isViewingSearchContext && isAtPresentRef.current;
+    const incomingMessageCount = relevantEvents.filter((event) => event.message.senderId !== currentUserId).length;
     relevantEvents.forEach((event) => replyTargetCacheRef.current.set(event.message.id, event.message));
 
     setMessages((currentMessages) => {
@@ -1382,12 +1463,15 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if ((event.message.messageType === "image" || event.message.messageType === "voice" || event.message.messageType === "file") && !attachmentCacheRef.current.has(event.message.id)) loadMessageAttachments(event.message.id);
     });
 
-    if (receivedIncomingMessage) {
-      setNewMessageAnnouncement(`New message from ${otherName}.`);
+    if (incomingMessageCount > 0) {
+      setNewMessageAnnouncement(incomingMessageCount === 1 ? `New message from ${otherName}.` : `${incomingMessageCount} new messages from ${otherName}.`);
       if (shouldAutoScroll) scrollToLatest("auto");
-      else setShowJumpToLatest(true);
+      else {
+        markBackreading();
+        setNewMessagesWhileBackreading((count) => Math.min(maximumDisplayedNewMessageCount + 1, count + incomingMessageCount));
+      }
     }
-  }, [conversation.id, currentUserId, isNearBottom, isViewingSearchContext, loadMessageAttachments, loadReplyTarget, otherName, realtimeMessageEvents, scrollToLatest]);
+  }, [conversation.id, currentUserId, isViewingSearchContext, loadMessageAttachments, loadReplyTarget, markBackreading, otherName, realtimeMessageEvents, scrollToLatest]);
 
   useEffect(() => {
     const newEvents = realtimeMessageUpdateEvents.filter((event) => event.sequence > processedMessageUpdateSequenceRef.current).sort((first, second) => first.sequence - second.sequence);
@@ -1518,7 +1602,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (change.action === "delete") {
         rememberDeletedConversationEvent(change.event.id);
         setConversationEvents((currentEvents) => currentEvents.filter((event) => event.id !== change.event.id && (!change.event.targetMessageId || event.targetMessageId !== change.event.targetMessageId) && (!change.event.targetReminderId || event.targetReminderId !== change.event.targetReminderId)));
-        void loadConversationEvents();
+        scheduleConversationActivityReload();
         return;
       }
 
@@ -1542,7 +1626,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       if (change.event.eventType === "message_pinned" && change.event.actorId !== currentUserId) showPinToast(`${otherName} pinned a message`);
       if (change.event.eventType === "theme_changed" && change.event.actorId !== currentUserId) showPinToast(`${otherName} changed the theme to ${getConversationTheme(change.event.themeKey).name}`);
     });
-  }, [conversation.id, currentName, currentUserId, loadConversationEvents, markConversationActivitySeen, otherAccountName, otherName, realtimeConversationActivityEvents, rememberConversationEvent, rememberDeletedConversationEvent, showPinToast]);
+  }, [conversation.id, currentName, currentUserId, loadConversationEvents, markConversationActivitySeen, otherAccountName, otherName, realtimeConversationActivityEvents, rememberConversationEvent, rememberDeletedConversationEvent, scheduleConversationActivityReload, showPinToast]);
 
   useEffect(() => {
     const newEvents = realtimeReceiptEvents.filter((event) => event.sequence > processedReceiptSequenceRef.current);
@@ -1609,6 +1693,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   function handleHistoryRetry() {
     latestLoadRef.current += 1;
+    hasSettledInitialPresentRef.current = false;
+    isAtPresentRef.current = true;
+    setShowJumpToPresent(false);
+    setNewMessagesWhileBackreading(0);
     setMessages((currentMessages) => currentMessages.filter((message) => message.kind === "optimistic"));
     setReactions((currentReactions) => currentReactions.filter((reaction) => reaction.id.startsWith("optimistic:")));
     setIsLoading(true);
@@ -1617,9 +1705,24 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     setRetryKey((key) => key + 1);
   }
 
-  function handleJumpToLatest() {
+  function handleJumpToPresent() {
     if (!isViewingSearchContext) {
       scrollToLatest("smooth");
+      return;
+    }
+    latestLoadRef.current += 1;
+    markAtPresent();
+    setIsViewingSearchContext(false);
+    setIsLoading(true);
+    setSearchContextError("");
+    hasLoadedMessagesRef.current = false;
+    setRetryKey((key) => key + 1);
+  }
+
+  function followOwnMessageToPresent() {
+    markAtPresent();
+    if (!isViewingSearchContext) {
+      scrollToLatest("smooth", true);
       return;
     }
     latestLoadRef.current += 1;
@@ -1675,8 +1778,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
       setDraft("");
       resetTextareaHeight();
     }
-    setShowJumpToLatest(false);
-    scrollToLatest("smooth");
+    followOwnMessageToPresent();
 
     const { data, error } = await supabase.from("messages").insert({ conversation_id: conversation.id, sender_id: currentUserId, body: trimmedBody, reply_to_message_id: replyToMessageId }).select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id, is_forwarded").single();
 
@@ -1727,8 +1829,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     setMediaError("");
     stopTyping();
     setMessages((currentMessages) => sortMessages([...currentMessages.filter((message) => message.kind === "confirmed" || message.optimisticId !== optimisticId), optimisticMessage]));
-    setShowJumpToLatest(false);
-    scrollToLatest("smooth");
+    followOwnMessageToPresent();
 
     async function cleanupUploadedObjects(paths: string[]) {
       if (paths.length === 0) return;
@@ -1835,7 +1936,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     isSubmittingRef.current = true; setIsSubmitting(true); setMediaError(""); setUploadStatus(sourceFiles.length > 1 ? `Uploading 1 of ${sourceFiles.length}…` : "Uploading…"); setIsComposerEmojiPickerOpen(false); stopTyping();
     inFlightMessageRef.current = { optimisticId, conversationId: conversation.id, body: trimmedCaption, replyToMessageId };
     setMessages((current) => sortMessages([...current.filter((message) => message.kind === "confirmed" || message.optimisticId !== optimisticId), optimisticMessage]));
-    setShowJumpToLatest(false); scrollToLatest("smooth");
+    followOwnMessageToPresent();
 
     async function cleanup(paths: string[]) { if (paths.length) await supabase.storage.from(messageMediaBucket).remove(paths); }
     async function reconcileExisting() {
@@ -1915,8 +2016,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
     stopTyping();
     inFlightMessageRef.current = { optimisticId, conversationId: conversation.id, body: "", replyToMessageId };
     setMessages((currentMessages) => sortMessages([...currentMessages.filter((message) => message.kind === "confirmed" || message.optimisticId !== optimisticId), optimisticMessage]));
-    setShowJumpToLatest(false);
-    scrollToLatest("smooth");
+    followOwnMessageToPresent();
 
     async function reconcileExistingVoiceMessage() {
       const { data: existingMessage } = await supabase.from("messages").select("id, conversation_id, sender_id, body, created_at, edited_at, is_deleted, deleted_at, source_request_id, message_type, reply_to_message_id, is_forwarded").eq("id", optimisticId).eq("conversation_id", conversation.id).eq("sender_id", currentUserId).maybeSingle();
@@ -2320,7 +2420,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
 
   function handleScroll() {
     cancelMobileLongPress();
-    if (!isViewingSearchContext && isNearBottom()) setShowJumpToLatest(false);
+    schedulePresentStateUpdate();
   }
 
   function showReactionError(message: string) {
@@ -2750,6 +2850,7 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   function jumpToOriginalMessage(messageId: string) {
     const element = messageElementsRef.current.get(messageId);
     if (!element) return;
+    markBackreading();
     element.scrollIntoView({ behavior: shouldReduceMotion ? "auto" : "smooth", block: "center" });
     setHighlightedMessageId(messageId);
     if (replyHighlightTimerRef.current !== null) window.clearTimeout(replyHighlightTimerRef.current);
@@ -2770,6 +2871,11 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
   const characterCountId = `message-character-count-${conversation.id}`;
   const mediaErrorId = `message-media-error-${conversation.id}`;
   const composerDescription = [composerHelpId, showCharacterCount ? characterCountId : "", mediaError ? mediaErrorId : ""].filter(Boolean).join(" ");
+  const displayedNewMessageCount = newMessagesWhileBackreading > maximumDisplayedNewMessageCount ? `${maximumDisplayedNewMessageCount}+` : String(newMessagesWhileBackreading);
+  const jumpToPresentText = newMessagesWhileBackreading > 0 ? `${displayedNewMessageCount} new ${newMessagesWhileBackreading === 1 ? "message" : "messages"}` : "Present";
+  const jumpToPresentLabel = newMessagesWhileBackreading > maximumDisplayedNewMessageCount
+    ? `Jump to present, ${maximumDisplayedNewMessageCount} or more new messages`
+    : `Jump to present${newMessagesWhileBackreading > 0 ? `, ${newMessagesWhileBackreading} new ${newMessagesWhileBackreading === 1 ? "message" : "messages"}` : ""}`;
   const loadedConfirmedMessageIds = new Set(messages.flatMap((message) => message.kind === "confirmed" ? [message.id] : []));
   const mobileActionMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === mobileActionMessageId) ?? null;
   const moreActionMessage = messages.find((message): message is ChatMessage => message.kind === "confirmed" && !message.isDeleted && message.id === moreActionMessageId) ?? null;
@@ -2900,9 +3006,10 @@ function AcceptedConversationPanel({ conversation, currentProfile, currentUserId
               })}
             </div>
           )}
+          <div ref={presentSentinelRef} className="h-px w-full" aria-hidden="true" />
         </div>
 
-        {showJumpToLatest && <button type="button" onClick={handleJumpToLatest} className="chat-jump-latest absolute bottom-4 left-1/2 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-semibold text-heading shadow-soft transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m7 10 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>Jump to latest</button>}
+        {showJumpToPresent && <button type="button" onClick={handleJumpToPresent} aria-label={jumpToPresentLabel} className="chat-jump-latest absolute bottom-3 left-1/2 z-30 inline-flex min-h-11 max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-semibold text-heading shadow-soft transition hover:bg-accent active:translate-y-px focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover sm:bottom-4 sm:px-4 sm:text-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0" aria-hidden="true"><path d="m7 10 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg><span>{jumpToPresentText}</span></button>}
       </div>
 
       {reactionError && <p role="status" aria-live="polite" className="shrink-0 border-t border-border bg-accent px-4 py-2 text-center text-xs leading-5 text-body">{reactionError}</p>}

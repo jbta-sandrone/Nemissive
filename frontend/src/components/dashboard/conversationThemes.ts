@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { canAccessPremiumProduct, type PremiumAccessState, type PremiumProductId } from "./premiumAccess";
+import { canAccessPremiumProduct, type PremiumAccessState, type PremiumThemeProductId } from "./premiumAccess";
 
 export const conversationThemeIds = ["default", "midnight", "ocean", "lavender", "emerald", "rose", "sunset", "obsidian", "celestial", "sakura", "ember", "glacier", "verdant", "abyss", "eclipse", "dune", "void", "shinkai"] as const;
 
@@ -19,7 +19,7 @@ export type ConversationThemeDefinition = {
   name: string;
   description: string;
   access: ConversationThemeAccess;
-  premiumProductId?: PremiumProductId;
+  premiumProductId?: PremiumThemeProductId;
   light: ConversationThemeTokens;
   dark: ConversationThemeTokens;
 };

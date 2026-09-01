@@ -2,7 +2,13 @@ import type { AccountPlan, AccountStatus } from "../../types/account";
 
 export type { AccountPlan, AccountStatus } from "../../types/account";
 
-export const premiumProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura", "theme.ember", "theme.glacier", "theme.verdant", "theme.abyss", "theme.eclipse", "theme.dune", "theme.void", "theme.shinkai"] as const;
+export const premiumThemeProductIds = ["theme.obsidian", "theme.celestial", "theme.sakura", "theme.ember", "theme.glacier", "theme.verdant", "theme.abyss", "theme.eclipse", "theme.dune", "theme.void", "theme.shinkai"] as const;
+export type PremiumThemeProductId = (typeof premiumThemeProductIds)[number];
+
+export const premiumAvatarBorderProductIds = ["border.aurelia"] as const;
+export type PremiumAvatarBorderProductId = (typeof premiumAvatarBorderProductIds)[number];
+
+export const premiumProductIds = [...premiumThemeProductIds, ...premiumAvatarBorderProductIds] as const;
 export type PremiumProductId = (typeof premiumProductIds)[number];
 
 export type PremiumAccessState = {
@@ -45,6 +51,7 @@ export const isEclipseDevelopmentPreviewEnabled = import.meta.env.DEV && import.
 export const isDuneDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_DUNE_THEME_PREVIEW === "true";
 export const isVoidDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_VOID_THEME_PREVIEW === "true";
 export const isShinkaiDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_SHINKAI_THEME_PREVIEW === "true";
+export const isAureliaDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_AURELIA_BORDER_PREVIEW === "true";
 
 function normalizeLegacyPremiumProductId(value: unknown) {
   return value === "theme.celestia" ? "theme.celestial" : value;
@@ -66,6 +73,7 @@ export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProd
   if (productId === "theme.dune") return isDuneDevelopmentPreviewEnabled;
   if (productId === "theme.void") return isVoidDevelopmentPreviewEnabled;
   if (productId === "theme.shinkai") return isShinkaiDevelopmentPreviewEnabled;
+  if (productId === "border.aurelia") return isAureliaDevelopmentPreviewEnabled;
   return false;
 }
 

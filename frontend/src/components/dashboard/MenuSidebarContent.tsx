@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { ProfileSearchResult } from "../../types/conversations";
 import AccountStatusBadge from "./AccountStatusBadge";
-import type { AccountStatus } from "./premiumAccess";
+import type { AccountStatus, PremiumAccessState } from "./premiumAccess";
 import NotificationSettings from "./NotificationSettings";
 import ProfileAvatar from "./ProfileAvatar";
 import ProfileDetailsSettings from "./ProfileDetailsSettings";
@@ -12,6 +12,7 @@ import { getProfileDisplayName } from "./profileUtils";
 type MenuSidebarContentProps = {
   profile: ProfileSearchResult | null;
   accountStatus: AccountStatus;
+  premiumAccess: PremiumAccessState;
   isAccountLoading: boolean;
   accountError: string;
   quickReactions: string[];
@@ -99,7 +100,7 @@ function SubsectionHeader({ headingRef, title, description, onBack }: { headingR
   );
 }
 
-function MenuSidebarContent({ profile, accountStatus, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onOpenElite, onRequestSignOut, onAccountDeleted }: MenuSidebarContentProps) {
+function MenuSidebarContent({ profile, accountStatus, premiumAccess, isAccountLoading, accountError, quickReactions, onSaveQuickReactions, notificationPermission, isNotificationSupported, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onOpenElite, onRequestSignOut, onAccountDeleted }: MenuSidebarContentProps) {
   const subsectionHeadingRef = useRef<HTMLHeadingElement>(null);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
@@ -142,7 +143,7 @@ function MenuSidebarContent({ profile, accountStatus, isAccountLoading, accountE
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
         <SubsectionHeader headingRef={subsectionHeadingRef} title={copy.title} description={copy.description} onBack={returnToLanding} />
         <div className="flex-1 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-5">
-          {activeView === "profile" && profile && <ProfileDetailsSettings profile={profile} accountStatus={accountStatus} onIdentityUpdated={onProfileIdentityUpdated} />}
+          {activeView === "profile" && profile && <ProfileDetailsSettings profile={profile} accountStatus={accountStatus} premiumAccess={premiumAccess} onIdentityUpdated={onProfileIdentityUpdated} />}
           {activeView === "notifications" && profile && <NotificationSettings isSupported={isNotificationSupported} permission={notificationPermission} notificationsEnabled={profile.browser_notifications_enabled ?? false} soundEnabled={profile.notification_sound_enabled ?? true} onEnable={onEnableNotifications} onSave={onSaveNotificationPreferences} />}
           {activeView === "quick-reactions" && <QuickReactionSettings quickReactions={quickReactions} onSave={onSaveQuickReactions} />}
         </div>

@@ -1,4 +1,4 @@
-export const avatarBorderKeys = ["none", "pearl", "graphite", "azure", "emerald", "violet", "rose", "amber"] as const;
+export const avatarBorderKeys = ["none", "pearl", "graphite", "azure", "emerald", "violet", "rose", "amber", "aurelia"] as const;
 
 export type AvatarBorderKey = (typeof avatarBorderKeys)[number];
 

@@ -3,6 +3,7 @@ import type { AccountStatus } from "../../types/account";
 import type { AvatarBorderKey } from "../../types/avatarBorders";
 import type { ProfileSearchResult } from "../../types/conversations";
 import AvatarBorderPicker from "./AvatarBorderPicker";
+import type { PremiumAccessState } from "./premiumAccess";
 import UserIdentityAvatar from "./UserIdentityAvatar";
 
 export type AvatarCustomizationTab = "photo" | "border";
@@ -10,6 +11,7 @@ export type AvatarCustomizationTab = "photo" | "border";
 type AvatarCustomizationWorkspaceProps = {
   profile: ProfileSearchResult;
   accountStatus: AccountStatus;
+  premiumAccess: PremiumAccessState;
   activeTab: AvatarCustomizationTab;
   savedBorder: AvatarBorderKey;
   borderSelection: AvatarBorderKey;
@@ -34,7 +36,7 @@ function BackIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function AvatarCustomizationWorkspace({ profile, accountStatus, activeTab, savedBorder, borderSelection, borderError, isBorderSaving, avatarInputRef, avatarPreviewUrl, hasAvatarDraft, avatarError, isAvatarSaving, onTabChange, onBorderSelectionChange, onApplyBorder, onChooseAvatar, onSaveAvatar, onCancelAvatar, onRemoveAvatar, onBack }: AvatarCustomizationWorkspaceProps) {
+function AvatarCustomizationWorkspace({ profile, accountStatus, premiumAccess, activeTab, savedBorder, borderSelection, borderError, isBorderSaving, avatarInputRef, avatarPreviewUrl, hasAvatarDraft, avatarError, isAvatarSaving, onTabChange, onBorderSelectionChange, onApplyBorder, onChooseAvatar, onSaveAvatar, onCancelAvatar, onRemoveAvatar, onBack }: AvatarCustomizationWorkspaceProps) {
   const photoTabRef = useRef<HTMLButtonElement>(null);
   const borderTabRef = useRef<HTMLButtonElement>(null);
   const interactionsDisabled = isAvatarSaving || isBorderSaving;
@@ -83,7 +85,7 @@ function AvatarCustomizationWorkspace({ profile, accountStatus, activeTab, saved
         </div>
       ) : (
         <div id="avatar-border-panel" role="tabpanel" aria-labelledby="avatar-border-tab" className="pt-5">
-          <AvatarBorderPicker profile={profile} accountStatus={accountStatus} selection={borderSelection} isSaving={isBorderSaving} error={borderError} onSelectionChange={onBorderSelectionChange} onApply={onApplyBorder} />
+          <AvatarBorderPicker profile={profile} accountStatus={accountStatus} premiumAccess={premiumAccess} selection={borderSelection} isSaving={isBorderSaving} error={borderError} onSelectionChange={onBorderSelectionChange} onApply={onApplyBorder} />
         </div>
       )}
     </section>

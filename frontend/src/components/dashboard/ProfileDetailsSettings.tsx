@@ -7,8 +7,10 @@ import type { AvatarBorderKey } from "../../types/avatarBorders";
 import { normalizeAvatarBorderKey } from "../../types/avatarBorders";
 import type { BirthdayVisibility, EditableProfileDetails, ProfileSearchResult } from "../../types/conversations";
 import AvatarCustomizationWorkspace, { type AvatarCustomizationTab } from "./AvatarCustomizationWorkspace";
+import { canUseAvatarBorder } from "./avatarBorders";
 import InterestIcon from "./InterestIcon";
 import InterestPickerDialog from "./InterestPickerDialog";
+import type { PremiumAccessState } from "./premiumAccess";
 import UserIdentityAvatar from "./UserIdentityAvatar";
 import { getInterestOption, normalizeInterestKeys, type InterestKey } from "./profileInterests";
 
@@ -49,6 +51,7 @@ function parseDetails(value: unknown): EditableProfileDetails {
 type Props = {
   profile: ProfileSearchResult;
   accountStatus: AccountStatus;
+  premiumAccess: PremiumAccessState;
   onIdentityUpdated: (profile: ProfileSearchResult) => void;
 };
 
@@ -68,7 +71,7 @@ function parseIdentity(value: unknown, fallback: ProfileSearchResult) {
   };
 }
 
-function ProfileDetailsSettings({ profile, accountStatus, onIdentityUpdated }: Props) {
+function ProfileDetailsSettings({ profile, accountStatus, premiumAccess, onIdentityUpdated }: Props) {
   const shouldReduceMotion = useReducedMotion();
   const interestPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const changeAvatarTriggerRef = useRef<HTMLButtonElement>(null);
@@ -187,6 +190,10 @@ function ProfileDetailsSettings({ profile, accountStatus, onIdentityUpdated }: P
   async function applyAvatarBorder() {
     if (isAvatarBorderSaving) return;
     const border = avatarBorderSelection;
+    if (!canUseAvatarBorder(border, premiumAccess)) {
+      setAvatarBorderError("Aurelia requires permanent ownership or active Nemissive Elite.");
+      return;
+    }
     setIsAvatarBorderSaving(true);
     setAvatarBorderError("");
     const { data, error: saveError } = await supabase.rpc("set_my_avatar_border", { candidate_border: border });
@@ -360,7 +367,7 @@ function ProfileDetailsSettings({ profile, accountStatus, onIdentityUpdated }: P
 
   const successToast = <div className="pointer-events-none fixed left-1/2 top-[max(1rem,env(safe-area-inset-top))] z-[120] w-[min(calc(100%-2rem),22rem)] -translate-x-1/2"><AnimatePresence initial={false}>{successToastId !== null && <motion.div key={successToastId} role="status" aria-live="polite" aria-atomic="true" initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }} transition={{ duration: shouldReduceMotion ? 0 : 0.16 }} className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3 text-center text-sm font-semibold text-heading shadow-soft"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-primary"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m4 10 4 4 8-8" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span>{successToastMessage}</span></motion.div>}</AnimatePresence></div>;
 
-  if (profileView === "avatar") return <><div ref={avatarWorkspaceRef}><AvatarCustomizationWorkspace profile={profile} accountStatus={accountStatus} activeTab={avatarTab} savedBorder={savedAvatarBorder} borderSelection={avatarBorderSelection} borderError={avatarBorderError} isBorderSaving={isAvatarBorderSaving} avatarInputRef={avatarInputRef} avatarPreviewUrl={avatarPreviewUrl} hasAvatarDraft={avatarFile !== null} avatarError={avatarError} isAvatarSaving={isAvatarSaving} onTabChange={setAvatarTab} onBorderSelectionChange={(border) => { setAvatarBorderSelection(border); setAvatarBorderError(""); }} onApplyBorder={() => void applyAvatarBorder()} onChooseAvatar={(file) => void chooseAvatar(file)} onSaveAvatar={() => void saveAvatar()} onCancelAvatar={cancelAvatarDraft} onRemoveAvatar={() => void removeAvatar()} onBack={returnToProfileEditor} /></div>{successToast}</>;
+  if (profileView === "avatar") return <><div ref={avatarWorkspaceRef}><AvatarCustomizationWorkspace profile={profile} accountStatus={accountStatus} premiumAccess={premiumAccess} activeTab={avatarTab} savedBorder={savedAvatarBorder} borderSelection={avatarBorderSelection} borderError={avatarBorderError} isBorderSaving={isAvatarBorderSaving} avatarInputRef={avatarInputRef} avatarPreviewUrl={avatarPreviewUrl} hasAvatarDraft={avatarFile !== null} avatarError={avatarError} isAvatarSaving={isAvatarSaving} onTabChange={setAvatarTab} onBorderSelectionChange={(border) => { setAvatarBorderSelection(border); setAvatarBorderError(""); }} onApplyBorder={() => void applyAvatarBorder()} onChooseAvatar={(file) => void chooseAvatar(file)} onSaveAvatar={() => void saveAvatar()} onCancelAvatar={cancelAvatarDraft} onRemoveAvatar={() => void removeAvatar()} onBack={returnToProfileEditor} /></div>{successToast}</>;
 
   return <section aria-labelledby="profile-details-settings-heading" className="mt-5 rounded-3xl border border-border bg-background p-4 shadow-soft">
     <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-accent text-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5.5 20a6.5 6.5 0 0 1 13 0" /></svg></span><div><h2 id="profile-details-settings-heading" className="font-bold text-heading">Edit profile</h2><p className="mt-1 text-xs leading-5 text-body">Choose the details accepted contacts can see.</p></div></div>

@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from "motion/react";
 import type { AccountStatus } from "../../types/account";
 import type { ProfileSearchResult } from "../../types/conversations";
 import type { PersonalSurface } from "./AccountMenuPopover";
+import type { PremiumAccessState } from "./premiumAccess";
 import NotificationSettings from "./NotificationSettings";
 import ProfileDetailsSettings from "./ProfileDetailsSettings";
 import QuickReactionSettings from "./QuickReactionSettings";
@@ -13,6 +14,7 @@ type PersonalSettingsDialogProps = {
   surface: PersonalSurface;
   profile: ProfileSearchResult;
   accountStatus: AccountStatus;
+  premiumAccess: PremiumAccessState;
   quickReactions: string[];
   notificationPermission: NotificationPermission | "unsupported";
   isNotificationSupported: boolean;
@@ -35,7 +37,7 @@ function CloseIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg>;
 }
 
-function PersonalSettingsDialog({ surface, profile, accountStatus, quickReactions, notificationPermission, isNotificationSupported, returnFocusRef, onClose, onSaveQuickReactions, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onAccountDeleted }: PersonalSettingsDialogProps) {
+function PersonalSettingsDialog({ surface, profile, accountStatus, premiumAccess, quickReactions, notificationPermission, isNotificationSupported, returnFocusRef, onClose, onSaveQuickReactions, onEnableNotifications, onSaveNotificationPreferences, onProfileIdentityUpdated, onAccountDeleted }: PersonalSettingsDialogProps) {
   const shouldReduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -91,7 +93,7 @@ function PersonalSettingsDialog({ surface, profile, accountStatus, quickReaction
           <SettingsSidebarContent profile={profile} rootBackLabel="Workspace" onBackToMenu={onClose} onAccountDeleted={onAccountDeleted} />
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 sm:px-6">
-            {surface === "profile" && <ProfileDetailsSettings profile={profile} accountStatus={accountStatus} onIdentityUpdated={onProfileIdentityUpdated} />}
+            {surface === "profile" && <ProfileDetailsSettings profile={profile} accountStatus={accountStatus} premiumAccess={premiumAccess} onIdentityUpdated={onProfileIdentityUpdated} />}
             {surface === "notifications" && <NotificationSettings isSupported={isNotificationSupported} permission={notificationPermission} notificationsEnabled={profile.browser_notifications_enabled ?? false} soundEnabled={profile.notification_sound_enabled ?? true} onEnable={onEnableNotifications} onSave={onSaveNotificationPreferences} />}
             {surface === "quick-reactions" && <QuickReactionSettings quickReactions={quickReactions} onSave={onSaveQuickReactions} />}
           </div>

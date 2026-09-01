@@ -18,6 +18,16 @@ const geometry = {
 function AvatarBorderFrame({ borderKey, size }: AvatarBorderFrameProps) {
   if (borderKey === "none") return null;
   const border = getAvatarBorderDefinition(borderKey);
+
+  if (border.assetPath && border.overlayScale) {
+    const imageStyle = {
+      height: `${border.overlayScale * 100}%`,
+      width: `${border.overlayScale * 100}%`,
+    } satisfies CSSProperties;
+
+    return <img src={border.assetPath} alt="" draggable={false} data-avatar-layer="border" data-avatar-border={borderKey} aria-hidden="true" className="pointer-events-none absolute left-1/2 top-1/2 z-10 max-w-none -translate-x-1/2 -translate-y-1/2 select-none object-contain" style={imageStyle} />;
+  }
+
   const frameGeometry = geometry[size];
   const style = {
     inset: frameGeometry.inset,

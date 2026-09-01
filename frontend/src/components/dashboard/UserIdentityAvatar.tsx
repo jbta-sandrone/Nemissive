@@ -20,8 +20,8 @@ type UserIdentityAvatarProps = {
 };
 
 /**
- * Shared avatar stack. The image uses z-0; z-10 is intentionally available
- * for the future avatar-border layer; status and presence stay above it.
+ * Shared avatar stack. The image uses z-0, the selected frame uses z-10,
+ * and account status plus presence remain visible above it at z-20.
  */
 function UserIdentityAvatar({ profile, accountStatus = null, isOnline = false, size = "md", avatarBorder, avatarOverride, className = "" }: UserIdentityAvatarProps) {
   const displayName = getProfileDisplayName(profile);

@@ -1,4 +1,4 @@
-import type { PremiumProductId } from "./premiumAccess";
+import type { PremiumThemeProductId } from "./premiumAccess";
 
 export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "theme.ember" | "theme.glacier" | "theme.verdant" | "theme.abyss" | "theme.eclipse" | "theme.dune" | "theme.void" | "theme.shinkai" | "elite.monthly";
 
@@ -12,14 +12,14 @@ export type PremiumCatalogEntry = {
 };
 
 export type PremiumThemePurchasePresentation = {
-  id: PremiumProductId;
+  id: PremiumThemeProductId;
   name: string;
   amountMinor: number;
   currency: "PHP";
   checkoutProductId: Exclude<BillingProductId, "elite.monthly"> | null;
 };
 
-export const premiumThemePurchaseCatalog: Record<PremiumProductId, PremiumThemePurchasePresentation> = {
+export const premiumThemePurchaseCatalog: Record<PremiumThemeProductId, PremiumThemePurchasePresentation> = {
   "theme.obsidian": {
     id: "theme.obsidian",
     name: "Obsidian",
@@ -196,7 +196,7 @@ export function normalizeBillingProductId(value: unknown): BillingProductId | nu
   return isBillingProductId(value) ? value : null;
 }
 
-export function formatPremiumPrice(productId: BillingProductId | PremiumProductId) {
+export function formatPremiumPrice(productId: BillingProductId | PremiumThemeProductId) {
   const product = productId === "elite.monthly"
     ? premiumCatalog[productId]
     : premiumThemePurchaseCatalog[productId];
