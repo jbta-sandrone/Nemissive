@@ -2,18 +2,21 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState, type RefObjec
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { supabase } from "../../lib/supabase";
+import type { AccountStatus } from "../../types/account";
 import type { ConversationProfileDetails, ProfileSearchResult } from "../../types/conversations";
+import AccountStatusBadge from "./AccountStatusBadge";
 import { getConversationTheme, type ConversationThemeId } from "./conversationThemes";
 import InterestIcon from "./InterestIcon";
-import ProfileAvatar from "./ProfileAvatar";
 import { getInterestOption, normalizeInterestKeys } from "./profileInterests";
 import { getProfileDisplayName, isDeletedProfile } from "./profileUtils";
+import UserIdentityAvatar from "./UserIdentityAvatar";
 
 const PublicGallerySection = lazy(() => import("./PublicGallery"));
 
 type Props = {
   conversationId: string;
   profile: ProfileSearchResult;
+  accountStatus: AccountStatus | null;
   conversationNickname: string | null;
   currentTheme: ConversationThemeId;
   presenceText: string | null;
@@ -69,7 +72,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   return <div className="flex min-w-0 items-start justify-between gap-5 py-2"><dt className="shrink-0 text-sm text-muted">{label}</dt><dd className="min-w-0 break-words text-right text-sm font-semibold text-heading">{value}</dd></div>;
 }
 
-function ConversationProfileDrawer({ conversationId, profile, conversationNickname, currentTheme, presenceText, isOnline, isBlocked, messagingAvailable = true, returnFocusRef, onClose, onEditNicknames, onChangeTheme, onOpenContent, onBlockChange }: Props) {
+function ConversationProfileDrawer({ conversationId, profile, accountStatus, conversationNickname, currentTheme, presenceText, isOnline, isBlocked, messagingAvailable = true, returnFocusRef, onClose, onEditNicknames, onChangeTheme, onOpenContent, onBlockChange }: Props) {
   const reduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
@@ -122,13 +125,15 @@ function ConversationProfileDrawer({ conversationId, profile, conversationNickna
 
   const handleGalleryOverlayOpenChange = useCallback((open: boolean) => { nestedGalleryOpenRef.current = open; }, []);
 
-  const visibleProfile = details ? { ...details, username: profile.username, display_name: profile.display_name, avatar_url: profile.avatar_url } : profile;
+  const visibleProfile = details ? { ...details, username: profile.username, display_name: profile.display_name, avatar_url: profile.avatar_url, avatar_border: profile.avatar_border, account_status: profile.account_status, deleted_at: profile.deleted_at } : profile;
   const displayName = getProfileDisplayName(visibleProfile);
+  const isUnavailable = isDeletedProfile(visibleProfile);
+  const visibleAccountStatus = isUnavailable ? null : accountStatus;
   const birthday = details?.birthdayDisplay ? formatBirthday(details.birthdayDisplay) : null;
   const hasOptionalDetails = details ? Boolean(details.bio || details.locationText || birthday || details.age !== null || details.interests.length) : false;
 
   return createPortal(<motion.div initial={reduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[96] flex justify-end bg-heading/25" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><motion.aside ref={panelRef} initial={reduceMotion ? false : { x: "100%" }} animate={{ x: 0 }} exit={reduceMotion ? { opacity: 0 } : { x: "100%" }} role="dialog" aria-modal="true" aria-labelledby="conversation-profile-title" className="flex h-[100dvh] w-full max-w-md flex-col overflow-hidden bg-surface shadow-soft sm:border-l sm:border-border"><header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5 sm:py-4"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">Conversation</p><h2 id="conversation-profile-title" className="mt-1 text-lg font-semibold text-heading">View profile</h2></div><button data-autofocus type="button" onClick={onClose} aria-label="Close profile" className="flex h-11 w-11 items-center justify-center rounded-2xl text-muted hover:bg-accent hover:text-heading focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" strokeLinecap="round" /></svg></button></header><div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-6 sm:px-6">
-    <section className="text-center" aria-labelledby="profile-identity-heading"><div className="flex justify-center"><ProfileAvatar profile={visibleProfile} size="xl" accessibleLabel={`${displayName} profile photo`} /></div><h3 id="profile-identity-heading" className="mt-4 break-words text-2xl font-bold text-heading">{displayName}</h3><p className="mt-1 break-all text-sm text-body">{visibleProfile.username ? `@${visibleProfile.username}` : "Nemissive member"}</p>{presenceText && <p className={`mt-2 text-sm font-semibold ${isOnline ? "text-online" : "text-muted"}`}>{presenceText}</p>}{details?.bio && <p className="mx-auto mt-5 max-w-sm whitespace-pre-wrap break-words text-sm leading-6 text-body">{details.bio}</p>}</section>
+    <section className="text-center" aria-labelledby="profile-identity-heading"><div className="flex justify-center overflow-visible px-4 py-1"><UserIdentityAvatar profile={visibleProfile} accountStatus={visibleAccountStatus} size="xl" /></div>{visibleAccountStatus && <div className="mt-3 flex flex-wrap justify-center gap-2"><AccountStatusBadge status={visibleAccountStatus} /></div>}<h3 id="profile-identity-heading" className="mt-2 break-words text-2xl font-bold text-heading">{displayName}</h3><p className="mt-1 break-all text-sm text-body">{visibleProfile.username ? `@${visibleProfile.username}` : "Nemissive member"}</p>{presenceText && <p className={`mt-2 text-sm font-semibold ${isOnline ? "text-online" : "text-muted"}`}>{presenceText}</p>}{details?.bio && <p className="mx-auto mt-5 max-w-sm whitespace-pre-wrap break-words text-sm leading-6 text-body">{details.bio}</p>}</section>
     {isLoading && <div role="status" aria-live="polite" className="mt-6 rounded-2xl bg-background px-4 py-5 text-center text-sm text-body">Loading profile details…</div>}
     {error && <div role="alert" className="mt-6 rounded-2xl border border-border bg-background p-4 text-sm text-body"><p>{error}</p><button type="button" onClick={() => setRetryKey((key) => key + 1)} className="mt-3 min-h-10 rounded-xl px-3 font-semibold text-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Retry</button></div>}
     {details && <><section aria-labelledby="profile-about-heading" className="mt-7 border-t border-border pt-5"><h3 id="profile-about-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-muted">About</h3><dl className="mt-2 divide-y divide-border">{details.locationText && <DetailRow label="Location" value={details.locationText} />}{birthday && <DetailRow label="Birthday" value={birthday} />}{details.age !== null && <DetailRow label="Age" value={`${details.age}`} />}<DetailRow label="Member since" value={formatJoinedMonth(details.joinedMonth).replace(/^Joined /u, "")} /></dl>{!hasOptionalDetails && <p className="mt-4 rounded-2xl bg-background px-4 py-3 text-sm leading-6 text-body">No additional profile details yet.</p>}</section>{details.interests.length > 0 && <section aria-labelledby="profile-interests-heading" className="mt-7 border-t border-border pt-5"><h3 id="profile-interests-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Interests</h3><ul className="mt-3 flex flex-wrap gap-2">{details.interests.map((interestKey) => { const option = getInterestOption(interestKey); if (!option) return null; return <li key={option.key} className="inline-flex max-w-full items-center gap-2 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-heading"><InterestIcon icon={option.icon} className="h-3.5 w-3.5 shrink-0 text-primary" /><span className="break-words">{option.label}</span></li>; })}</ul></section>}<Suspense fallback={<p role="status" className="mt-7 rounded-2xl bg-background p-4 text-center text-sm text-body">Loading Gallery…</p>}><PublicGallerySection profile={visibleProfile} onOverlayOpenChange={handleGalleryOverlayOpenChange} /></Suspense></>}
