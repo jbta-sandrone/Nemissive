@@ -1,8 +1,11 @@
+import { useState } from "react";
 import type { AccountStatus } from "../../types/account";
 import type { AvatarBorderKey } from "../../types/avatarBorders";
 import type { ProfileSearchResult } from "../../types/conversations";
 import UserIdentityAvatar from "./UserIdentityAvatar";
 import { canUseAvatarBorder, freeAvatarBorderCatalog, getAvatarBorderDefinition, premiumAvatarBorderCatalog, type AvatarBorderDefinition } from "./avatarBorders";
+import { beginBillingCheckout } from "./billing";
+import type { BillingProductId } from "./premiumCatalog";
 import { resolvePremiumProductAccessSource, type PremiumAccessState } from "./premiumAccess";
 import { premiumThemeAccessLabels } from "./premiumPresentation";
 
@@ -30,11 +33,26 @@ function formatPrice(amountMinor: number, currency: "PHP") {
 }
 
 function AvatarBorderPicker({ profile, accountStatus, premiumAccess, selection, isSaving, error, onSelectionChange, onApply }: AvatarBorderPickerProps) {
+  const [checkoutProductId, setCheckoutProductId] = useState<BillingProductId | null>(null);
+  const [checkoutError, setCheckoutError] = useState("");
   const selectedDefinition = getAvatarBorderDefinition(selection);
   const selectionAvailable = canUseAvatarBorder(selection, premiumAccess);
-  const selectedAccessSource = selectedDefinition.premiumProductId
-    ? resolvePremiumProductAccessSource(premiumAccess, selectedDefinition.premiumProductId)
+  const selectedProductId = selectedDefinition.premiumProductId;
+  const selectedPrice = selectedDefinition.amountMinor !== null && selectedDefinition.currency
+    ? formatPrice(selectedDefinition.amountMinor, selectedDefinition.currency)
     : null;
+  const selectedAccessSource = selectedProductId
+    ? resolvePremiumProductAccessSource(premiumAccess, selectedProductId)
+    : null;
+
+  async function startCheckout(productId: BillingProductId) {
+    if (checkoutProductId) return;
+    setCheckoutProductId(productId);
+    setCheckoutError("");
+    const nextError = await beginBillingCheckout(productId);
+    if (nextError) setCheckoutError(nextError);
+    setCheckoutProductId(null);
+  }
 
   function renderBorderOption(border: AvatarBorderDefinition) {
     const selected = selection === border.key;
@@ -49,8 +67,8 @@ function AvatarBorderPicker({ profile, accountStatus, premiumAccess, selection, 
         type="button"
         aria-pressed={selected}
         aria-label={`${border.name}, ${border.access === "premium" ? "Elite avatar border" : "free avatar border"}, ${stateLabel}${selected ? ", selected" : ""}`}
-        onClick={() => onSelectionChange(border.key)}
-        disabled={isSaving}
+        onClick={() => { setCheckoutError(""); onSelectionChange(border.key); }}
+        disabled={isSaving || Boolean(checkoutProductId)}
         className={`relative flex min-h-28 min-w-0 flex-col items-center justify-center rounded-2xl border px-2 py-3 text-center transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:opacity-60 ${selected ? "border-primary bg-accent shadow-soft" : "border-border bg-surface hover:bg-accent"}`}
       >
         <UserIdentityAvatar profile={profile} avatarBorder={border.key} size="md" />
@@ -71,8 +89,8 @@ function AvatarBorderPicker({ profile, accountStatus, premiumAccess, selection, 
       {selectedDefinition.access === "premium" && selectedAccessSource && (
         <div className="mt-4 rounded-2xl border border-border bg-surface px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-bold text-heading">{selectedDefinition.name}</p><p className="mt-1 text-xs text-body">Elite Avatar Border · {selectedDefinition.collectionPosition} of 11</p></div><span className="rounded-full bg-accent px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-wide text-primary">{premiumThemeAccessLabels[selectedAccessSource]}</span></div>
-          {selectedDefinition.amountMinor !== null && selectedDefinition.currency && <p className="mt-3 text-sm font-semibold text-heading">{formatPrice(selectedDefinition.amountMinor, selectedDefinition.currency)} <span className="font-normal text-body">one-time · Own forever</span></p>}
-          {selectedAccessSource === "locked" && <p className="mt-2 text-xs leading-5 text-body">Permanent purchase is coming soon. {selectedDefinition.name} is available now with active Nemissive Elite or authoritative permanent ownership.</p>}
+          {selectedPrice && <p className="mt-3 text-sm font-semibold text-heading">{selectedPrice} <span className="font-normal text-body">one-time · Own forever</span></p>}
+          {selectedAccessSource === "locked" && selectedProductId && <><p className="mt-2 text-xs leading-5 text-body">Included with active Nemissive Elite.</p><button type="button" onClick={() => void startCheckout(selectedProductId)} disabled={Boolean(checkoutProductId) || isSaving} aria-label={`Buy ${selectedDefinition.name} for ${selectedPrice ?? "the listed price"}`} className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-2xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-60">{checkoutProductId === selectedProductId ? "Preparing secure checkout…" : `Buy ${selectedDefinition.name}`}</button></>}
         </div>
       )}
 
@@ -90,9 +108,10 @@ function AvatarBorderPicker({ profile, accountStatus, premiumAccess, selection, 
         </div>
       </fieldset>
 
-      {error && <p role="alert" className="mt-4 rounded-2xl border border-primary/25 bg-accent px-3 py-2.5 text-xs leading-5 text-body">{error}</p>}
+      {(checkoutError || error) && <p role="alert" className="mt-4 rounded-2xl border border-primary/25 bg-accent px-3 py-2.5 text-xs leading-5 text-body">{checkoutError || error}</p>}
+      <p className="sr-only" role="status" aria-live="polite">{checkoutProductId ? "Preparing secure checkout." : ""}</p>
       <div className="mt-6 flex justify-end">
-        <button type="button" onClick={onApply} disabled={isSaving || !selectionAvailable} className="min-h-11 w-full rounded-2xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">{isSaving ? "Applying…" : selectedAccessSource === "preview" ? "Apply development preview" : "Apply border"}</button>
+        <button type="button" onClick={onApply} disabled={isSaving || Boolean(checkoutProductId) || !selectionAvailable} className="min-h-11 w-full rounded-2xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">{isSaving ? "Applying…" : selectedAccessSource === "preview" ? "Apply development preview" : "Apply border"}</button>
       </div>
     </div>
   );

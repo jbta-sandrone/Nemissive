@@ -1,6 +1,32 @@
 import type { PremiumThemeProductId } from "./premiumAccess";
 
-export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "theme.ember" | "theme.glacier" | "theme.verdant" | "theme.abyss" | "theme.eclipse" | "theme.dune" | "theme.void" | "theme.shinkai" | "elite.monthly";
+export const billingProductIds = [
+  "theme.obsidian",
+  "theme.celestial",
+  "theme.sakura",
+  "theme.ember",
+  "theme.glacier",
+  "theme.verdant",
+  "theme.abyss",
+  "theme.eclipse",
+  "theme.dune",
+  "theme.void",
+  "theme.shinkai",
+  "border.aurelia",
+  "border.moonveil",
+  "border.prismara",
+  "border.solstice",
+  "border.scarlet",
+  "border.tidal",
+  "border.inferno",
+  "border.frost",
+  "border.orbit",
+  "border.chrono",
+  "border.zenith",
+  "elite.monthly",
+] as const;
+
+export type BillingProductId = (typeof billingProductIds)[number];
 
 export type PremiumCatalogEntry = {
   id: BillingProductId;
@@ -177,6 +203,83 @@ export const premiumCatalog: Record<BillingProductId, PremiumCatalogEntry> = {
     currency: "PHP",
     billingType: "one_time",
   },
+  "border.aurelia": {
+    id: "border.aurelia",
+    name: "Aurelia",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.moonveil": {
+    id: "border.moonveil",
+    name: "Moonveil",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.prismara": {
+    id: "border.prismara",
+    name: "Prismara",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.solstice": {
+    id: "border.solstice",
+    name: "Solstice",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.scarlet": {
+    id: "border.scarlet",
+    name: "Scarlet",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.tidal": {
+    id: "border.tidal",
+    name: "Tidal",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.inferno": {
+    id: "border.inferno",
+    name: "Inferno",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.frost": {
+    id: "border.frost",
+    name: "Frost",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.orbit": {
+    id: "border.orbit",
+    name: "Orbit",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.chrono": {
+    id: "border.chrono",
+    name: "Chrono",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
+  "border.zenith": {
+    id: "border.zenith",
+    name: "Zenith",
+    amountMinor: 9900,
+    currency: "PHP",
+    billingType: "one_time",
+  },
   "elite.monthly": {
     id: "elite.monthly",
     name: "Nemissive Elite",
@@ -188,7 +291,7 @@ export const premiumCatalog: Record<BillingProductId, PremiumCatalogEntry> = {
 };
 
 export function isBillingProductId(value: unknown): value is BillingProductId {
-  return value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "theme.ember" || value === "theme.glacier" || value === "theme.verdant" || value === "theme.abyss" || value === "theme.eclipse" || value === "theme.dune" || value === "theme.void" || value === "theme.shinkai" || value === "elite.monthly";
+  return typeof value === "string" && billingProductIds.includes(value as BillingProductId);
 }
 
 export function normalizeBillingProductId(value: unknown): BillingProductId | null {
@@ -196,10 +299,8 @@ export function normalizeBillingProductId(value: unknown): BillingProductId | nu
   return isBillingProductId(value) ? value : null;
 }
 
-export function formatPremiumPrice(productId: BillingProductId | PremiumThemeProductId) {
-  const product = productId === "elite.monthly"
-    ? premiumCatalog[productId]
-    : premiumThemePurchaseCatalog[productId];
+export function formatPremiumPrice(productId: BillingProductId) {
+  const product = premiumCatalog[productId];
   return new Intl.NumberFormat("en-PH", {
     style: "currency",
     currency: product.currency,

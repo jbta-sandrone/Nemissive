@@ -1,4 +1,30 @@
-export type BillingProductId = "theme.obsidian" | "theme.celestial" | "theme.sakura" | "theme.ember" | "theme.glacier" | "theme.verdant" | "theme.abyss" | "theme.eclipse" | "theme.dune" | "theme.void" | "theme.shinkai" | "elite.monthly";
+export const billingProductIds = [
+  "theme.obsidian",
+  "theme.celestial",
+  "theme.sakura",
+  "theme.ember",
+  "theme.glacier",
+  "theme.verdant",
+  "theme.abyss",
+  "theme.eclipse",
+  "theme.dune",
+  "theme.void",
+  "theme.shinkai",
+  "border.aurelia",
+  "border.moonveil",
+  "border.prismara",
+  "border.solstice",
+  "border.scarlet",
+  "border.tidal",
+  "border.inferno",
+  "border.frost",
+  "border.orbit",
+  "border.chrono",
+  "border.zenith",
+  "elite.monthly",
+] as const;
+
+export type BillingProductId = (typeof billingProductIds)[number];
 
 export type BillingCatalogEntry = {
   productId: BillingProductId;
@@ -105,6 +131,61 @@ export function getBillingCatalogConfig(): BillingCatalogConfig {
       billingType: "one_time",
     },
     {
+      productId: "border.aurelia",
+      variantId: positiveIntegerEnvironment("AURELIA_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.moonveil",
+      variantId: positiveIntegerEnvironment("MOONVEIL_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.prismara",
+      variantId: positiveIntegerEnvironment("PRISMARA_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.solstice",
+      variantId: positiveIntegerEnvironment("SOLSTICE_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.scarlet",
+      variantId: positiveIntegerEnvironment("SCARLET_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.tidal",
+      variantId: positiveIntegerEnvironment("TIDAL_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.inferno",
+      variantId: positiveIntegerEnvironment("INFERNO_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.frost",
+      variantId: positiveIntegerEnvironment("FROST_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.orbit",
+      variantId: positiveIntegerEnvironment("ORBIT_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.chrono",
+      variantId: positiveIntegerEnvironment("CHRONO_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "border.zenith",
+      variantId: positiveIntegerEnvironment("ZENITH_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
       productId: "elite.monthly",
       variantId: positiveIntegerEnvironment("LEMONSQUEEZY_ELITE_MONTHLY_VARIANT_ID"),
       billingType: "subscription",
@@ -145,8 +226,9 @@ export function getWebhookSecret() {
 
 export function resolveBillingProduct(value: unknown): BillingProductId | null {
   if (value === "theme.celestia") return "theme.celestial";
-  if (value === "theme.obsidian" || value === "theme.celestial" || value === "theme.sakura" || value === "theme.ember" || value === "theme.glacier" || value === "theme.verdant" || value === "theme.abyss" || value === "theme.eclipse" || value === "theme.dune" || value === "theme.void" || value === "theme.shinkai" || value === "elite.monthly") return value;
-  return null;
+  return typeof value === "string" && billingProductIds.includes(value as BillingProductId)
+    ? value as BillingProductId
+    : null;
 }
 
 /** Temporary RPC compatibility for deploying canonical Edge code before the database rename. */
