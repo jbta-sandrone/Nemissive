@@ -8,7 +8,10 @@ export type PremiumThemeProductId = (typeof premiumThemeProductIds)[number];
 export const premiumAvatarBorderProductIds = ["border.aurelia", "border.moonveil", "border.prismara", "border.solstice", "border.scarlet", "border.tidal", "border.inferno", "border.frost", "border.orbit", "border.chrono", "border.zenith"] as const;
 export type PremiumAvatarBorderProductId = (typeof premiumAvatarBorderProductIds)[number];
 
-export const premiumProductIds = [...premiumThemeProductIds, ...premiumAvatarBorderProductIds] as const;
+export const premiumProfileThemeProductIds = ["profile-theme.astralis"] as const;
+export type PremiumProfileThemeProductId = (typeof premiumProfileThemeProductIds)[number];
+
+export const premiumProductIds = [...premiumThemeProductIds, ...premiumAvatarBorderProductIds, ...premiumProfileThemeProductIds] as const;
 export type PremiumProductId = (typeof premiumProductIds)[number];
 
 export type PremiumAccessState = {
@@ -62,6 +65,7 @@ export const isFrostDevelopmentPreviewEnabled = import.meta.env.DEV && import.me
 export const isOrbitDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ORBIT_BORDER_PREVIEW === "true";
 export const isChronoDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_CHRONO_BORDER_PREVIEW === "true";
 export const isZenithDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ZENITH_BORDER_PREVIEW === "true";
+export const isAstralisProfileThemeDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ASTRALIS_PROFILE_THEME_PREVIEW === "true";
 
 const premiumAvatarBorderDevelopmentPreviewEnabled: Record<PremiumAvatarBorderProductId, boolean> = {
   "border.aurelia": isAureliaDevelopmentPreviewEnabled,
@@ -89,6 +93,10 @@ export function isPremiumAvatarBorderProductId(value: unknown): value is Premium
   return typeof value === "string" && premiumAvatarBorderProductIds.includes(value as PremiumAvatarBorderProductId);
 }
 
+export function isPremiumProfileThemeProductId(value: unknown): value is PremiumProfileThemeProductId {
+  return typeof value === "string" && premiumProfileThemeProductIds.includes(value as PremiumProfileThemeProductId);
+}
+
 export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProductId) {
   if (productId === "theme.obsidian") return isObsidianDevelopmentPreviewEnabled;
   if (productId === "theme.celestial") return isCelestialDevelopmentPreviewEnabled;
@@ -102,6 +110,7 @@ export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProd
   if (productId === "theme.void") return isVoidDevelopmentPreviewEnabled;
   if (productId === "theme.shinkai") return isShinkaiDevelopmentPreviewEnabled;
   if (isPremiumAvatarBorderProductId(productId)) return premiumAvatarBorderDevelopmentPreviewEnabled[productId];
+  if (productId === "profile-theme.astralis") return isAstralisProfileThemeDevelopmentPreviewEnabled;
   return false;
 }
 
@@ -116,7 +125,7 @@ function normalizeOwnedProductIds(value: unknown) {
     typeof productId === "string"
     && productId.length >= 3
     && productId.length <= 100
-    && /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_-]*)+$/.test(productId)
+    && /^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$/.test(productId)
   )))];
 }
 

@@ -6,13 +6,17 @@ import type { AccountStatus } from "../../types/account";
 import type { AvatarBorderKey } from "../../types/avatarBorders";
 import { normalizeAvatarBorderKey } from "../../types/avatarBorders";
 import type { BirthdayVisibility, EditableProfileDetails, ProfileSearchResult } from "../../types/conversations";
+import type { ProfileBannerKey } from "../../types/profileBanners";
+import { normalizeProfileBannerKey } from "../../types/profileBanners";
 import AvatarCustomizationWorkspace, { type AvatarCustomizationTab } from "./AvatarCustomizationWorkspace";
 import { canUseAvatarBorder } from "./avatarBorders";
 import InterestIcon from "./InterestIcon";
 import InterestPickerDialog from "./InterestPickerDialog";
 import type { PremiumAccessState } from "./premiumAccess";
-import UserIdentityAvatar from "./UserIdentityAvatar";
+import ProfileBanner from "./ProfileBanner";
+import { canUseProfileBanner } from "./profileBanners";
 import { getInterestOption, normalizeInterestKeys, type InterestKey } from "./profileInterests";
+import UserIdentityAvatar from "./UserIdentityAvatar";
 
 const emptyDetails: EditableProfileDetails = { bio: "", locationText: "", birthDate: "", birthdayVisibility: "hidden", showAge: false, interests: [] };
 const profileSuccessToastDurationMs = 3000;
@@ -68,6 +72,7 @@ function parseIdentity(value: unknown, fallback: ProfileSearchResult) {
     username: typeof row.username === "string" ? row.username : null,
     avatar_url: typeof row.avatar_url === "string" ? row.avatar_url : null,
     avatar_border: normalizeAvatarBorderKey(row.avatar_border ?? fallback.avatar_border),
+    profile_banner: normalizeProfileBannerKey(row.profile_banner ?? fallback.profile_banner),
   };
 }
 
@@ -100,8 +105,12 @@ function ProfileDetailsSettings({ profile, accountStatus, premiumAccess, onIdent
   const [avatarBorderSelection, setAvatarBorderSelection] = useState<AvatarBorderKey>(() => normalizeAvatarBorderKey(profile.avatar_border));
   const [avatarBorderError, setAvatarBorderError] = useState("");
   const [isAvatarBorderSaving, setIsAvatarBorderSaving] = useState(false);
+  const [profileBannerSelection, setProfileBannerSelection] = useState<ProfileBannerKey>(() => normalizeProfileBannerKey(profile.profile_banner));
+  const [profileBannerError, setProfileBannerError] = useState("");
+  const [isProfileBannerSaving, setIsProfileBannerSaving] = useState(false);
 
   const savedAvatarBorder = normalizeAvatarBorderKey(profile.avatar_border);
+  const savedProfileBanner = normalizeProfileBannerKey(profile.profile_banner);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,6 +185,8 @@ function ProfileDetailsSettings({ profile, accountStatus, premiumAccess, onIdent
     setAvatarTab("photo");
     setAvatarBorderSelection(savedAvatarBorder);
     setAvatarBorderError("");
+    setProfileBannerSelection(savedProfileBanner);
+    setProfileBannerError("");
     setProfileView("avatar");
   }
 
@@ -183,6 +194,8 @@ function ProfileDetailsSettings({ profile, accountStatus, premiumAccess, onIdent
     cancelAvatarDraft();
     setAvatarBorderSelection(savedAvatarBorder);
     setAvatarBorderError("");
+    setProfileBannerSelection(savedProfileBanner);
+    setProfileBannerError("");
     setProfileView("edit");
     window.requestAnimationFrame(() => changeAvatarTriggerRef.current?.focus());
   }
@@ -215,6 +228,37 @@ function ProfileDetailsSettings({ profile, accountStatus, premiumAccess, onIdent
     cancelAvatarDraft();
     setProfileView("edit");
     showSuccessToast("Avatar border applied");
+    window.requestAnimationFrame(() => changeAvatarTriggerRef.current?.focus());
+  }
+
+  async function applyProfileBanner() {
+    if (isProfileBannerSaving) return;
+    const banner = profileBannerSelection;
+    if (!canUseProfileBanner(banner, premiumAccess)) {
+      setProfileBannerError("This Elite profile theme is not available for your account.");
+      return;
+    }
+    setIsProfileBannerSaving(true);
+    setProfileBannerError("");
+    const { data, error: saveError } = await supabase.rpc("set_my_profile_banner", { candidate_banner: banner });
+    if (saveError) {
+      setIsProfileBannerSaving(false);
+      if (import.meta.env.DEV) console.warn("Saving profile theme failed", { code: saveError.code });
+      setProfileBannerError("We couldn’t save your profile theme. Please try again.");
+      return;
+    }
+    const savedBanner = normalizeProfileBannerKey(data);
+    if (savedBanner !== banner) {
+      setIsProfileBannerSaving(false);
+      setProfileBannerError("We couldn’t confirm your profile theme. Please try again.");
+      return;
+    }
+    onIdentityUpdated({ ...profile, profile_banner: savedBanner });
+    announceProfileIdentityChanged();
+    setIsProfileBannerSaving(false);
+    cancelAvatarDraft();
+    setProfileView("edit");
+    showSuccessToast("Profile theme applied");
     window.requestAnimationFrame(() => changeAvatarTriggerRef.current?.focus());
   }
 
@@ -367,12 +411,12 @@ function ProfileDetailsSettings({ profile, accountStatus, premiumAccess, onIdent
 
   const successToast = <div className="pointer-events-none fixed left-1/2 top-[max(1rem,env(safe-area-inset-top))] z-[120] w-[min(calc(100%-2rem),22rem)] -translate-x-1/2"><AnimatePresence initial={false}>{successToastId !== null && <motion.div key={successToastId} role="status" aria-live="polite" aria-atomic="true" initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }} transition={{ duration: shouldReduceMotion ? 0 : 0.16 }} className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3 text-center text-sm font-semibold text-heading shadow-soft"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-primary"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true"><path d="m4 10 4 4 8-8" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span>{successToastMessage}</span></motion.div>}</AnimatePresence></div>;
 
-  if (profileView === "avatar") return <><div ref={avatarWorkspaceRef}><AvatarCustomizationWorkspace profile={profile} accountStatus={accountStatus} premiumAccess={premiumAccess} activeTab={avatarTab} savedBorder={savedAvatarBorder} borderSelection={avatarBorderSelection} borderError={avatarBorderError} isBorderSaving={isAvatarBorderSaving} avatarInputRef={avatarInputRef} avatarPreviewUrl={avatarPreviewUrl} hasAvatarDraft={avatarFile !== null} avatarError={avatarError} isAvatarSaving={isAvatarSaving} onTabChange={setAvatarTab} onBorderSelectionChange={(border) => { setAvatarBorderSelection(border); setAvatarBorderError(""); }} onApplyBorder={() => void applyAvatarBorder()} onChooseAvatar={(file) => void chooseAvatar(file)} onSaveAvatar={() => void saveAvatar()} onCancelAvatar={cancelAvatarDraft} onRemoveAvatar={() => void removeAvatar()} onBack={returnToProfileEditor} /></div>{successToast}</>;
+  if (profileView === "avatar") return <><div ref={avatarWorkspaceRef}><AvatarCustomizationWorkspace profile={profile} accountStatus={accountStatus} premiumAccess={premiumAccess} activeTab={avatarTab} savedBorder={savedAvatarBorder} borderSelection={avatarBorderSelection} borderError={avatarBorderError} isBorderSaving={isAvatarBorderSaving} savedBanner={savedProfileBanner} bannerSelection={profileBannerSelection} bannerError={profileBannerError} isBannerSaving={isProfileBannerSaving} avatarInputRef={avatarInputRef} avatarPreviewUrl={avatarPreviewUrl} hasAvatarDraft={avatarFile !== null} avatarError={avatarError} isAvatarSaving={isAvatarSaving} onTabChange={setAvatarTab} onBorderSelectionChange={(border) => { setAvatarBorderSelection(border); setAvatarBorderError(""); }} onApplyBorder={() => void applyAvatarBorder()} onBannerSelectionChange={(banner) => { setProfileBannerSelection(banner); setProfileBannerError(""); }} onApplyBanner={() => void applyProfileBanner()} onChooseAvatar={(file) => void chooseAvatar(file)} onSaveAvatar={() => void saveAvatar()} onCancelAvatar={cancelAvatarDraft} onRemoveAvatar={() => void removeAvatar()} onBack={returnToProfileEditor} /></div>{successToast}</>;
 
-  return <section aria-labelledby="profile-details-settings-heading" className="mt-5 rounded-3xl border border-border bg-background p-4 shadow-soft">
+  return <ProfileBanner bannerKey={savedProfileBanner} className="mt-5 overflow-visible rounded-3xl border border-border shadow-soft"><section aria-labelledby="profile-details-settings-heading" className="p-4">
     <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-accent text-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5.5 20a6.5 6.5 0 0 1 13 0" /></svg></span><div><h2 id="profile-details-settings-heading" className="font-bold text-heading">Edit profile</h2><p className="mt-1 text-xs leading-5 text-body">Choose the details accepted contacts can see.</p></div></div>
     {isLoading ? <div role="status" aria-live="polite" className="mt-4 rounded-2xl bg-surface px-4 py-5 text-sm text-body">Loading profile details…</div> : !hasLoaded ? <div role="alert" className="mt-4 rounded-2xl border border-border bg-surface px-4 py-4 text-sm leading-6 text-body"><p>{error || "We couldn’t load your profile details."}</p><button type="button" onClick={() => setReloadKey((key) => key + 1)} className="mt-3 min-h-10 rounded-xl px-3 font-semibold text-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Retry</button></div> : <form onSubmit={(event) => void save(event)} className="mt-5 space-y-5">
-      <section aria-labelledby="profile-avatar-heading" className="rounded-2xl border border-border bg-surface p-4"><h3 id="profile-avatar-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Avatar</h3><div className="mt-4 flex flex-col items-center gap-5"><UserIdentityAvatar profile={profile} accountStatus={accountStatus} avatarBorder={savedAvatarBorder} size="xl" /><button ref={changeAvatarTriggerRef} type="button" onClick={openAvatarWorkspace} disabled={isSaving || isAvatarSaving} className="min-h-11 rounded-2xl border border-border bg-background px-5 py-2.5 text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:opacity-50">Change Avatar</button></div></section>
+      <section aria-labelledby="profile-avatar-heading" className="rounded-2xl border border-border bg-surface/70 p-4 backdrop-blur-sm"><h3 id="profile-avatar-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Profile identity</h3><div className="my-5 flex justify-center overflow-visible"><UserIdentityAvatar profile={profile} accountStatus={accountStatus} avatarBorder={savedAvatarBorder} size="xl" /></div><div className="flex justify-center"><button ref={changeAvatarTriggerRef} type="button" onClick={openAvatarWorkspace} disabled={isSaving || isAvatarSaving || isProfileBannerSaving} className="min-h-11 rounded-2xl border border-border bg-surface/80 px-5 py-2.5 text-sm font-semibold text-heading transition hover:bg-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-hover disabled:opacity-50">Customize Profile</button></div></section>
       <section aria-labelledby="profile-identity-heading" className="space-y-4"><h3 id="profile-identity-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Identity</h3><div><div className="flex items-center justify-between gap-3"><label htmlFor="profile-display-name" className="text-sm font-semibold text-heading">Display name</label><span className="text-xs text-muted" aria-label={`${characterCount(displayName)} of 50 characters`}>{characterCount(displayName)} / 50</span></div><input id="profile-display-name" type="text" autoComplete="name" value={displayName} onChange={(event) => { setDisplayName(event.target.value); setError(""); }} disabled={isSaving} aria-invalid={displayName.length > 0 && !displayNameValidation.valid} className="mt-2 min-h-11 w-full rounded-2xl border border-border bg-surface px-3 text-sm text-heading outline-none focus:border-primary focus:ring-4 focus:ring-accent-hover disabled:opacity-60" /></div><div><label htmlFor="profile-username" className="text-sm font-semibold text-heading">Username</label><div className="mt-2 flex min-w-0 items-center rounded-2xl border border-border bg-surface px-3 focus-within:border-primary focus-within:ring-4 focus-within:ring-accent-hover"><span className="shrink-0 text-sm text-muted" aria-hidden="true">@</span><input id="profile-username" type="text" autoComplete="username" value={username} onChange={(event) => { setUsername(event.target.value.toLocaleLowerCase()); setUsernameAvailability("idle"); setError(""); }} disabled={isSaving} aria-invalid={effectiveUsernameAvailability === "taken" || effectiveUsernameAvailability === "invalid"} aria-describedby="profile-username-status" className="min-h-11 min-w-0 flex-1 bg-transparent px-1 text-sm text-heading outline-none disabled:opacity-60" /></div><p id="profile-username-status" role="status" aria-live="polite" className={`mt-2 text-xs leading-5 ${effectiveUsernameAvailability === "available" ? "text-online" : effectiveUsernameAvailability === "taken" || effectiveUsernameAvailability === "invalid" ? "text-primary" : "text-muted"}`}>{usernameStatusText}</p></div></section>
       <h3 className="border-t border-border pt-5 text-xs font-bold uppercase tracking-[0.16em] text-muted">About</h3>
       <div><div className="flex items-center justify-between gap-3"><label htmlFor="profile-bio" className="text-sm font-semibold text-heading">Bio</label><span className="text-xs text-muted" aria-label={`${characterCount(draft.bio)} of 150 characters`}>{characterCount(draft.bio)} / 150</span></div><textarea id="profile-bio" value={draft.bio} onChange={(event) => { setDraft((current) => ({ ...current, bio: event.target.value })); setError(""); }} rows={3} disabled={isSaving} placeholder="A little about you" className="mt-2 min-h-24 w-full resize-y rounded-2xl border border-border bg-surface px-3 py-3 text-sm leading-6 text-heading outline-none placeholder:text-muted focus:border-primary focus:ring-4 focus:ring-accent-hover disabled:opacity-60" /></div>
@@ -384,7 +428,7 @@ function ProfileDetailsSettings({ profile, accountStatus, premiumAccess, onIdent
     </form>}
     {isInterestPickerOpen && <InterestPickerDialog initialInterests={draft.interests} returnFocusRef={interestPickerTriggerRef} onClose={() => setIsInterestPickerOpen(false)} onSave={applyInterestDraft} />}
     {successToast}
-  </section>;
+  </section></ProfileBanner>;
 }
 
 export default ProfileDetailsSettings;

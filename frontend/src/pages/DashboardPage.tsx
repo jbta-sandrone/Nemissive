@@ -194,7 +194,7 @@ function DashboardPage() {
 
       setCurrentUserId(userData.user.id);
 
-      const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, avatar_border, quick_reactions, browser_notifications_enabled, notification_sound_enabled, account_status, deleted_at").eq("id", userData.user.id).abortSignal(abortController.signal).maybeSingle();
+      const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, avatar_border, profile_banner, quick_reactions, browser_notifications_enabled, notification_sound_enabled, account_status, deleted_at").eq("id", userData.user.id).abortSignal(abortController.signal).maybeSingle();
 
       if (isCancelled) return;
       if (profileError || !profileData) {

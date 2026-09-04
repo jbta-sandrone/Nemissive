@@ -1,5 +1,6 @@
 import type { AccountStatus } from "./account";
 import type { AvatarBorderKey } from "./avatarBorders";
+import type { ProfileBannerKey } from "./profileBanners";
 
 export type ProfileSearchResult = {
   id: string;
@@ -7,6 +8,7 @@ export type ProfileSearchResult = {
   display_name: string | null;
   avatar_url: string | null;
   avatar_border?: AvatarBorderKey | null;
+  profile_banner?: ProfileBannerKey | null;
   last_seen_at?: string | null;
   active_status_visible?: boolean;
   quick_reactions?: string[] | null;
@@ -43,7 +45,7 @@ export type RealtimeNotificationPreferencesEvent = {
   notificationSoundEnabled: boolean;
 };
 
-export type RealtimeProfileIdentityEvent = Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "avatar_border" | "account_status" | "deleted_at">;
+export type RealtimeProfileIdentityEvent = Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "avatar_border" | "profile_banner" | "account_status" | "deleted_at">;
 
 export type ConversationRequestRealtimeChange = {
   action: "insert" | "update";

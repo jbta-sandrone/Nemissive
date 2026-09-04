@@ -75,7 +75,7 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
       let profiles: ProfileSearchResult[] = [];
 
       if (profileIds.length > 0) {
-        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, account_status, deleted_at").in("id", profileIds).abortSignal(abortController.signal);
+        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, profile_banner, account_status, deleted_at").in("id", profileIds).abortSignal(abortController.signal);
 
         if (isCancelled || loadId !== latestLoadRef.current) return;
 
@@ -212,7 +212,7 @@ function useMessageRequests({ currentUserId, isAccountResolved, onConversationRe
     return null;
   }, []);
 
-  const patchProfileIdentity = useCallback((identity: Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url">) => {
+  const patchProfileIdentity = useCallback((identity: Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "profile_banner">) => {
     setRequests((currentRequests) => currentRequests.map((request) => request.senderProfile.id === identity.id ? { ...request, senderProfile: { ...request.senderProfile, ...identity } } : request));
     setUpdates((currentUpdates) => currentUpdates.map((update) => update.recipientProfile.id === identity.id ? { ...update, recipientProfile: { ...update.recipientProfile, ...identity } } : update));
   }, []);

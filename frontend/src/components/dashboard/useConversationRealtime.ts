@@ -3,6 +3,7 @@ import { supabase } from "../../lib/supabase";
 import { announcePrivacyPreferencesChanged } from "../../lib/privacyPreferences";
 import { announceProfileIdentityChanged } from "../../lib/profileIdentity";
 import { normalizeAvatarBorderKey } from "../../types/avatarBorders";
+import { normalizeProfileBannerKey } from "../../types/profileBanners";
 import type { ChatMessage, ConversationActivityRealtimeChange, ConversationConnectionRealtimeChange, ConversationNicknameRealtimeChange, ConversationRequestRealtimeChange, ConversationThemeChange, MessageReaction, MessageReactionDeleteIdentity, MessageReactionRealtimeChange, ParticipantConversationPreferencesState, ParticipantMuteState, PinnedMessageRealtimeChange, RealtimeNotificationPreferencesEvent, RealtimeProfileIdentityEvent } from "../../types/conversations";
 
 type UseConversationRealtimeOptions = {
@@ -111,7 +112,7 @@ function parseProfileIdentity(value: unknown): RealtimeProfileIdentityEvent | nu
   if (row.avatar_url !== null && typeof row.avatar_url !== "string") return null;
   if (row.account_status !== "active" && row.account_status !== "deleting" && row.account_status !== "deleted") return null;
   if (row.deleted_at !== null && typeof row.deleted_at !== "string") return null;
-  return { id: row.id, username: row.username, display_name: row.display_name, avatar_url: row.avatar_url, avatar_border: normalizeAvatarBorderKey(row.avatar_border), account_status: row.account_status, deleted_at: row.deleted_at };
+  return { id: row.id, username: row.username, display_name: row.display_name, avatar_url: row.avatar_url, avatar_border: normalizeAvatarBorderKey(row.avatar_border), profile_banner: normalizeProfileBannerKey(row.profile_banner), account_status: row.account_status, deleted_at: row.deleted_at };
 }
 
 function parseConversationConnection(value: unknown): ConversationConnectionRealtimeChange | null {

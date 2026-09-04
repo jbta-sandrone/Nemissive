@@ -60,6 +60,42 @@ body {
   --shadow-soft: 0 8px 30px rgb(0 0 0 / 0.22);
 }
 
+/* Premium profile artwork follows the single resolved app appearance on the
+   root element. Portrait art remains top-aligned and full-width; its sampled
+   lower color continues naturally on profiles taller than the source image. */
+.profile-theme-surface[data-profile-theme-kind="image"] {
+  --color-background: var(--profile-theme-light-background);
+  --color-surface: var(--profile-theme-light-base);
+  --color-card: var(--profile-theme-light-card);
+  --color-primary: var(--profile-theme-light-primary);
+  --color-accent: var(--profile-theme-light-accent);
+  --color-accent-hover: var(--profile-theme-light-accent-hover);
+  --color-border: var(--profile-theme-light-border);
+  --color-heading: var(--profile-theme-light-heading);
+  --color-body: var(--profile-theme-light-body);
+  --color-muted: var(--profile-theme-light-muted);
+  background-color: var(--profile-theme-light-base);
+  background-image: var(--profile-theme-light-image);
+  background-position: top center;
+  background-repeat: no-repeat;
+  background-size: 100% auto;
+}
+
+:root[data-appearance="dark"] .profile-theme-surface[data-profile-theme-kind="image"] {
+  --color-background: var(--profile-theme-dark-background);
+  --color-surface: var(--profile-theme-dark-base);
+  --color-card: var(--profile-theme-dark-card);
+  --color-primary: var(--profile-theme-dark-primary);
+  --color-accent: var(--profile-theme-dark-accent);
+  --color-accent-hover: var(--profile-theme-dark-accent-hover);
+  --color-border: var(--profile-theme-dark-border);
+  --color-heading: var(--profile-theme-dark-heading);
+  --color-body: var(--profile-theme-dark-body);
+  --color-muted: var(--profile-theme-dark-muted);
+  background-color: var(--profile-theme-dark-base);
+  background-image: var(--profile-theme-dark-image);
+}
+
 /* Self-facing account identities. Status is always conveyed by icon and text;
    these palettes only provide the supporting visual hierarchy. */
 .account-status-badge {

@@ -214,7 +214,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
       let profiles: ProfileSearchResult[] = [];
 
       if (profileIds.length > 0) {
-        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, avatar_border, account_status, deleted_at").in("id", profileIds).abortSignal(abortController.signal);
+        const { data: profileData, error: profileError } = await supabase.from("profiles").select("id, username, display_name, avatar_url, avatar_border, profile_banner, account_status, deleted_at").in("id", profileIds).abortSignal(abortController.signal);
 
         if (isCancelled || loadId !== latestLoadRef.current) return;
 
@@ -394,7 +394,7 @@ function useMessagesData({ currentUserId, isAccountResolved, currentUserReceipts
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.conversationId === change.conversationId ? { ...conversation, themeKey: change.themeKey } : conversation));
   }, []);
 
-  const patchProfileIdentity = useCallback((identity: Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "avatar_border" | "account_status" | "deleted_at">) => {
+  const patchProfileIdentity = useCallback((identity: Pick<ProfileSearchResult, "id" | "username" | "display_name" | "avatar_url" | "avatar_border" | "profile_banner" | "account_status" | "deleted_at">) => {
     setPendingRequests((currentRequests) => currentRequests.map((request) => request.otherProfile.id === identity.id ? { ...request, otherProfile: { ...request.otherProfile, ...identity } } : request));
     setConversations((currentConversations) => currentConversations.map((conversation) => conversation.otherProfile.id === identity.id ? { ...conversation, otherProfile: { ...conversation.otherProfile, ...identity } } : conversation));
   }, []);
