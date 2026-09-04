@@ -21,6 +21,13 @@ export const billingProductIds = [
   "border.orbit",
   "border.chrono",
   "border.zenith",
+  "profile-theme.astralis",
+  "profile-theme.hanami",
+  "profile-theme.coralline",
+  "profile-theme.regalia",
+  "profile-theme.tempest",
+  "profile-theme.bladeworn",
+  "profile-theme.shadow",
   "elite.monthly",
 ] as const;
 
@@ -183,6 +190,41 @@ export function getBillingCatalogConfig(): BillingCatalogConfig {
     {
       productId: "border.zenith",
       variantId: positiveIntegerEnvironment("ZENITH_BORDER_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "profile-theme.astralis",
+      variantId: positiveIntegerEnvironment("ASTRALIS_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "profile-theme.hanami",
+      variantId: positiveIntegerEnvironment("HANAMI_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "profile-theme.coralline",
+      variantId: positiveIntegerEnvironment("CORALLINE_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "profile-theme.regalia",
+      variantId: positiveIntegerEnvironment("REGALIA_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "profile-theme.tempest",
+      variantId: positiveIntegerEnvironment("TEMPEST_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "profile-theme.bladeworn",
+      variantId: positiveIntegerEnvironment("BLADEWORN_ID"),
+      billingType: "one_time",
+    },
+    {
+      productId: "profile-theme.shadow",
+      variantId: positiveIntegerEnvironment("SHADOW_ID"),
       billingType: "one_time",
     },
     {

@@ -16,6 +16,7 @@ function ProfileBanner({ bannerKey, className = "", children }: ProfileBannerPro
   const style = theme.appearance ? {
     "--profile-theme-light-image": `url("${theme.appearance.light.assetPath}")`,
     "--profile-theme-light-base": theme.appearance.light.baseColor,
+    "--profile-theme-light-continuation": theme.appearance.light.continuationBackground,
     "--profile-theme-light-background": theme.appearance.light.background,
     "--profile-theme-light-card": theme.appearance.light.card,
     "--profile-theme-light-primary": theme.appearance.light.primary,
@@ -25,8 +26,10 @@ function ProfileBanner({ bannerKey, className = "", children }: ProfileBannerPro
     "--profile-theme-light-heading": theme.appearance.light.heading,
     "--profile-theme-light-body": theme.appearance.light.body,
     "--profile-theme-light-muted": theme.appearance.light.muted,
+    "--profile-theme-light-control-accent": theme.appearance.light.controlAccent ?? theme.appearance.light.primary,
     "--profile-theme-dark-image": `url("${theme.appearance.dark.assetPath}")`,
     "--profile-theme-dark-base": theme.appearance.dark.baseColor,
+    "--profile-theme-dark-continuation": theme.appearance.dark.continuationBackground,
     "--profile-theme-dark-background": theme.appearance.dark.background,
     "--profile-theme-dark-card": theme.appearance.dark.card,
     "--profile-theme-dark-primary": theme.appearance.dark.primary,
@@ -36,9 +39,11 @@ function ProfileBanner({ bannerKey, className = "", children }: ProfileBannerPro
     "--profile-theme-dark-heading": theme.appearance.dark.heading,
     "--profile-theme-dark-body": theme.appearance.dark.body,
     "--profile-theme-dark-muted": theme.appearance.dark.muted,
+    "--profile-theme-image-aspect-ratio": theme.imageAspectRatio ?? 1,
+    "--profile-theme-image-fade-start": `${theme.imageFadeStartPercent ?? 78}%`,
   } as CSSProperties : theme.backgroundImage ? { backgroundImage: theme.backgroundImage } satisfies CSSProperties : undefined;
 
-  return <div data-profile-theme={resolvedKey} data-profile-theme-kind={theme.kind} className={`profile-theme-surface relative bg-surface ${className}`} style={style}>{children}</div>;
+  return <div data-profile-theme={resolvedKey} data-profile-theme-kind={theme.kind} className={`profile-theme-surface relative bg-surface ${className}`} style={style}>{theme.appearance && <span className="profile-theme-artwork" aria-hidden="true" />}{children}</div>;
 }
 
 export default ProfileBanner;

@@ -8,6 +8,12 @@ export const profileBannerKeys = [
   "ocean",
   "twilight",
   "astralis",
+  "hanami",
+  "coralline",
+  "regalia",
+  "tempest",
+  "bladeworn",
+  "shadow",
 ] as const;
 
 export type ProfileBannerKey = (typeof profileBannerKeys)[number];

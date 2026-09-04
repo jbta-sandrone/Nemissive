@@ -8,7 +8,7 @@ export type PremiumThemeProductId = (typeof premiumThemeProductIds)[number];
 export const premiumAvatarBorderProductIds = ["border.aurelia", "border.moonveil", "border.prismara", "border.solstice", "border.scarlet", "border.tidal", "border.inferno", "border.frost", "border.orbit", "border.chrono", "border.zenith"] as const;
 export type PremiumAvatarBorderProductId = (typeof premiumAvatarBorderProductIds)[number];
 
-export const premiumProfileThemeProductIds = ["profile-theme.astralis"] as const;
+export const premiumProfileThemeProductIds = ["profile-theme.astralis", "profile-theme.hanami", "profile-theme.coralline", "profile-theme.regalia", "profile-theme.tempest", "profile-theme.bladeworn", "profile-theme.shadow"] as const;
 export type PremiumProfileThemeProductId = (typeof premiumProfileThemeProductIds)[number];
 
 export const premiumProductIds = [...premiumThemeProductIds, ...premiumAvatarBorderProductIds, ...premiumProfileThemeProductIds] as const;
@@ -66,6 +66,12 @@ export const isOrbitDevelopmentPreviewEnabled = import.meta.env.DEV && import.me
 export const isChronoDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_CHRONO_BORDER_PREVIEW === "true";
 export const isZenithDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ZENITH_BORDER_PREVIEW === "true";
 export const isAstralisProfileThemeDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ASTRALIS_PROFILE_THEME_PREVIEW === "true";
+export const isHanamiProfileThemeDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_HANAMI_PROFILE_THEME_PREVIEW === "true";
+export const isCorallineProfileThemeDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_CORALLINE_PROFILE_THEME_PREVIEW === "true";
+export const isRegaliaProfileThemeDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_REGALIA_PROFILE_THEME_PREVIEW === "true";
+export const isTempestProfileThemeDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_TEMPEST_PROFILE_THEME_PREVIEW === "true";
+export const isBladewornProfileThemeDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_BLADEWORN_PROFILE_THEME_PREVIEW === "true";
+export const isShadowProfileThemeDevelopmentPreviewEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_SHADOW_PROFILE_THEME_PREVIEW === "true";
 
 const premiumAvatarBorderDevelopmentPreviewEnabled: Record<PremiumAvatarBorderProductId, boolean> = {
   "border.aurelia": isAureliaDevelopmentPreviewEnabled,
@@ -79,6 +85,16 @@ const premiumAvatarBorderDevelopmentPreviewEnabled: Record<PremiumAvatarBorderPr
   "border.orbit": isOrbitDevelopmentPreviewEnabled,
   "border.chrono": isChronoDevelopmentPreviewEnabled,
   "border.zenith": isZenithDevelopmentPreviewEnabled,
+};
+
+const premiumProfileThemeDevelopmentPreviewEnabled: Record<PremiumProfileThemeProductId, boolean> = {
+  "profile-theme.astralis": isAstralisProfileThemeDevelopmentPreviewEnabled,
+  "profile-theme.hanami": isHanamiProfileThemeDevelopmentPreviewEnabled,
+  "profile-theme.coralline": isCorallineProfileThemeDevelopmentPreviewEnabled,
+  "profile-theme.regalia": isRegaliaProfileThemeDevelopmentPreviewEnabled,
+  "profile-theme.tempest": isTempestProfileThemeDevelopmentPreviewEnabled,
+  "profile-theme.bladeworn": isBladewornProfileThemeDevelopmentPreviewEnabled,
+  "profile-theme.shadow": isShadowProfileThemeDevelopmentPreviewEnabled,
 };
 
 function normalizeLegacyPremiumProductId(value: unknown) {
@@ -110,7 +126,7 @@ export function isPremiumProductDevelopmentPreviewEnabled(productId: PremiumProd
   if (productId === "theme.void") return isVoidDevelopmentPreviewEnabled;
   if (productId === "theme.shinkai") return isShinkaiDevelopmentPreviewEnabled;
   if (isPremiumAvatarBorderProductId(productId)) return premiumAvatarBorderDevelopmentPreviewEnabled[productId];
-  if (productId === "profile-theme.astralis") return isAstralisProfileThemeDevelopmentPreviewEnabled;
+  if (isPremiumProfileThemeProductId(productId)) return premiumProfileThemeDevelopmentPreviewEnabled[productId];
   return false;
 }
 
